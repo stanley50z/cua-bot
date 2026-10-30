@@ -198,9 +198,10 @@ for (const t of (await client.listTools()).tools) registry.install(defineExtensi
 <tr><td><span class="tag low">low</span></td><td>Memory section changing every turn invalidates the Grok prompt cache.</td><td>Render from a string that only changes on write.</td></tr>
 </table>
 
-<h2>Decisions you need to make</h2>
+<h2>Decisions</h2>
+<p class="small">Approved by the owner on 2026-10-30.</p>
 <ol>
-<li><b>Composio as the connector.</b> Runner-up is Pipedream. Say the word if the "E" product turns out to be something else.</li>
+<li><b>Composio as the connector.</b> Decided. Runner-up is Pipedream if Composio stops fitting.</li>
 <li><b>Main model.</b> Still Grok 4.7 via your SuperGrok login. Pi supports Anthropic and others with a one-line change.</li>
 <li><b>The old folder.</b> <code>~/grokbot-hackathon</code> is fully represented here except its <code>.env</code>, 20 MB of runtime data and 335 MB of <code>node_modules</code>. Copy the <code>.env</code> over, then delete it when ready; I have not touched it.</li>
 </ol>
