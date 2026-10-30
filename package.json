@@ -1,0 +1,27 @@
+{
+  "name": "grokbot",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Self-hosted Grok bot: Pi Durable service + Cua Spaces computer use + proactive email",
+  "scripts": {
+    "start": "node --env-file-if-exists=.env src/main.ts",
+    "check": "tsc --noEmit"
+  },
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "dependencies": {
+    "@earendil-works/chord": "^1.4.0",
+    "@earendil-works/pi-ai": "^1.4.0",
+    "@earendil-works/pi-durable": "^1.4.0",
+    "@earendil-works/pi-mcp": "^1.4.0",
+    "@trycua/cua": "^0.7.0",
+    "nodemailer": "^10.2.1"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.5",
+    "@types/nodemailer": "^8.0.2",
+    "typescript": "^7.0.2"
+  }
+}
