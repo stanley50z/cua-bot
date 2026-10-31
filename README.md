@@ -7,6 +7,7 @@ cua-bot (formerly the Grokbot hackathon project) is a self-hosted assistant for 
 - `src/main.ts` opens a Pi Durable Harness on `data/grokbot.sqlite`, resumes unfinished and sleeping work, and serves one HTTP server on `127.0.0.1:43142`: `POST /say` (plain text in, plain text out) plus the web app at `/` ([src/app.html](src/app.html)) with its JSON API under `/api/` (see [src/web.ts](src/web.ts)). The chat API ([src/chat.ts](src/chat.ts)): `GET /api/chat` pages the transcript, `POST /api/chat` with `{"text"}` queues a message without waiting, `POST /api/chat/stop` stops the current turn, `GET /api/chat/events` is a server-sent event stream of the live reply, running tools, and new messages, `GET /api/chat/computer` returns the computer pane (Space name, newest screenshot, steps of the latest computer-use run, from [src/computer-view.ts](src/computer-view.ts)), and `/shots/<name>.png` serves computer-use screenshots.
 - `computer_use` runs in the foreground as a Grok subagent with Cua driver tools. On-screen work goes there, one task at a time.
 - `send_email` sends only to the owner, through Gmail SMTP.
+- Memory ([src/memory.ts](src/memory.ts)) is plain markdown under `data/memory/`, after Grok Bot's design: `profile.md` for lasting facts about the owner and `log/YYYY-MM.md` for dated ones, one fact per line as `- (YYYY-MM-DD) fact`. The bot saves with `remember`, removes with `forget`, and searches older facts with `recall`. Every request carries a memory section with the profile facts and the 30 most recent log facts, capped at 4,000 characters. The files are re-read on every request, so hand edits apply at once.
 - Routines (`schedule`, `list_routines`, `run_routine`, `cancel_routine`) are durable sleeping tasks, one per routine. A schedule is a 5-field cron string, a nickname like `@daily`, or `@every 30m`, optionally prefixed `CRON_TZ=Area/City`, parsed with `croner` (see [src/cron.ts](src/cron.ts)). The legacy `everyMinutes`/`dailyAt`/`weeklyOn` objects are still accepted and converted. A deadline that passed while the bot was down fires once on restart; missed slots are not replayed. At most 50 routines. Definitions live in `routines.json` in the project root; the chat tools, the web app, and hand edits all sync through that file (a watcher applies hand edits within a second or two).
 - Outbound mail is plain SMTP. Google's official Gmail MCP is Developer Preview only and has no send tool.
 
@@ -39,6 +40,7 @@ Open `http://127.0.0.1:43142/` in a browser. It has three parts:
 - **Chat** in the middle. Replies stream in as the bot writes them. Each tool the bot used shows as a chip above its reply; click a finished chip to see the tool's result, and screenshots appear as thumbnails. Routine runs show as a line in the conversation. Enter sends, Shift+Enter adds a line, and the stop button ends the current reply. A message sent while the bot is busy waits its turn.
 - **Computer** on the right. The latest screenshot of the paired Space and each click and keystroke of the most recent computer-use task. The frame turns amber while the bot is driving.
 - **Routines**, from the clock icon in the left rail. See the next section.
+- **Memory**, from the page icon in the left rail. Everything the bot has saved about you, split into lasting facts and recent ones. Add a fact yourself or forget one with its ✕.
 
 The page is served on loopback only and has no login, the same trust as `/say`.
 
@@ -85,6 +87,7 @@ That stops the recorded process and its children, checks that the process has ex
 - `data/grokbot.sqlite` — Harness database, including sleeping routines and their last-fired times.
 - `routines.json` — routine definitions (project root). Edit it directly or in the web app; the bot syncs from it.
 - `data/shots/` — screenshots taken during computer use.
+- `data/memory/` — what the bot remembers about you: `profile.md` and `log/YYYY-MM.md`.
 
 ## Demo
 

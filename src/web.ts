@@ -8,6 +8,7 @@ import { basename, join } from "node:path";
 import type { Context } from "@earendil-works/chord";
 import type { Cursor } from "@earendil-works/pi-durable";
 import type { Chat } from "./chat.ts";
+import { type Memory, MemoryError } from "./memory.ts";
 import { DATA_DIR } from "./log.ts";
 import {
 	addRoutine,
@@ -89,6 +90,8 @@ export type BotServerDeps = {
 	context: Context;
 	/** Enables /api/chat*. Absent in tests that only exercise routines. */
 	chat?: Chat;
+	/** Enables /api/memory*. */
+	memory?: Memory;
 	/** Shown in the chat header, e.g. "grok-4.7". */
 	model?: string;
 	shotsDir?: string;
@@ -169,7 +172,48 @@ async function route(req: IncomingMessage, res: ServerResponse, deps: BotServerD
 		return;
 	}
 	if (url.pathname.startsWith("/api/chat")) return routeChat(req, res, deps, url, method);
+	if (url.pathname.startsWith("/api/memory")) return routeMemory(req, res, deps, url, method);
 	if (url.pathname.startsWith("/api/")) return routeApi(req, res, deps, url, method);
+	throw new HttpError(404, "not found");
+}
+
+function factInput(body: unknown): { fact: string; tier: "profile" | "log" } {
+	const record = body !== null && typeof body === "object" && !Array.isArray(body) ? (body as Record<string, unknown>) : {};
+	if (typeof record.fact !== "string") throw new HttpError(400, "fact must be a string");
+	const tier = record.tier ?? "profile";
+	if (tier !== "profile" && tier !== "log") throw new HttpError(400, "tier must be profile or log");
+	return { fact: record.fact, tier };
+}
+
+// The Memory view: list every fact (log newest first), add one, or forget one by its text.
+async function routeMemory(req: IncomingMessage, res: ServerResponse, deps: BotServerDeps, url: URL, method: string) {
+	const memory = deps.memory;
+	if (memory === undefined) throw new HttpError(404, "not found");
+	try {
+		if (method === "GET" && url.pathname === "/api/memory") {
+			const { profile, log } = await memory.all();
+			sendJson(res, 200, { profile, log: log.toReversed(), dir: memory.dir });
+			return;
+		}
+		if (method === "POST" && url.pathname === "/api/memory") {
+			const { fact, tier } = factInput(await readJson(req));
+			const saved = await memory.remember(fact, tier);
+			deps.log?.(`memory (web): ${saved.added ? "added" : "already had"} ${tier}: ${saved.fact.text}`);
+			sendJson(res, saved.added ? 201 : 200, saved);
+			return;
+		}
+		if (method === "POST" && url.pathname === "/api/memory/forget") {
+			const { fact } = factInput(await readJson(req));
+			const removed = await memory.forget(fact);
+			if (removed.length === 0) throw new HttpError(404, "no saved fact matches that text");
+			deps.log?.(`memory (web): forgot ${removed.length}: ${fact}`);
+			sendJson(res, 200, { removed });
+			return;
+		}
+	} catch (error) {
+		if (error instanceof MemoryError) throw new HttpError(400, error.message);
+		throw error;
+	}
 	throw new HttpError(404, "not found");
 }
 

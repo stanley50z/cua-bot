@@ -12,6 +12,7 @@ import { createComputerExtension, spaceLabel } from "./computer.ts";
 import { createComputerView } from "./computer-view.ts";
 import { createEmailExtension } from "./email.ts";
 import { DATA_DIR, log } from "./log.ts";
+import { createMemory, createMemoryExtension } from "./memory.ts";
 import { bindRoutines, createRoutinesExtension, startRoutineFileWatch, syncRoutines } from "./routines.ts";
 import { traceExtension } from "./trace.ts";
 import { createBotServer } from "./web.ts";
@@ -58,6 +59,8 @@ registry.install(traceExtension);
 registry.install(createComputerExtension());
 registry.install(createEmailExtension());
 registry.install(createRoutinesExtension());
+const memory = createMemory({ dir: join(DATA_DIR, "memory") });
+registry.install(createMemoryExtension(memory));
 
 const storage = await openNodeSqliteStorage(join(DATA_DIR, "grokbot.sqlite"));
 const harness = await Harness.open(storage, { models, registry }, context);
@@ -94,7 +97,7 @@ const computer = createComputerView({
 	...(space === undefined ? {} : { space }),
 });
 const chat = createChat({ harness, root, context, computer });
-createBotServer({ say, chat, model: MODEL.modelId, context, log }).listen(PORT, "127.0.0.1", () =>
+createBotServer({ say, chat, memory, model: MODEL.modelId, context, log }).listen(PORT, "127.0.0.1", () =>
 	log(`listening: web app http://127.0.0.1:${PORT}/ · chat POST http://127.0.0.1:${PORT}/say`),
 );
 

@@ -125,6 +125,20 @@ code, pre, .mono { font-family: "Cascadia Code", Consolas, monospace; }
 .table .none { color: var(--muted); padding: 24px 10px; }
 .file { padding: 0 24px 16px; color: var(--muted); font-size: 12.5px; }
 
+/* memory */
+.add-fact { display: flex; gap: 8px; padding: 16px 24px 4px; }
+.add-fact input { flex: 1; padding: 7px 10px; border: 1px solid var(--line); border-radius: 7px; font: inherit; color: var(--ink); }
+.add-fact select { padding: 6px 8px; border: 1px solid var(--line); border-radius: 7px; font: inherit; color: var(--ink); background: #fff; }
+.facts { padding: 12px 24px; overflow: auto; flex: 1; display: grid; grid-template-columns: 1fr 1fr; gap: 28px; align-content: start; }
+.facts h2 { font: 600 14px "Bahnschrift", sans-serif; margin: 0 0 6px; }
+.facts ul { list-style: none; margin: 0; padding: 0; }
+.facts li { padding: 8px 0; border-bottom: 1px solid var(--line); font-size: 13.5px; display: grid; grid-template-columns: minmax(0, 1fr) auto 28px; gap: 10px; align-items: start; }
+.facts li .when { color: var(--muted); font-size: 12px; white-space: nowrap; padding-top: 1px; }
+.facts li .x { width: 26px; height: 26px; border: 0; background: transparent; border-radius: 6px; cursor: pointer; color: var(--muted); display: grid; place-items: center; }
+.facts li .x:hover { background: var(--bad-bg); color: var(--bad); }
+.facts li .x svg { width: 14px; height: 14px; }
+.facts .none { display: block; color: var(--muted); border-bottom: 0; }
+
 dialog { border: 1px solid var(--line); border-radius: 12px; padding: 22px 24px; width: min(560px, 92vw); color: var(--ink); box-shadow: 0 18px 50px rgba(27,33,41,.22); }
 dialog::backdrop { background: rgba(27,33,41,.35); }
 dialog h2 { font: 600 17px "Bahnschrift", sans-serif; margin: 0 0 14px; }
@@ -146,6 +160,8 @@ dialog .row { display: flex; gap: 8px; justify-content: flex-end; margin-top: 18
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">
  <symbol id="i-chat" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M4 5h16v11H9l-5 4z"/></symbol>
  <symbol id="i-clock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></symbol>
+ <symbol id="i-mem" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M6 3.5h10l3 3v14H6z"/><path d="M9 10h7M9 14h7M9 18h4"/></symbol>
+ <symbol id="i-x" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M7 7l10 10M17 7L7 17"/></symbol>
  <symbol id="i-send" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M6 11l6-6 6 6"/></symbol>
  <symbol id="i-stop" viewBox="0 0 24 24" fill="currentColor"><rect x="7" y="7" width="10" height="10" rx="1.5"/></symbol>
 </svg>
@@ -155,6 +171,7 @@ dialog .row { display: flex; gap: 8px; justify-content: flex-end; margin-top: 18
   <div class="mark" aria-hidden="true">cb</div>
   <button type="button" aria-label="Chat" aria-pressed="true" data-view="chat"><svg><use href="#i-chat"/></svg></button>
   <button type="button" aria-label="Routines" aria-pressed="false" data-view="routines"><svg><use href="#i-clock"/></svg></button>
+  <button type="button" aria-label="Memory" aria-pressed="false" data-view="memory"><svg><use href="#i-mem"/></svg></button>
  </nav>
 
  <main class="main">
@@ -177,6 +194,20 @@ dialog .row { display: flex; gap: 8px; justify-content: flex-end; margin-top: 18
     <tbody id="routine-rows"></tbody>
    </table></div>
    <p class="file">Saved to <code id="routine-file">routines.json</code> next to the bot. Hand edits to that file apply within a few seconds, and routines the bot creates in chat appear here.</p>
+  </section>
+  <section class="view" id="view-memory" aria-labelledby="memory-h" hidden>
+   <div class="bar"><h1 id="memory-h">Memory</h1><span class="aside">What the bot knows about you. It reads this before every reply.</span></div>
+   <div class="banner" id="memory-error" role="alert" hidden></div>
+   <form class="add-fact" id="fact-form">
+    <input id="fact-text" maxlength="500" aria-label="A fact for the bot to remember" placeholder="Add a fact, for example: My partner is Dana" autocomplete="off">
+    <select id="fact-tier" aria-label="Where to save it"><option value="profile">About you</option><option value="log">Recent</option></select>
+    <button type="submit" class="btn primary">Remember</button>
+   </form>
+   <div class="facts">
+    <div><h2>About you</h2><ul id="facts-profile"></ul></div>
+    <div><h2>Recent</h2><ul id="facts-log"></ul></div>
+   </div>
+   <p class="file">Saved as markdown in <code id="memory-dir">data/memory</code>: <code>profile.md</code> and one file per month under <code>log/</code>. Edit those files by hand anytime; the bot reads them fresh on every reply.</p>
   </section>
  </main>
 
@@ -213,6 +244,15 @@ function el(tag, className, text) {
   if (className) node.className = className;
   if (text !== undefined) node.textContent = text;
   return node;
+}
+
+function icon(id) {
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("aria-hidden", "true");
+  const use = document.createElementNS("http://www.w3.org/2000/svg", "use");
+  use.setAttribute("href", "#" + id);
+  svg.append(use);
+  return svg;
 }
 
 async function request(method, path, payload) {
@@ -306,6 +346,9 @@ function toolLabel(call) {
     case "list_routines": return "Checked routines";
     case "run_routine": return "Ran a routine";
     case "cancel_routine": return "Removed a routine";
+    case "remember": return "Remembered: " + clip(pick("fact") || "");
+    case "forget": return "Forgot: " + clip(pick("fact") || "");
+    case "recall": return "Searched memory: " + clip(pick("query") || "");
     default: {
       const detail = pick("query", "q", "title", "subject", "text");
       return call.name.replace(/_/g, " ").toLowerCase() + (detail ? ": " + clip(detail) : "");
@@ -545,9 +588,56 @@ document.querySelectorAll(".rail button[data-view]").forEach((button) => button.
   document.querySelectorAll(".rail button[data-view]").forEach((b) => b.setAttribute("aria-pressed", String(b === button)));
   $("view-chat").hidden = view !== "chat";
   $("view-routines").hidden = view !== "routines";
+  $("view-memory").hidden = view !== "memory";
   if (view === "routines") loadRoutines();
+  else if (view === "memory") loadMemory();
   else $("input").focus();
 }));
+
+/* ---------- memory ---------- */
+function showMemoryError(message) { $("memory-error").textContent = message; $("memory-error").hidden = !message; }
+const factDate = (date) => new Date(date + "T12:00:00").toLocaleDateString(undefined, { month: "short", day: "numeric" });
+
+async function loadMemory() {
+  try {
+    const data = await request("GET", "/api/memory");
+    $("memory-dir").textContent = data.dir;
+    renderFacts($("facts-profile"), data.profile, "Nothing yet. The bot saves lasting facts here as it learns them.");
+    renderFacts($("facts-log"), data.log, "Nothing yet. Dated events and plans go here.");
+    showMemoryError("");
+  } catch (error) { showMemoryError(error.message); }
+}
+
+function renderFacts(list, facts, emptyText) {
+  list.textContent = "";
+  if (facts.length === 0) { list.append(el("li", "none", emptyText)); return; }
+  for (const fact of facts) {
+    const row = el("li");
+    const forget = el("button", "x");
+    forget.type = "button";
+    forget.setAttribute("aria-label", "Forget: " + fact.text);
+    forget.title = "Forget";
+    forget.append(icon("i-x"));
+    forget.addEventListener("click", async () => {
+      forget.disabled = true;
+      try { await request("POST", "/api/memory/forget", { fact: fact.text }); await loadMemory(); }
+      catch (error) { showMemoryError(error.message); forget.disabled = false; }
+    });
+    row.append(el("span", "", fact.text), el("span", "when", factDate(fact.date)), forget);
+    list.append(row);
+  }
+}
+
+$("fact-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const fact = $("fact-text").value;
+  if (fact.trim() === "") return;
+  try {
+    await request("POST", "/api/memory", { fact, tier: $("fact-tier").value });
+    $("fact-text").value = "";
+    await loadMemory();
+  } catch (error) { showMemoryError(error.message); }
+});
 
 /* ---------- routines ---------- */
 let routines = [];
