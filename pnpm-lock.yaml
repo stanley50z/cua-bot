@@ -21,8 +21,8 @@ importers:
         specifier: ^1.4.0
         version: 1.4.0
       '@trycua/cua':
-        specifier: ^0.7.0
-        version: 0.7.0
+        specifier: ^0.9.0
+        version: 0.9.0
       nodemailer:
         specifier: ^10.2.1
         version: 10.2.1
@@ -223,40 +223,40 @@ packages:
   '@stablelib/base64@1.0.1':
     resolution: {integrity: sha512-1bnPQqSxSuc3Ii6MhBysoWCg58j97aUjuCSZrGSmDxNqtytIi0k8utUenAwTZN4V5mXXYGsVUI9zeBqy+jBOSQ==}
 
-  '@trycua/cua-darwin-arm64@0.7.0':
-    resolution: {integrity: sha512-IniqCC7GMWIDwpKPvvg8ktnWjPlnY3toHh3YnL39M/I1vVkoKWqUw7LmyvrZFJ+4SJTg9TlAP5S6+X15MXQYpg==}
+  '@trycua/cua-darwin-arm64@0.9.0':
+    resolution: {integrity: sha512-GnID6zggzoATLHoy1mTNTs819cQ/hQcHHY26i6B6B/IiK6lELiP/zlO1wvWWsYmkdVGuMYADwGcxq+8s87yVbg==}
     cpu: [arm64]
     os: [darwin]
 
-  '@trycua/cua-darwin-x64@0.7.0':
-    resolution: {integrity: sha512-YCelX0MchCmzRZS5Ug/F093vHhYzZhFw9onKhGhKGrXjIA+69oC2US3P+joXZOajXu5PI9I9kZjPm/taGEPXrw==}
+  '@trycua/cua-darwin-x64@0.9.0':
+    resolution: {integrity: sha512-iOKcRjqybrZ9SisccpOzaLEhLUmVe9rqQkd1TMpAfn4OzdtkUIwv9HFINob9zAR6wwuH6KSH/pPunqm3GQrllg==}
     cpu: [x64]
     os: [darwin]
 
-  '@trycua/cua-linux-arm64-gnu@0.7.0':
-    resolution: {integrity: sha512-XtpTsUEGJFAM/mjnXD12HZIXu4ltbFuxCFni9l974OafzjxAj04B1hyiQasNrcWHIB11RlZ/bdxwipLWE91WXw==}
+  '@trycua/cua-linux-arm64-gnu@0.9.0':
+    resolution: {integrity: sha512-EEd2soKTE8ymtfFXVvRaTNfQKs1HCCw6/33xzpxXcGNi7Glk5qU8QDx5XGqB2ZFDCHwVik9mhR7QqEbgS9Jl1A==}
     cpu: [arm64]
     os: [linux]
     libc: [glibc]
 
-  '@trycua/cua-linux-x64-gnu@0.7.0':
-    resolution: {integrity: sha512-5cVnfiO3c/i5ifarrLd7mhvgt8xm5c7t+O1ZmgWv6jjkpFpexFuQQzLTnlxlPTaG/Rn6cbT22onv6RPV+0BHQw==}
+  '@trycua/cua-linux-x64-gnu@0.9.0':
+    resolution: {integrity: sha512-W0OYMixqcgGEUVLWcNfzRawam4nrrjBnZdiWNdbM/PqxIcdt3nRCSyP2qTTfUWTfwKjtFhJlfaWGfx3ezToYvw==}
     cpu: [x64]
     os: [linux]
     libc: [glibc]
 
-  '@trycua/cua-win32-arm64-msvc@0.7.0':
-    resolution: {integrity: sha512-BTExCN9CGSUsw0Y8idPBCPjEJLK5Ff78wK5eg1EW3Pk15HKHPhpsujQgsxY9AkFWCt7HHVbw8GJvuUuwE9q+eQ==}
+  '@trycua/cua-win32-arm64-msvc@0.9.0':
+    resolution: {integrity: sha512-cxweE4uY1DJi2aQksmy9Z/PQifC40558ZzUHZPSI2ckOO+LpqTIFFPPkupJP+Nj7EnAVWI9Rpe5zyg8q48dIkw==}
     cpu: [arm64]
     os: [win32]
 
-  '@trycua/cua-win32-x64-msvc@0.7.0':
-    resolution: {integrity: sha512-vDp6fHysqJnZCLXHctEqlieKxe+60A+XbHiphgkuiumyYCuoG9dDljyVBIvQVmT4ce1Ekb21xN40QIVQ4WzC4A==}
+  '@trycua/cua-win32-x64-msvc@0.9.0':
+    resolution: {integrity: sha512-IUVofvhsnd6LMZ0AdOv5NbA2IYdZF6t5eSejVANDbom5dGng6U8pAAcd0DAMrIWsRO6hdRvO2xfcWP8jENwMnQ==}
     cpu: [x64]
     os: [win32]
 
-  '@trycua/cua@0.7.0':
-    resolution: {integrity: sha512-wSpB1aEPFCbOc58Pnsl/6mVhD7aUHUndZ7FBdFIjfRWAzQTo+X4yPaRqh0g+j0QqNZqa2q0iw/heKf0iTFITAQ==}
+  '@trycua/cua@0.9.0':
+    resolution: {integrity: sha512-sSPpgpltQ+yZhnkESlHzSwmfliibY8kUSqmXnAt07qoWMoyr4Z20heKNRESKg6UQ3tktHygSo3I0/58+TlJm1w==}
     hasBin: true
     peerDependencies:
       '@modelcontextprotocol/client': ^2.1.0
@@ -992,35 +992,35 @@ snapshots:
 
   '@stablelib/base64@1.0.1': {}
 
-  '@trycua/cua-darwin-arm64@0.7.0':
+  '@trycua/cua-darwin-arm64@0.9.0':
     optional: true
 
-  '@trycua/cua-darwin-x64@0.7.0':
+  '@trycua/cua-darwin-x64@0.9.0':
     optional: true
 
-  '@trycua/cua-linux-arm64-gnu@0.7.0':
+  '@trycua/cua-linux-arm64-gnu@0.9.0':
     optional: true
 
-  '@trycua/cua-linux-x64-gnu@0.7.0':
+  '@trycua/cua-linux-x64-gnu@0.9.0':
     optional: true
 
-  '@trycua/cua-win32-arm64-msvc@0.7.0':
+  '@trycua/cua-win32-arm64-msvc@0.9.0':
     optional: true
 
-  '@trycua/cua-win32-x64-msvc@0.7.0':
+  '@trycua/cua-win32-x64-msvc@0.9.0':
     optional: true
 
-  '@trycua/cua@0.7.0':
+  '@trycua/cua@0.9.0':
     dependencies:
       '@ubjs/core': 0.31.0-3
       '@ubjs/node': 0.31.0-3
     optionalDependencies:
-      '@trycua/cua-darwin-arm64': 0.7.0
-      '@trycua/cua-darwin-x64': 0.7.0
-      '@trycua/cua-linux-arm64-gnu': 0.7.0
-      '@trycua/cua-linux-x64-gnu': 0.7.0
-      '@trycua/cua-win32-arm64-msvc': 0.7.0
-      '@trycua/cua-win32-x64-msvc': 0.7.0
+      '@trycua/cua-darwin-arm64': 0.9.0
+      '@trycua/cua-darwin-x64': 0.9.0
+      '@trycua/cua-linux-arm64-gnu': 0.9.0
+      '@trycua/cua-linux-x64-gnu': 0.9.0
+      '@trycua/cua-win32-arm64-msvc': 0.9.0
+      '@trycua/cua-win32-x64-msvc': 0.9.0
 
   '@types/node@26.6.5':
     dependencies:
