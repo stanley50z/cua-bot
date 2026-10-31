@@ -7,7 +7,7 @@
   "scripts": {
     "start": "node --env-file-if-exists=.env src/main.ts",
     "check": "tsc --noEmit",
-    "test": "node --test test/cron.test.ts test/routines.test.ts test/routines-file.test.ts test/web.test.ts test/chat.test.ts test/computer-view.test.ts test/memory.test.ts test/models.test.ts test/executor.test.ts test/approvals.test.ts test/email.test.ts"
+    "test": "node --test test/cron.test.ts test/routines.test.ts test/routines-file.test.ts test/web.test.ts test/chat.test.ts test/computer-view.test.ts test/memory.test.ts test/models.test.ts test/executor.test.ts test/approvals.test.ts"
   },
   "engines": {
     "node": ">=22.19.0"
@@ -18,12 +18,10 @@
     "@earendil-works/pi-durable": "^1.4.0",
     "@earendil-works/pi-mcp": "^1.4.0",
     "@trycua/cua": "^0.9.0",
-    "croner": "^11.0.0",
-    "nodemailer": "^10.2.1"
+    "croner": "^11.0.0"
   },
   "devDependencies": {
     "@types/node": "^26.6.5",
-    "@types/nodemailer": "^8.0.2",
     "typescript": "^7.0.2"
   }
 }

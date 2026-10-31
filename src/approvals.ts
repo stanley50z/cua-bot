@@ -50,7 +50,7 @@ export function titleFor(path: string): string {
 	return [verb.charAt(0).toUpperCase() + verb.slice(1), ...rest.map((word) => word.toLowerCase())].join(" ");
 }
 
-// Executor's Gmail helpers (tools.google.gmail.send, tools.gmail.send) take the message as fields.
+// Executor's Gmail helper (tools.google.gmail.send) takes the message as fields.
 type FieldsSend = { to?: string[] | null; cc?: string[] | null; subject?: string | null; body: string; html?: boolean | null; replyToMessageId?: string | null };
 
 const addresses = (text: string) =>

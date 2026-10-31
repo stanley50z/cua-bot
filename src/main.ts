@@ -10,7 +10,6 @@ import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite
 import { createChat } from "./chat.ts";
 import { createComputerExtension, spaceLabel } from "./computer.ts";
 import { createComputerView } from "./computer-view.ts";
-import { createEmailExtension } from "./email.ts";
 import { type Approvals, createApprovals } from "./approvals.ts";
 import { connectExecutor, createExecutor, createExecutorExtension } from "./executor.ts";
 import { DATA_DIR, log } from "./log.ts";
@@ -46,7 +45,7 @@ registry.install(
 				() =>
 					[
 						"You are cua-bot, a self-hosted personal agent that runs 24/7 for one owner.",
-						`The owner's email is ${process.env.OWNER_EMAIL || "(unset)"}. Email is how you reach the owner when they are not chatting with you.`,
+						`The owner's email is ${process.env.OWNER_EMAIL || "(unset)"}. Email is how you reach the owner when they are not chatting with you; it goes through Gmail in Executor like any other mail.`,
 						"You never operate a computer yourself: delegate every on-screen task to computer_use, one at a time.",
 						"For recurring or future work, create a routine with schedule. A message starting with [routine] is a routine firing: do the work, and email the owner only if the outcome is worth it.",
 						"Be brief.",
@@ -58,7 +57,6 @@ registry.install(
 );
 registry.install(traceExtension);
 registry.install(createComputerExtension());
-registry.install(createEmailExtension());
 registry.install(createRoutinesExtension());
 const memory = createMemory({ dir: join(DATA_DIR, "memory") });
 registry.install(createMemoryExtension(memory));

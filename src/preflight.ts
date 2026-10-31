@@ -7,16 +7,14 @@ import { createServer } from "node:net";
 import { join } from "node:path";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { AssistantEntry, createRegistry, Harness, MemoryStorage, type ModelRef } from "@earendil-works/pi-durable";
-import { createTransport } from "nodemailer";
 import { listDriverToolNames } from "./computer.ts";
 import { connectExecutor } from "./executor.ts";
 import { botModel, createBotModels } from "./models.ts";
 import { CREDENTIAL_FILE } from "./xai-auth.ts";
 
-const REQUIRED_ENV = ["OWNER_EMAIL", "SMTP_USER", "SMTP_PASS"] as const;
+const REQUIRED_ENV = ["OWNER_EMAIL"] as const;
 const XAI_TIMEOUT_MS = 60_000;
 const SPACE_TIMEOUT_MS = 60_000;
-const SMTP_TIMEOUT_MS = 20_000;
 const SECRET_KEYS = new Set(["access", "refresh", "key", "id_token", "password", "secret", "token", "api_key", "access_token", "refresh_token"]);
 
 type Status = "PASS" | "FAIL" | "INFO";
@@ -45,7 +43,7 @@ function clip(text: string, max = 200): string {
 // Values that must never appear in check output: env secrets, plus token fields from the credential file.
 function secretValues(): string[] {
 	const found: string[] = [];
-	for (const name of ["SMTP_PASS", "XAI_API_KEY", "EXECUTOR_API_KEY", "AZURE_FOUNDRY_API_KEY", "AZURE_FOUNDRY_2_API_KEY"]) {
+	for (const name of ["XAI_API_KEY", "EXECUTOR_API_KEY", "AZURE_FOUNDRY_API_KEY", "AZURE_FOUNDRY_2_API_KEY"]) {
 		const value = process.env[name]?.trim();
 		if (value !== undefined && value.length >= 8) found.push(value);
 	}
@@ -127,7 +125,7 @@ function credentialState(): CredentialState {
 function checkEnv(): Check {
 	const missing = REQUIRED_ENV.filter((name) => (process.env[name]?.trim() ?? "").length === 0);
 	if (missing.length > 0) return report("FAIL", "env", `missing ${missing.join(", ")}. Set them in .env`);
-	return report("PASS", "env", `OWNER_EMAIL ${process.env.OWNER_EMAIL?.trim()}; SMTP_USER and SMTP_PASS set`);
+	return report("PASS", "env", `OWNER_EMAIL ${process.env.OWNER_EMAIL?.trim()}`);
 }
 
 // Confirms the bot's model answers, with one short completion on an in-memory Harness. Does not open
@@ -184,32 +182,6 @@ function unanswered(reason: string, detail: unknown): string {
 	if (detail === undefined) return `unanswered (${reason})`;
 	const extra = typeof detail === "string" ? detail : JSON.stringify(detail);
 	return `unanswered (${reason}) ${clip(scrub(extra))}`;
-}
-
-// Logs in to Gmail SMTP and disconnects. Does not send mail.
-async function checkSmtp(): Promise<Check> {
-	const user = process.env.SMTP_USER?.trim() ?? "";
-	const pass = process.env.SMTP_PASS?.trim() ?? "";
-	if (user.length === 0 || pass.length === 0) {
-		return report("FAIL", "smtp", "SMTP_USER or SMTP_PASS is empty. Fix: use a Gmail app password");
-	}
-	const transporter = createTransport({
-		host: "smtp.gmail.com",
-		port: 465,
-		secure: true,
-		auth: { user, pass },
-		connectionTimeout: SMTP_TIMEOUT_MS,
-		greetingTimeout: SMTP_TIMEOUT_MS,
-		socketTimeout: SMTP_TIMEOUT_MS,
-	});
-	try {
-		await deadline(SMTP_TIMEOUT_MS + 5_000, transporter.verify(), "smtp");
-		return report("PASS", "smtp", `smtp.gmail.com:465 login ok for ${user}`);
-	} catch (error) {
-		return report("FAIL", "smtp", `${messageOf(error)}. Fix: use a Gmail app password`);
-	} finally {
-		transporter.close();
-	}
 }
 
 // Lists the paired Mac's driver tools the same way the computer extension does. Read-only: no clicks or typing.
@@ -278,6 +250,6 @@ async function checkExecutor(): Promise<Check> {
 	}
 }
 
-const checks = await Promise.all([checkEnv(), checkModel(), checkSmtp(), checkSpace(), checkExecutor(), checkPort(), checkData()]);
+const checks = await Promise.all([checkEnv(), checkModel(), checkSpace(), checkExecutor(), checkPort(), checkData()]);
 for (const item of checks) console.log(`${item.status} ${item.name} — ${item.detail}`);
 process.exit(checks.some((item) => item.status === "FAIL") ? 1 : 0);

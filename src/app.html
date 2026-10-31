@@ -373,7 +373,6 @@ function toolLabel(call) {
   const clip = (s, n = 48) => (s.length > n ? s.slice(0, n - 1) + "…" : s);
   switch (call.name) {
     case "computer_use": return "Computer: " + clip(pick("task", "instructions") || "working");
-    case "send_email": return "Email to you: " + clip(pick("subject") || "message");
     case "schedule": return "New routine: " + clip(pick("title") || "");
     case "list_routines": return "Checked routines";
     case "run_routine": return "Ran a routine";
