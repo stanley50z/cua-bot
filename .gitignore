@@ -3,3 +3,4 @@ data/
 .env
 routines.json
 routines.json.tmp
+docs/mocks/
