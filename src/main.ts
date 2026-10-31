@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { AssistantEntry, createRegistry, defineExtension, Harness, section } from "@earendil-works/pi-durable";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
+import { createChat } from "./chat.ts";
 import { createComputerExtension } from "./computer.ts";
 import { createEmailExtension } from "./email.ts";
 import { DATA_DIR, log } from "./log.ts";
@@ -81,14 +82,16 @@ async function say(text: string): Promise<string> {
 	return message.content.flatMap((c) => (c.type === "text" ? [c.text] : [])).join("\n");
 }
 
-createBotServer({ say, context, log }).listen(PORT, "127.0.0.1", () =>
-	log(`listening: routines UI http://127.0.0.1:${PORT}/ · chat POST http://127.0.0.1:${PORT}/say`),
+const chat = createChat({ harness, root, context });
+createBotServer({ say, chat, context, log }).listen(PORT, "127.0.0.1", () =>
+	log(`listening: web app http://127.0.0.1:${PORT}/ · chat POST http://127.0.0.1:${PORT}/say`),
 );
 
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
 	process.on(signal, async () => {
 		log(`${signal}: closing`);
 		stopWatching();
+		await chat.close();
 		await harness.close(context);
 		process.exit(0);
 	});

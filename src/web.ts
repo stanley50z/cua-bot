@@ -1,9 +1,14 @@
-// The bot's HTTP surface on 127.0.0.1: the routines GUI at GET /, its JSON API under /api/,
-// and the original POST /say chat endpoint. Loopback only, no auth, same trust as /say always had.
-// Mutations go through the routines manager, so the GUI, chat tools, and routines.json agree.
+// The bot's HTTP surface on 127.0.0.1: the web app at GET /, its JSON API under /api/ (routines
+// CRUD, chat history/send/stop, and a server-sent event stream of live chat state), screenshots
+// under /shots/, and the original POST /say. Loopback only, no auth, same trust as /say always had.
+// Mutations go through the routines manager and the chat module, so every surface agrees.
+import { readFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import { basename } from "node:path";
+import { basename, join } from "node:path";
 import type { Context } from "@earendil-works/chord";
+import type { Cursor } from "@earendil-works/pi-durable";
+import type { Chat } from "./chat.ts";
+import { DATA_DIR } from "./log.ts";
 import {
 	addRoutine,
 	deleteRoutine,
@@ -82,8 +87,44 @@ function routineInput(body: unknown): { title: string; prompt: string; cron: str
 export type BotServerDeps = {
 	say: (text: string) => Promise<string>;
 	context: Context;
+	/** Enables /api/chat*. Absent in tests that only exercise routines. */
+	chat?: Chat;
+	shotsDir?: string;
 	log?: (...parts: unknown[]) => void;
 };
+
+const SHOT_NAME = /^[\w.-]+\.png$/;
+const HISTORY_LIMIT = 50;
+
+// History cursors travel as base64url JSON so the browser treats them as opaque strings.
+const encodeCursor = (cursor: Cursor | null) => (cursor === null ? null : Buffer.from(JSON.stringify(cursor)).toString("base64url"));
+function decodeCursor(text: string | null): Cursor | undefined {
+	if (text === null || text === "") return undefined;
+	try {
+		return JSON.parse(Buffer.from(text, "base64url").toString("utf8")) as Cursor;
+	} catch {
+		throw new HttpError(400, "before is not a valid history cursor");
+	}
+}
+
+function chatText(body: unknown): string {
+	const text = body !== null && typeof body === "object" && "text" in body ? body.text : undefined;
+	if (typeof text !== "string" || text.trim() === "") throw new HttpError(400, "text must be a non-empty string");
+	return text;
+}
+
+// One SSE client: a `live` snapshot right away, then every chat event until the socket closes.
+function streamChat(req: IncomingMessage, res: ServerResponse, chat: Chat): void {
+	res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-store", connection: "keep-alive" });
+	const send = (event: unknown) => res.write(`data: ${JSON.stringify(event)}\n\n`);
+	send({ type: "live", live: chat.live });
+	const unsubscribe = chat.subscribe(send);
+	const ping = setInterval(() => res.write(": ping\n\n"), 25_000);
+	req.on("close", () => {
+		clearInterval(ping);
+		unsubscribe();
+	});
+}
 
 /** Build the bot's HTTP server. The caller listens on 127.0.0.1 and owns shutdown. */
 export function createBotServer(deps: BotServerDeps): Server {
@@ -117,7 +158,40 @@ async function route(req: IncomingMessage, res: ServerResponse, deps: BotServerD
 		}
 		return;
 	}
+	if (method === "GET" && url.pathname.startsWith("/shots/")) {
+		const name = decodeURIComponent(url.pathname.slice("/shots/".length));
+		if (!SHOT_NAME.test(name)) throw new HttpError(404, "not found");
+		const file = await readFile(join(deps.shotsDir ?? join(DATA_DIR, "shots"), name)).catch(() => undefined);
+		if (file === undefined) throw new HttpError(404, "not found");
+		res.writeHead(200, { "content-type": "image/png", "cache-control": "max-age=31536000, immutable" }).end(file);
+		return;
+	}
+	if (url.pathname.startsWith("/api/chat")) return routeChat(req, res, deps, url, method);
 	if (url.pathname.startsWith("/api/")) return routeApi(req, res, deps, url, method);
+	throw new HttpError(404, "not found");
+}
+
+async function routeChat(req: IncomingMessage, res: ServerResponse, deps: BotServerDeps, url: URL, method: string) {
+	const chat = deps.chat;
+	if (chat === undefined) throw new HttpError(404, "not found");
+	if (method === "GET" && url.pathname === "/api/chat") {
+		const limit = Math.min(Math.max(Number(url.searchParams.get("limit")) || HISTORY_LIMIT, 1), 200);
+		const page = await chat.history(limit, decodeCursor(url.searchParams.get("before")));
+		sendJson(res, 200, { items: page.items, before: encodeCursor(page.before), live: chat.live });
+		return;
+	}
+	if (method === "POST" && url.pathname === "/api/chat") {
+		const text = chatText(await readJson(req));
+		deps.log?.("owner (web):", text);
+		sendJson(res, 202, await chat.send(text));
+		return;
+	}
+	if (method === "POST" && url.pathname === "/api/chat/stop") {
+		await chat.stop();
+		res.writeHead(204).end();
+		return;
+	}
+	if (method === "GET" && url.pathname === "/api/chat/events") return streamChat(req, res, chat);
 	throw new HttpError(404, "not found");
 }
 

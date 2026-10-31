@@ -1,0 +1,190 @@
+// The web chat API: POST /api/chat, the /api/chat/events stream, GET /api/chat history paging,
+// stop, and /shots/ file serving. Exercised over real HTTP against createBotServer with a faux model.
+// Run from the repo root:  node --test test/chat.test.ts
+import assert from "node:assert/strict";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import type { Server } from "node:http";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { test } from "node:test";
+import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
+import { Type } from "@earendil-works/pi-ai";
+import { createModels } from "@earendil-works/pi-ai/models";
+import { fauxAssistantMessage, fauxProvider, fauxText, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
+import { createRegistry, defineExtension, defineTool, Harness, MemoryStorage } from "@earendil-works/pi-durable";
+import { type ChatEvent, type ChatItem, createChat, toChatItem } from "../src/chat.ts";
+import { createBotServer } from "../src/web.ts";
+
+const context = BACKGROUND_CONTEXT;
+
+const lookTool = defineTool({
+	name: "look",
+	description: "Take a screenshot.",
+	parameters: Type.Object({}),
+	execute: async () => ({ output: [{ type: "text" as const, text: "Saw the desktop. Screenshot: data/shots/2026-10-31T10-00-00.png" }] }),
+});
+
+async function open() {
+	const dir = await mkdtemp(join(tmpdir(), "cua-bot-chat-"));
+	const faux = fauxProvider();
+	const models = createModels();
+	models.setProvider(faux.provider);
+	faux.setResponses([
+		fauxAssistantMessage([fauxText("Hello there.")]),
+		fauxAssistantMessage([fauxToolCall("look", {}, { id: "call-1" })], { stopReason: "toolUse" }),
+		fauxAssistantMessage([fauxText("Your desktop is tidy.")]),
+	]);
+	const registry = createRegistry();
+	registry.install(defineExtension({ name: "test", tools: [lookTool] }));
+	const harness = await Harness.open(new MemoryStorage(), { models, registry }, context);
+	const root = await harness.root(context, { agent: { model: { provider: "faux", modelId: "faux-1" } } });
+	harness.resume();
+	const chat = createChat({ harness, root, context });
+	const server = createBotServer({ say: async (text) => text, chat, context, shotsDir: dir });
+	await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+	const address = server.address();
+	assert.ok(address !== null && typeof address === "object");
+	const base = `http://127.0.0.1:${address.port}`;
+	return {
+		dir,
+		base,
+		harness,
+		root,
+		chat,
+		async close() {
+			await chat.close();
+			await new Promise<void>((resolve) => (server as Server).close(() => resolve()));
+			await harness.close(context);
+			await rm(dir, { recursive: true, force: true });
+		},
+	};
+}
+
+// Collects SSE events from /api/chat/events until `done` returns true for the collected list.
+async function collect(base: string, done: (events: ChatEvent[]) => boolean, action: () => Promise<void>) {
+	const abort = new AbortController();
+	const response = await fetch(`${base}/api/chat/events`, { signal: abort.signal });
+	assert.equal(response.headers.get("content-type"), "text/event-stream");
+	const reader = response.body!.pipeThrough(new TextDecoderStream()).getReader();
+	const events: ChatEvent[] = [];
+	let buffer = "";
+	let acted = false;
+	const deadline = Date.now() + 10_000;
+	while (!done(events)) {
+		assert.ok(Date.now() < deadline, `timed out; got ${JSON.stringify(events)}`);
+		const { value, done: ended } = await reader.read();
+		assert.ok(!ended, "stream ended early");
+		buffer += value;
+		let split: number;
+		while ((split = buffer.indexOf("\n\n")) >= 0) {
+			const frame = buffer.slice(0, split);
+			buffer = buffer.slice(split + 2);
+			if (frame.startsWith("data: ")) events.push(JSON.parse(frame.slice(6)) as ChatEvent);
+		}
+		if (!acted && events.length > 0) {
+			acted = true;
+			await action();
+		}
+	}
+	abort.abort();
+	return events;
+}
+
+const items = (events: ChatEvent[]) => events.flatMap((event) => (event.type === "items" ? event.items : []));
+const settled = (kinds: ChatItem["kind"][]) => (events: ChatEvent[]) => {
+	const last = events.at(-1);
+	return items(events).map((item) => item.kind).join() === kinds.join() && last?.type === "live" && !last.live.busy;
+};
+
+const post = (base: string, path: string, body?: unknown) =>
+	fetch(`${base}${path}`, {
+		method: "POST",
+		headers: { "content-type": "application/json" },
+		...(body === undefined ? {} : { body: JSON.stringify(body) }),
+	});
+
+test("a sent message streams back as user and assistant items, then history pages them", async () => {
+	const bot = await open();
+	try {
+		const empty = await (await fetch(`${bot.base}/api/chat`)).json();
+		assert.deepEqual(empty.items, []);
+		assert.equal(empty.before, null);
+
+		const events = await collect(bot.base, settled(["user", "assistant"]), async () => {
+			const response = await post(bot.base, "/api/chat", { text: "hi" });
+			assert.equal(response.status, 202);
+		});
+		assert.equal(events[0]?.type, "live");
+		assert.ok(events.some((event) => event.type === "live" && event.live.busy), "saw the bot busy");
+		const [user, reply] = items(events);
+		assert.equal(user?.kind === "user" && user.text, "hi");
+		assert.equal(reply?.kind === "assistant" && reply.text, "Hello there.");
+
+		const events2 = await collect(bot.base, settled(["user", "assistant", "tool", "assistant"]), async () => {
+			await post(bot.base, "/api/chat", { text: "look at my screen" });
+		});
+		const [, call, result, final] = items(events2);
+		assert.deepEqual(call?.kind === "assistant" && call.tools.map((tool) => tool.name), ["look"]);
+		assert.ok(result?.kind === "tool");
+		assert.equal(result.name, "look");
+		assert.deepEqual(result.shots, ["2026-10-31T10-00-00.png"]);
+		assert.equal(final?.kind === "assistant" && final.text, "Your desktop is tidy.");
+
+		const page1 = await (await fetch(`${bot.base}/api/chat?limit=3`)).json();
+		assert.deepEqual(
+			page1.items.map((item: ChatItem) => item.kind),
+			["assistant", "tool", "assistant"],
+			"newest page, oldest first",
+		);
+		assert.equal(typeof page1.before, "string");
+		const page2 = await (await fetch(`${bot.base}/api/chat?limit=50&before=${page1.before}`)).json();
+		assert.deepEqual(
+			page2.items.map((item: ChatItem) => (item.kind === "user" || item.kind === "assistant" ? item.text : item.kind)),
+			["hi", "Hello there.", "look at my screen"],
+		);
+	} finally {
+		await bot.close();
+	}
+});
+
+test("bad chat input is rejected without reaching the bot", async () => {
+	const bot = await open();
+	try {
+		assert.equal((await post(bot.base, "/api/chat", { text: "  " })).status, 400);
+		assert.equal((await post(bot.base, "/api/chat", { message: "hi" })).status, 400);
+		assert.equal((await fetch(`${bot.base}/api/chat?before=not-a-cursor`)).status, 400);
+		assert.equal((await post(bot.base, "/api/chat/stop")).status, 204);
+		assert.deepEqual((await (await fetch(`${bot.base}/api/chat`)).json()).items, []);
+	} finally {
+		await bot.close();
+	}
+});
+
+test("screenshots are served by name only", async () => {
+	const bot = await open();
+	try {
+		await writeFile(join(bot.dir, "a.png"), Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+		const shot = await fetch(`${bot.base}/shots/a.png`);
+		assert.equal(shot.status, 200);
+		assert.equal(shot.headers.get("content-type"), "image/png");
+		assert.equal((await fetch(`${bot.base}/shots/missing.png`)).status, 404);
+		assert.equal((await fetch(`${bot.base}/shots/..%2Fsecret.png`)).status, 404);
+		assert.equal((await fetch(`${bot.base}/shots/a.txt`)).status, 404);
+	} finally {
+		await bot.close();
+	}
+});
+
+test("routine firings and context markers are labeled for the chat", () => {
+	const base = { conversationId: 0 as never };
+	const routine = toChatItem({
+		...base,
+		id: 1 as never,
+		kind: "pi.user",
+		model: [{ role: "user", content: '[routine] "Morning agenda": email me', timestamp: 5 }],
+	});
+	assert.equal(routine?.kind, "routine");
+	const compaction = toChatItem({ ...base, id: 2 as never, kind: "pi.compaction", data: { reason: "threshold" } });
+	assert.equal(compaction?.kind, "marker");
+	assert.equal(toChatItem({ ...base, id: 3 as never, kind: "pi.system" }), undefined);
+});
