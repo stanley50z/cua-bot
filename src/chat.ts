@@ -1,14 +1,16 @@
 // Owner chat over the root conversation, for the web app in src/web.ts.
-// main.ts calls createChat({ harness, root, context }) once. The server uses history() for pages of
-// past messages, send()/stop() for input, and subscribe() for live updates: the streaming partial
-// reply, running tool calls, and every new transcript entry. Entries are normalized to ChatItem so
-// the browser never sees provider message shapes.
+// main.ts calls createChat({ harness, root, context, computer }) once. The server uses history() for
+// pages of past messages, send()/stop() for input, computer() for the computer pane, and subscribe()
+// for live updates: the streaming partial reply, running tool calls, every new transcript entry, and
+// computer pane snapshots while computer_use runs. Entries are normalized to ChatItem so the browser
+// never sees provider message shapes.
 import type { Context } from "@earendil-works/chord";
 import type { AssistantMessage, ToolResultMessage, UserMessage } from "@earendil-works/pi-ai";
 import {
 	AssistantEntry,
 	CompactionEntry,
 	type Conversation,
+	type ConversationId,
 	type Cursor,
 	type EntryId,
 	type EntryRecord,
@@ -19,8 +21,10 @@ import {
 	ToolResultEntry,
 	UserEntry,
 } from "@earendil-works/pi-durable";
+import type { ComputerSnapshot, ComputerView } from "./computer-view.ts";
 
 const TOOL_TEXT_LIMIT = 4000;
+const COMPUTER_POLL_MS = 1500;
 const SHOT_PATTERN = /shots[\\/]([\w.-]+\.png)/g;
 
 export type ChatTool = { id: string; name: string; args: Record<string, unknown> };
@@ -36,11 +40,15 @@ export type ChatLive = {
 	busy: boolean;
 	/** Text of the in-flight reply so far. */
 	partial: string;
-	tools: { callId: string; name: string; status: "pending" | "running" | "done"; output?: string }[];
+	/** `child` is the conversation a running computer_use call drives the Space from. */
+	tools: { callId: string; name: string; status: "pending" | "running" | "done"; output?: string; child?: number }[];
 	retry?: { at: number; error: string };
 };
 
-export type ChatEvent = { type: "live"; live: ChatLive } | { type: "items"; items: ChatItem[] };
+export type ChatEvent =
+	| { type: "live"; live: ChatLive }
+	| { type: "items"; items: ChatItem[] }
+	| { type: "computer"; computer: ComputerSnapshot };
 
 function textOf(content: string | readonly { type: string; text?: string }[]): string {
 	if (typeof content === "string") return content;
@@ -101,12 +109,20 @@ export function toChatLive(live: Readonly<LiveState> | null): ChatLive {
 	return {
 		busy: live?.run !== undefined,
 		partial: partial === undefined ? "" : textOf(partial.content as readonly { type: string; text?: string }[]),
-		tools: (live?.tools ?? []).map((slot) => ({
-			callId: slot.callId,
-			name: slot.name,
-			status: slot.status,
-			...(slot.output === undefined ? {} : { output: slot.output.slice(-TOOL_TEXT_LIMIT) }),
-		})),
+		tools: (live?.tools ?? []).map((slot) => {
+			const details = slot.details;
+			const child =
+				details !== null && typeof details === "object" && !Array.isArray(details) && typeof details.conversationId === "number"
+					? details.conversationId
+					: undefined;
+			return {
+				callId: slot.callId,
+				name: slot.name,
+				status: slot.status,
+				...(slot.output === undefined ? {} : { output: slot.output.slice(-TOOL_TEXT_LIMIT) }),
+				...(child === undefined ? {} : { child }),
+			};
+		}),
 		...(live?.generation?.retry === undefined ? {} : { retry: { ...live.generation.retry } }),
 	};
 }
@@ -114,18 +130,44 @@ export function toChatLive(live: Readonly<LiveState> | null): ChatLive {
 export type Chat = ReturnType<typeof createChat>;
 
 /** Bind the chat to the bot's root conversation. Call close() on shutdown. */
-export function createChat(deps: { harness: Harness; root: Conversation; context: Context }) {
-	const { harness, root, context } = deps;
+export function createChat(deps: { harness: Harness; root: Conversation; context: Context; computer?: ComputerView }) {
+	const { harness, root, context, computer } = deps;
 	const listeners = new Set<(event: ChatEvent) => void>();
 	let lastSeen: EntryId | undefined;
 	let live = toChatLive(null);
 	let watching: Promise<void> | undefined;
 	let stopWatch: (() => Promise<unknown>) | undefined;
 	let pump = Promise.resolve();
+	let poll: ReturnType<typeof setInterval> | undefined;
+	let lastComputer = "";
 
 	const emit = (event: ChatEvent) => {
 		for (const listener of listeners) listener(event);
 	};
+
+	const runningComputer = () => live.tools.find((tool) => tool.name === "computer_use" && tool.status !== "done");
+
+	// Push a computer snapshot when it changed. Errors are dropped: the pane keeps its last state.
+	async function pushComputer(): Promise<void> {
+		if (computer === undefined || listeners.size === 0) return;
+		const snapshot = await computer.snapshot(runningComputer()?.child as ConversationId | undefined).catch(() => undefined);
+		if (snapshot === undefined) return;
+		const text = JSON.stringify(snapshot);
+		if (text === lastComputer) return;
+		lastComputer = text;
+		emit({ type: "computer", computer: snapshot });
+	}
+
+	// computer_use's driver steps land in a child conversation, so poll while it runs and refresh once when it stops.
+	function trackComputer(): void {
+		const driving = runningComputer() !== undefined;
+		if (driving && poll === undefined) poll = setInterval(() => void pushComputer(), COMPUTER_POLL_MS);
+		if (!driving && poll !== undefined) {
+			clearInterval(poll);
+			poll = undefined;
+		}
+		void pushComputer();
+	}
 
 	// Entries newer than lastSeen, oldest first. The query's minEntryId is inclusive.
 	async function newEntries(ctx: Context): Promise<ChatItem[]> {
@@ -163,6 +205,7 @@ export function createChat(deps: { harness: Harness; root: Conversation; context
 				const items = await newEntries(ctx);
 				if (items.length > 0) emit({ type: "items", items });
 				emit({ type: "live", live });
+				trackComputer();
 			});
 			await pump;
 		});
@@ -187,6 +230,8 @@ export function createChat(deps: { harness: Harness; root: Conversation; context
 		get live() {
 			return live;
 		},
+		/** The computer pane's current state, or undefined when the bot has no computer view. */
+		computer: () => computer?.snapshot(runningComputer()?.child as ConversationId | undefined),
 		/** Receive live events until the returned function is called. */
 		subscribe(listener: (event: ChatEvent) => void) {
 			listeners.add(listener);
@@ -196,6 +241,7 @@ export function createChat(deps: { harness: Harness; root: Conversation; context
 		/** Resolves once live updates are flowing; used by tests. */
 		ready: () => (watching ??= startWatch()),
 		async close() {
+			if (poll !== undefined) clearInterval(poll);
 			listeners.clear();
 			await stopWatch?.();
 		},

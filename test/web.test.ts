@@ -88,18 +88,22 @@ async function api(session: Session, method: string, path: string, body?: unknow
 	return { status: response.status, json: text.length > 0 ? (JSON.parse(text) as unknown) : undefined };
 }
 
-test("GET / serves the routines page", { timeout: 20_000 }, async () => {
+test("GET / serves the web app with chat, computer pane, and routines", { timeout: 20_000 }, async () => {
 	const session = await open();
 	try {
 		const response = await fetch(`${session.base}/`);
 		assert.equal(response.status, 200);
 		assert.match(response.headers.get("content-type") ?? "", /text\/html/);
 		const html = await response.text();
-		assert.match(html, /cua-bot routines/);
+		assert.match(html, /<title>cua-bot<\/title>/);
+		assert.match(html, /id="composer"/);
+		assert.match(html, /\/api\/chat\/events/);
+		assert.match(html, /id="screen"/);
 		assert.match(html, /id="routine-form"/);
-		assert.match(html, /id="routine-list"/);
+		assert.match(html, /id="routine-rows"/);
 		assert.match(html, /\/api\/routines/);
 		assert.match(html, /routines\.json/);
+		assert.doesNotMatch(html, /innerHTML/, "server text is rendered with DOM nodes only");
 	} finally {
 		await close(session);
 	}

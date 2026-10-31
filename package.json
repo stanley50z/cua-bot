@@ -7,7 +7,7 @@
   "scripts": {
     "start": "node --env-file-if-exists=.env src/main.ts",
     "check": "tsc --noEmit",
-    "test": "node --test test/cron.test.ts test/routines.test.ts test/routines-file.test.ts test/web.test.ts test/chat.test.ts test/email.test.ts"
+    "test": "node --test test/cron.test.ts test/routines.test.ts test/routines-file.test.ts test/web.test.ts test/chat.test.ts test/computer-view.test.ts test/email.test.ts"
   },
   "engines": {
     "node": ">=22.19.0"

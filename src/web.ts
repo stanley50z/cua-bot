@@ -89,6 +89,8 @@ export type BotServerDeps = {
 	context: Context;
 	/** Enables /api/chat*. Absent in tests that only exercise routines. */
 	chat?: Chat;
+	/** Shown in the chat header, e.g. "grok-4.7". */
+	model?: string;
 	shotsDir?: string;
 	log?: (...parts: unknown[]) => void;
 };
@@ -177,7 +179,7 @@ async function routeChat(req: IncomingMessage, res: ServerResponse, deps: BotSer
 	if (method === "GET" && url.pathname === "/api/chat") {
 		const limit = Math.min(Math.max(Number(url.searchParams.get("limit")) || HISTORY_LIMIT, 1), 200);
 		const page = await chat.history(limit, decodeCursor(url.searchParams.get("before")));
-		sendJson(res, 200, { items: page.items, before: encodeCursor(page.before), live: chat.live });
+		sendJson(res, 200, { items: page.items, before: encodeCursor(page.before), live: chat.live, model: deps.model ?? null });
 		return;
 	}
 	if (method === "POST" && url.pathname === "/api/chat") {
@@ -192,6 +194,10 @@ async function routeChat(req: IncomingMessage, res: ServerResponse, deps: BotSer
 		return;
 	}
 	if (method === "GET" && url.pathname === "/api/chat/events") return streamChat(req, res, chat);
+	if (method === "GET" && url.pathname === "/api/chat/computer") {
+		sendJson(res, 200, (await chat.computer()) ?? { steps: [] });
+		return;
+	}
 	throw new HttpError(404, "not found");
 }
 

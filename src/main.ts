@@ -8,7 +8,8 @@ import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { AssistantEntry, createRegistry, defineExtension, Harness, section } from "@earendil-works/pi-durable";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { createChat } from "./chat.ts";
-import { createComputerExtension } from "./computer.ts";
+import { createComputerExtension, spaceLabel } from "./computer.ts";
+import { createComputerView } from "./computer-view.ts";
 import { createEmailExtension } from "./email.ts";
 import { DATA_DIR, log } from "./log.ts";
 import { bindRoutines, createRoutinesExtension, startRoutineFileWatch, syncRoutines } from "./routines.ts";
@@ -58,7 +59,8 @@ registry.install(createComputerExtension());
 registry.install(createEmailExtension());
 registry.install(createRoutinesExtension());
 
-const harness = await Harness.open(await openNodeSqliteStorage(join(DATA_DIR, "grokbot.sqlite")), { models, registry }, context);
+const storage = await openNodeSqliteStorage(join(DATA_DIR, "grokbot.sqlite"));
+const harness = await Harness.open(storage, { models, registry }, context);
 const root = await harness.root(context, { agent: { model: MODEL, thinkingLevel: "medium" } });
 bindRoutines({ harness, root });
 harness.resume();
@@ -82,8 +84,17 @@ async function say(text: string): Promise<string> {
 	return message.content.flatMap((c) => (c.type === "text" ? [c.text] : [])).join("\n");
 }
 
-const chat = createChat({ harness, root, context });
-createBotServer({ say, chat, context, log }).listen(PORT, "127.0.0.1", () =>
+const space = spaceLabel();
+const computer = createComputerView({
+	harness,
+	storage,
+	root,
+	shotsDir: join(DATA_DIR, "shots"),
+	context,
+	...(space === undefined ? {} : { space }),
+});
+const chat = createChat({ harness, root, context, computer });
+createBotServer({ say, chat, model: MODEL.modelId, context, log }).listen(PORT, "127.0.0.1", () =>
 	log(`listening: web app http://127.0.0.1:${PORT}/ · chat POST http://127.0.0.1:${PORT}/say`),
 );
 

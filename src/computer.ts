@@ -219,23 +219,30 @@ async function openSpace(): Promise<ConnectedSpace> {
 }
 
 function spaceIdFromRegistry(): string | undefined {
+	return registrySpaces()[0]?.id;
+}
+
+/** Used by the web app's computer pane. The paired Space's display name, falling back to its id. */
+export function spaceLabel(): string | undefined {
+	const id = process.env.CUA_SPACE_ID?.trim() || spaceIdFromRegistry();
+	const entry = registrySpaces().find((space) => space.id === id);
+	return entry?.name ?? id;
+}
+
+function registrySpaces(): { id: string; name?: string }[] {
 	const home = process.env.CUA_HOME?.trim() || join(homedir(), ".cua");
-	let raw: string;
-	try {
-		raw = readFileSync(join(home, "spaces.json"), "utf8");
-	} catch {
-		return undefined;
-	}
 	let parsed: unknown;
 	try {
-		parsed = JSON.parse(raw);
+		parsed = JSON.parse(readFileSync(join(home, "spaces.json"), "utf8"));
 	} catch {
-		return undefined;
+		return [];
 	}
-	if (!Array.isArray(parsed)) return undefined;
-	const first = parsed[0];
-	if (first === null || typeof first !== "object" || !("id" in first)) return undefined;
-	return typeof first.id === "string" && first.id.length > 0 ? first.id : undefined;
+	if (!Array.isArray(parsed)) return [];
+	return parsed.flatMap((space: unknown) => {
+		if (space === null || typeof space !== "object" || !("id" in space) || typeof space.id !== "string" || space.id === "") return [];
+		const name = "name" in space && typeof space.name === "string" && space.name !== "" ? space.name : undefined;
+		return [{ id: space.id, ...(name === undefined ? {} : { name }) }];
+	});
 }
 
 function driverInfos(): Promise<DriverInfo[]> {

@@ -1,0 +1,658 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>cua-bot</title>
+<!--
+ The cua-bot web app (Workbench layout), served by src/web.ts at GET /. One self-contained document:
+ inline CSS and JS, no dependencies, works offline. Talks to /api/chat (history, send, stop),
+ /api/chat/events (server-sent live state), /api/chat/computer, /api/routines, and /shots/.
+ Every server string is rendered with textContent or built DOM nodes, never parsed as HTML.
+-->
+<style>
+:root { --ink:#1B2129; --muted:#5A6370; --bg:#F4F6F8; --panel:#FFFFFF; --line:#DCE0E6; --drive:#A96500; --drive-line:#E2B567; --drive-bg:#FFF4E0;
+  --ok:#1E7A55; --bad:#B42318; --bad-bg:#FDF1F0; --accent:#27507F; --me:#E8EEF6; --focus:#2F6BFF; }
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body { background: var(--bg); color: var(--ink); font: 14px/1.5 "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif; }
+button { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.label { font-family: "Bahnschrift", "Segoe UI", sans-serif; letter-spacing: .01em; }
+code, pre, .mono { font-family: "Cascadia Code", Consolas, monospace; }
+[hidden] { display: none !important; }
+
+.app { display: grid; grid-template-columns: 64px minmax(0, 1fr) 440px; height: 100%; }
+
+/* rail */
+.rail { background: var(--ink); display: flex; flex-direction: column; align-items: center; padding: 14px 0; gap: 6px; }
+.mark { width: 34px; height: 34px; border-radius: 9px; background: #E9EDF2; color: var(--ink); display: grid; place-items: center; font: 700 15px "Bahnschrift", sans-serif; margin-bottom: 14px; }
+.rail button { width: 44px; height: 44px; border: 0; border-radius: 10px; background: transparent; color: #A9B3C0; cursor: pointer; display: grid; place-items: center; position: relative; }
+.rail button[aria-pressed="true"] { background: #2E3846; color: #fff; }
+.rail button:hover { color: #fff; }
+.rail svg { width: 21px; height: 21px; }
+
+/* main column */
+.main { display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--panel); border-right: 1px solid var(--line); }
+.bar { height: 52px; flex: none; display: flex; align-items: center; gap: 12px; padding: 0 22px; border-bottom: 1px solid var(--line); }
+.bar h1 { font: 600 16px "Bahnschrift", sans-serif; letter-spacing: .01em; margin: 0; }
+.bar .aside { margin-left: auto; font-size: 12.5px; color: var(--muted); }
+.state { font-size: 13px; color: var(--muted); display: flex; align-items: center; gap: 6px; }
+.state.busy::before, .state.drive::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); animation: pulse 1.2s ease-in-out infinite; }
+.state.drive { color: var(--drive); } .state.drive::before { background: var(--drive); }
+.state.bad { color: var(--bad); }
+@keyframes pulse { 50% { opacity: .25; } }
+.view { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+
+/* chat */
+.msgs { flex: 1; overflow: auto; padding: 18px 26px 8px; display: flex; flex-direction: column; gap: 14px; }
+.more { align-self: center; border: 1px solid var(--line); background: #fff; border-radius: 7px; padding: 4px 12px; font-size: 12.5px; cursor: pointer; color: var(--muted); }
+.day { align-self: center; font-size: 12px; color: var(--muted); }
+.empty { margin: auto; text-align: center; color: var(--muted); max-width: 44ch; }
+.empty b { display: block; color: var(--ink); font: 600 16px "Bahnschrift", sans-serif; margin-bottom: 4px; }
+.m { max-width: 82%; }
+.m.me { align-self: flex-end; background: var(--me); border-radius: 12px 12px 3px 12px; padding: 8px 13px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.m.me.queued { opacity: .65; }
+.m.me .note { display: block; font-size: 11.5px; color: var(--muted); margin-top: 2px; }
+.m.bot { overflow-wrap: anywhere; }
+.m.bot .text > :first-child { margin-top: 0; } .m.bot .text > :last-child { margin-bottom: 0; }
+.m.bot p, .m.bot ul, .m.bot ol { margin: 0 0 8px; }
+.m.bot ul, .m.bot ol { padding-left: 20px; }
+.m.bot code { background: var(--bg); border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; font-size: 12.5px; }
+.m.bot a { color: var(--accent); }
+.m.bot .stopped { color: var(--muted); font-style: italic; }
+.m.bot .error { color: var(--bad); background: var(--bad-bg); border-radius: 6px; padding: 6px 10px; }
+.m.bot .partial { color: var(--muted); }
+.routine { align-self: stretch; border-left: 3px solid var(--accent); padding: 3px 0 3px 12px; font-size: 13px; color: var(--muted); }
+.routine b { color: var(--ink); font-weight: 600; }
+.marker { align-self: center; font-size: 12px; color: var(--muted); font-style: italic; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 8px; }
+.chip { font: 12.5px "Bahnschrift", sans-serif; letter-spacing: .01em; border: 1px solid var(--line); border-radius: 6px; padding: 2px 8px; color: var(--muted); background: var(--bg); cursor: pointer; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chip.done::before { content: "✓ "; color: var(--ok); }
+.chip.error { color: var(--bad); border-color: #E5B6B1; background: var(--bad-bg); } .chip.error::before { content: "✕ "; }
+.chip.run { color: var(--drive); border-color: var(--drive-line); background: var(--drive-bg); cursor: default; }
+.chip[aria-expanded="true"] { border-color: var(--accent); color: var(--ink); }
+.result { margin: 0 0 8px; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; font-size: 12.5px; white-space: pre-wrap; max-height: 260px; overflow: auto; }
+.thumbs { display: flex; gap: 8px; flex-wrap: wrap; margin: 0 0 8px; }
+.thumbs a { display: block; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+.thumbs img { display: block; height: 110px; width: auto; }
+.composer { flex: none; margin: 8px 22px 18px; border: 1px solid var(--line); border-radius: 12px; display: flex; align-items: flex-end; gap: 8px; padding: 8px 8px 8px 14px; background: #fff; }
+.composer:focus-within { border-color: #9FB2C8; }
+.composer textarea { flex: 1; border: 0; resize: none; font: inherit; min-height: 44px; max-height: 200px; outline: none; color: var(--ink); background: transparent; padding: 4px 0; }
+.icon { width: 36px; height: 36px; flex: none; border-radius: 9px; border: 1px solid var(--line); background: #fff; cursor: pointer; display: grid; place-items: center; }
+.icon svg { width: 17px; height: 17px; }
+.icon.primary { background: var(--ink); border-color: var(--ink); color: #fff; }
+.icon:disabled { opacity: .4; cursor: default; }
+.banner { flex: none; margin: 12px 22px 0; border: 1px solid #E5B6B1; background: var(--bad-bg); color: var(--bad); border-radius: 8px; padding: 8px 12px; font-size: 13px; }
+
+/* computer pane */
+.side { display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--bg); }
+.side .bar { background: var(--bg); }
+.side .bar .state { margin-left: auto; }
+.screen { flex: none; margin: 16px 16px 0; border-radius: 8px; overflow: hidden; aspect-ratio: 16 / 10; background: #E3E7EC; border: 1px solid var(--line); position: relative; display: grid; place-items: center; }
+.screen.drive { outline: 3px solid var(--drive); outline-offset: -1px; border-color: var(--drive); }
+.screen img { width: 100%; height: 100%; object-fit: contain; display: block; background: #1F262E; }
+.screen a { display: contents; }
+.screen .none { color: var(--muted); font-size: 13px; text-align: center; padding: 0 30px; }
+.screen .tag { position: absolute; right: 8px; bottom: 8px; background: var(--drive); color: #fff; font: 600 11.5px "Bahnschrift", sans-serif; padding: 3px 8px; border-radius: 5px; }
+.shot-time { flex: none; margin: 6px 16px 0; font-size: 12px; color: var(--muted); }
+.steps { margin: 12px 16px 16px; overflow: auto; flex: 1; min-height: 0; }
+.steps h2 { font: 600 13px "Bahnschrift", sans-serif; margin: 0 0 6px; color: var(--muted); letter-spacing: .02em; }
+.steps ol { margin: 0; padding: 0; list-style: none; }
+.steps li { display: grid; grid-template-columns: 22px 150px minmax(0, 1fr) auto; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--line); font-size: 13px; }
+.steps li .n { color: var(--muted); font: 12px "Bahnschrift", sans-serif; padding-top: 1px; }
+.steps li code { font-size: 12px; color: var(--accent); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.steps li .d { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.steps li .t { color: var(--muted); font-size: 12px; }
+.steps li.running { color: var(--drive); } .steps li.running code { color: var(--drive); }
+.steps li.error .d::after { content: " failed"; color: var(--bad); }
+.steps li.none { display: block; color: var(--muted); font-size: 13px; border-bottom: 0; }
+
+/* routines */
+.table { padding: 8px 24px 24px; overflow: auto; flex: 1; }
+.table table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+.table th { text-align: left; font: 600 12.5px "Bahnschrift", sans-serif; color: var(--muted); padding: 10px 10px 8px; border-bottom: 1px solid var(--line); letter-spacing: .02em; }
+.table td { padding: 11px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+.table td small { display: block; color: var(--muted); white-space: pre-wrap; overflow-wrap: anywhere; }
+.table .cron { font-size: 12.5px; color: var(--accent); }
+.table .acts { white-space: nowrap; text-align: right; }
+.btn { border: 1px solid var(--line); background: #fff; border-radius: 7px; padding: 4px 10px; font-size: 12.5px; cursor: pointer; }
+.btn:hover { background: var(--bg); }
+.btn.primary { background: var(--ink); color: #fff; border-color: var(--ink); }
+.btn.danger { color: var(--bad); border-color: #E5B6B1; }
+.btn:disabled { opacity: .5; cursor: default; }
+.bar .btn.primary { margin-left: 8px; }
+.table .none { color: var(--muted); padding: 24px 10px; }
+.file { padding: 0 24px 16px; color: var(--muted); font-size: 12.5px; }
+
+dialog { border: 1px solid var(--line); border-radius: 12px; padding: 22px 24px; width: min(560px, 92vw); color: var(--ink); box-shadow: 0 18px 50px rgba(27,33,41,.22); }
+dialog::backdrop { background: rgba(27,33,41,.35); }
+dialog h2 { font: 600 17px "Bahnschrift", sans-serif; margin: 0 0 14px; }
+dialog label { display: block; font-size: 13px; font-weight: 600; margin: 12px 0 4px; }
+dialog input, dialog textarea { width: 100%; padding: 8px 10px; border: 1px solid var(--line); border-radius: 7px; font: inherit; color: var(--ink); }
+dialog textarea { resize: vertical; }
+dialog .hint { color: var(--muted); font-size: 12.5px; margin: 6px 0 0; }
+dialog .hint code { background: var(--bg); padding: 0 4px; border-radius: 3px; }
+#preview { font-size: 13px; margin: 6px 0 0; min-height: 20px; }
+#preview.bad, #form-error { color: var(--bad); }
+dialog .row { display: flex; gap: 8px; justify-content: flex-end; margin-top: 18px; }
+
+@media (max-width: 1180px) { .app { grid-template-columns: 64px minmax(0, 1fr) 360px; } }
+@media (max-width: 900px) { .app { grid-template-columns: 56px minmax(0, 1fr); } .side { display: none; } }
+@media (prefers-reduced-motion: reduce) { * { animation: none !important; } }
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+ <symbol id="i-chat" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M4 5h16v11H9l-5 4z"/></symbol>
+ <symbol id="i-clock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></symbol>
+ <symbol id="i-send" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M6 11l6-6 6 6"/></symbol>
+ <symbol id="i-stop" viewBox="0 0 24 24" fill="currentColor"><rect x="7" y="7" width="10" height="10" rx="1.5"/></symbol>
+</svg>
+
+<div class="app">
+ <nav class="rail" aria-label="Sections">
+  <div class="mark" aria-hidden="true">cb</div>
+  <button type="button" aria-label="Chat" aria-pressed="true" data-view="chat"><svg><use href="#i-chat"/></svg></button>
+  <button type="button" aria-label="Routines" aria-pressed="false" data-view="routines"><svg><use href="#i-clock"/></svg></button>
+ </nav>
+
+ <main class="main">
+  <section class="view" id="view-chat" aria-labelledby="chat-h">
+   <div class="bar"><h1 id="chat-h">Chat</h1><span class="state" id="chat-state" aria-live="polite"></span><span class="aside" id="model"></span></div>
+   <div class="banner" id="chat-error" role="alert" hidden></div>
+   <div class="msgs" id="msgs" aria-live="polite"></div>
+   <form class="composer" id="composer">
+    <textarea id="input" rows="1" aria-label="Message cua-bot" placeholder="Message cua-bot"></textarea>
+    <button type="button" class="icon" id="stop" aria-label="Stop the current reply" title="Stop the current reply" hidden><svg><use href="#i-stop"/></svg></button>
+    <button type="submit" class="icon primary" id="send" aria-label="Send" title="Send (Enter)"><svg><use href="#i-send"/></svg></button>
+   </form>
+  </section>
+
+  <section class="view" id="view-routines" aria-labelledby="routines-h" hidden>
+   <div class="bar"><h1 id="routines-h">Routines</h1><span class="aside" id="routine-count"></span><button type="button" class="btn primary" id="new-routine">New routine</button></div>
+   <div class="banner" id="routine-error" role="alert" hidden></div>
+   <div class="table"><table>
+    <thead><tr><th>Routine</th><th>When</th><th>Next</th><th>Last ran</th><th><span hidden>Actions</span></th></tr></thead>
+    <tbody id="routine-rows"></tbody>
+   </table></div>
+   <p class="file">Saved to <code id="routine-file">routines.json</code> next to the bot. Hand edits to that file apply within a few seconds, and routines the bot creates in chat appear here.</p>
+  </section>
+ </main>
+
+ <aside class="side" aria-labelledby="space-h">
+  <div class="bar"><h1 id="space-h">Computer</h1><span class="state" id="space-state"></span></div>
+  <div class="screen" id="screen"><p class="none">No screenshots yet. Ask the bot to do something on the computer and its screen shows up here.</p></div>
+  <div class="shot-time" id="shot-time"></div>
+  <div class="steps"><h2 id="steps-h">Steps</h2><ol id="steps"></ol></div>
+ </aside>
+</div>
+
+<dialog id="routine-dialog" aria-labelledby="form-h">
+ <form id="routine-form" method="dialog">
+  <h2 id="form-h">New routine</h2>
+  <label for="f-title">Title</label>
+  <input id="f-title" required maxlength="120" placeholder="Morning agenda">
+  <label for="f-prompt">What the bot should do</label>
+  <textarea id="f-prompt" required rows="3" placeholder="Email me today's calendar and overnight mail worth reading."></textarea>
+  <label for="f-cron">Schedule</label>
+  <input id="f-cron" class="mono" required placeholder="30 7 * * 1-5" spellcheck="false" autocomplete="off">
+  <p id="preview" aria-live="polite"></p>
+  <p class="hint">Cron: minute, hour, day of month, month, day of week (0 is Sunday). <code>30 7 * * 1-5</code> is weekdays at 7:30, <code>0 9 * * 2,5</code> is Tuesdays and Fridays at 9:00. <code>@daily</code> and <code>@every 30m</code> work too. Times are this computer's local time unless you prefix <code>CRON_TZ=Area/City</code>.</p>
+  <p id="form-error" role="alert"></p>
+  <div class="row"><button type="button" class="btn" id="form-cancel">Cancel</button><button type="submit" class="btn primary" id="form-save">Add routine</button></div>
+ </form>
+</dialog>
+
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+
+function el(tag, className, text) {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  if (text !== undefined) node.textContent = text;
+  return node;
+}
+
+async function request(method, path, payload) {
+  const options = { method, headers: { "content-type": "application/json" } };
+  if (payload !== undefined) options.body = JSON.stringify(payload);
+  const response = await fetch(path, options);
+  if (response.status === 204) return undefined;
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error || `Request failed (${response.status})`);
+  return data;
+}
+
+const time = (ms) => new Date(ms).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+const timeSec = (ms) => new Date(ms).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit", second: "2-digit" });
+function dayLabel(ms) {
+  const d = new Date(ms), today = new Date();
+  const start = (x) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+  const diff = Math.round((start(today) - start(d)) / 86400000);
+  if (diff === 0) return "Today";
+  if (diff === 1) return "Yesterday";
+  if (diff < 7) return d.toLocaleDateString(undefined, { weekday: "long" });
+  return d.toLocaleDateString(undefined, { month: "long", day: "numeric", year: d.getFullYear() === today.getFullYear() ? undefined : "numeric" });
+}
+function shortDate(iso) {
+  return new Date(iso).toLocaleString(undefined, { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+}
+function relative(iso) {
+  const ms = new Date(iso).getTime() - Date.now();
+  if (ms <= 0) return "due now";
+  const minutes = Math.round(ms / 60000);
+  if (minutes < 60) return `in ${Math.max(minutes, 1)} min`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `in ${hours} h ${minutes % 60} min`;
+  return `in ${Math.floor(hours / 24)} d ${hours % 24} h`;
+}
+
+/* ---------- markdown subset: paragraphs, lists, headings as bold, **bold**, `code`, [links](http…) ---------- */
+function inline(parent, text) {
+  const pattern = /(\*\*[^*]+\*\*|`[^`]+`|\[[^\]]+\]\(https?:\/\/[^)\s]+\))/g;
+  let last = 0;
+  for (const match of text.matchAll(pattern)) {
+    if (match.index > last) parent.append(text.slice(last, match.index));
+    const token = match[0];
+    if (token.startsWith("**")) parent.append(el("strong", "", token.slice(2, -2)));
+    else if (token.startsWith("`")) parent.append(el("code", "", token.slice(1, -1)));
+    else {
+      const split = token.indexOf("](");
+      const link = el("a", "", token.slice(1, split));
+      link.href = token.slice(split + 2, -1);
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+      parent.append(link);
+    }
+    last = match.index + token.length;
+  }
+  if (last < text.length) parent.append(text.slice(last));
+}
+function markdown(text) {
+  const root = el("div", "text");
+  let list = null, para = null;
+  for (const raw of text.split("\n")) {
+    const line = raw.trimEnd();
+    const bullet = line.match(/^\s*[-*•]\s+(.*)$/), number = line.match(/^\s*\d+[.)]\s+(.*)$/), heading = line.match(/^#{1,6}\s+(.*)$/);
+    if (bullet || number) {
+      const tag = bullet ? "ul" : "ol";
+      if (!list || list.tagName.toLowerCase() !== tag) { list = el(tag); root.append(list); }
+      const item = el("li"); inline(item, (bullet || number)[1]); list.append(item);
+      para = null;
+    } else if (line.trim() === "") { list = null; para = null; }
+    else if (heading) { list = null; para = el("p"); const b = el("strong"); inline(b, heading[1]); para.append(b); root.append(para); para = null; }
+    else {
+      list = null;
+      if (para) para.append(el("br")); else { para = el("p"); root.append(para); }
+      inline(para, line);
+    }
+  }
+  return root;
+}
+
+/* ---------- chat state ---------- */
+const state = { items: [], ids: new Set(), before: null, live: { busy: false, partial: "", tools: [] }, queued: [], open: new Set(), computer: { steps: [] } };
+
+function toolLabel(call) {
+  const a = call.args || {};
+  const pick = (...keys) => keys.map((k) => a[k]).find((v) => typeof v === "string" && v.trim() !== "");
+  const clip = (s, n = 48) => (s.length > n ? s.slice(0, n - 1) + "…" : s);
+  switch (call.name) {
+    case "computer_use": return "Computer: " + clip(pick("task", "instructions") || "working");
+    case "send_email": return "Email to you: " + clip(pick("subject") || "message");
+    case "schedule": return "New routine: " + clip(pick("title") || "");
+    case "list_routines": return "Checked routines";
+    case "run_routine": return "Ran a routine";
+    case "cancel_routine": return "Removed a routine";
+    default: {
+      const detail = pick("query", "q", "title", "subject", "text");
+      return call.name.replace(/_/g, " ").toLowerCase() + (detail ? ": " + clip(detail) : "");
+    }
+  }
+}
+
+function addItems(items) {
+  for (const item of items) {
+    if (state.ids.has(item.id)) continue;
+    state.ids.add(item.id);
+    state.items.push(item);
+    if (item.kind === "user") {
+      const at = state.queued.findIndex((text) => text.trim() === item.text.trim());
+      if (at >= 0) state.queued.splice(at, 1);
+    }
+  }
+  state.items.sort((a, b) => a.id - b.id);
+}
+
+function routineTitle(text) {
+  const match = text.match(/^\[routine\]\s+"([^"]+)"/);
+  return match ? match[1] : "A routine";
+}
+
+function renderChat() {
+  const box = $("msgs");
+  const nearBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 80;
+  box.textContent = "";
+  if (state.before) {
+    const more = el("button", "more", "Show earlier messages");
+    more.type = "button";
+    more.addEventListener("click", loadEarlier);
+    box.append(more);
+  }
+  const results = new Map();
+  for (const item of state.items) if (item.kind === "tool") results.set(item.callId, item);
+  const running = new Map(state.live.tools.map((tool) => [tool.callId, tool]));
+  let day = "";
+  const visible = state.items.filter((item) => item.kind !== "tool");
+  if (visible.length === 0 && !state.live.busy && state.queued.length === 0) {
+    const empty = el("div", "empty");
+    empty.append(el("b", "", "Ask cua-bot anything"));
+    empty.append("It can use the computer on the right, check your mail and calendar, email you, and run routines on a schedule.");
+    box.append(empty);
+  }
+  for (const item of visible) {
+    if (item.at !== undefined) {
+      const label = dayLabel(item.at);
+      if (label !== day) { day = label; box.append(el("div", "day", label)); }
+    }
+    if (item.kind === "user") box.append(el("div", "m me", item.text));
+    else if (item.kind === "routine") {
+      const line = el("div", "routine");
+      line.append(el("b", "", routineTitle(item.text)), ` ran at ${time(item.at)}.`);
+      line.title = item.text;
+      box.append(line);
+    } else if (item.kind === "marker") box.append(el("div", "marker", item.text));
+    else if (item.kind === "assistant") box.append(renderReply(item, results, running));
+  }
+  for (const text of state.queued) {
+    const bubble = el("div", "m me queued", text);
+    bubble.append(el("span", "note", state.live.busy ? "Queued until the current reply finishes" : "Sending…"));
+    box.append(bubble);
+  }
+  if (state.live.busy) {
+    const done = new Set(state.items.filter((i) => i.kind === "assistant").flatMap((i) => i.tools.map((t) => t.id)));
+    const pending = state.live.tools.filter((tool) => !done.has(tool.callId));
+    if (state.live.partial || pending.length > 0) {
+      const live = el("div", "m bot");
+      if (pending.length > 0) {
+        const chips = el("div", "chips");
+        for (const tool of pending) chips.append(el("span", "chip run", toolLabel({ name: tool.name, args: {} })));
+        live.append(chips);
+      }
+      if (state.live.partial) live.append(markdown(state.live.partial));
+      box.append(live);
+    }
+  }
+  if (nearBottom) box.scrollTop = box.scrollHeight;
+}
+
+function renderReply(item, results, running) {
+  const node = el("div", "m bot");
+  if (item.tools.length > 0) {
+    const chips = el("div", "chips");
+    const below = el("div");
+    for (const call of item.tools) {
+      const result = results.get(call.id);
+      const live = running.get(call.id);
+      const status = result ? (result.isError ? "error" : "done") : live && live.status !== "done" ? "run" : "done";
+      const chip = el("button", "chip " + status, toolLabel(call));
+      chip.type = "button";
+      chip.title = toolLabel(call);
+      if (status === "run" || !result) { chip.disabled = true; chips.append(chip); continue; }
+      const key = item.id + ":" + call.id;
+      chip.setAttribute("aria-expanded", String(state.open.has(key)));
+      chip.addEventListener("click", () => { state.open.has(key) ? state.open.delete(key) : state.open.add(key); renderChat(); });
+      chips.append(chip);
+      if (state.open.has(key)) below.append(el("pre", "result", result.text || "(no output)"));
+      if (result.shots.length > 0) {
+        const thumbs = el("div", "thumbs");
+        for (const shot of result.shots) {
+          const link = el("a"); link.href = "/shots/" + encodeURIComponent(shot); link.target = "_blank"; link.rel = "noopener";
+          const img = el("img"); img.src = link.href; img.alt = "Screenshot from " + toolLabel(call); img.loading = "lazy";
+          link.append(img); thumbs.append(link);
+        }
+        below.append(thumbs);
+      }
+    }
+    node.append(chips, below);
+  }
+  if (item.text) node.append(markdown(item.text));
+  if (item.error) node.append(el("div", "error", item.error));
+  else if (item.aborted) node.append(el("div", "stopped", "Stopped."));
+  return node;
+}
+
+function renderLive() {
+  const live = state.live;
+  const driving = live.tools.some((tool) => tool.name === "computer_use" && tool.status !== "done");
+  const label = $("chat-state");
+  label.className = "state" + (live.retry ? " bad" : driving ? " drive" : live.busy ? " busy" : "");
+  label.textContent = live.retry ? `Retrying after an error: ${live.retry.error}` : driving ? "Using the computer" : live.busy ? (live.partial ? "Replying" : "Working") : "";
+  $("stop").hidden = !live.busy;
+  const space = $("space-state");
+  space.className = "state" + (driving ? " drive" : "");
+  space.textContent = driving ? "Bot is driving" : "Idle";
+  $("screen").classList.toggle("drive", driving);
+  const tag = $("screen").querySelector(".tag");
+  if (tag) tag.hidden = !driving;
+}
+
+function renderComputer() {
+  const c = state.computer;
+  $("space-h").textContent = c.space || "Computer";
+  const screen = $("screen");
+  screen.textContent = "";
+  if (c.shot) {
+    const link = el("a"); link.href = "/shots/" + encodeURIComponent(c.shot.name); link.target = "_blank"; link.rel = "noopener";
+    const img = el("img"); img.src = link.href; img.alt = "Latest screenshot of " + (c.space || "the computer");
+    link.append(img); screen.append(link);
+    const tag = el("span", "tag", "Bot is driving"); screen.append(tag);
+    $("shot-time").textContent = `Latest screenshot: ${dayLabel(c.shot.at)} at ${time(c.shot.at)}`;
+  } else {
+    screen.append(el("p", "none", "No screenshots yet. Ask the bot to do something on the computer and its screen shows up here."));
+    $("shot-time").textContent = "";
+  }
+  const list = $("steps");
+  list.textContent = "";
+  $("steps-h").textContent = c.steps.length > 0 ? "Steps of the last computer task" : "Steps";
+  if (c.steps.length === 0) list.append(el("li", "none", "The bot's clicks and keystrokes appear here while it works."));
+  c.steps.forEach((step, index) => {
+    const row = el("li", step.status);
+    row.append(el("span", "n", String(index + 1)), el("code", "", step.name), el("span", "d", step.detail), el("span", "t", step.status === "running" ? "now" : timeSec(step.at)));
+    row.querySelector(".d").title = step.detail;
+    list.append(row);
+  });
+  list.lastElementChild?.scrollIntoView({ block: "nearest" });
+  renderLive();
+}
+
+/* ---------- chat I/O ---------- */
+function showChatError(message) { $("chat-error").textContent = message; $("chat-error").hidden = !message; }
+
+async function loadHistory() {
+  const data = await request("GET", "/api/chat?limit=60");
+  state.items = []; state.ids = new Set();
+  addItems(data.items);
+  state.before = data.before;
+  state.live = data.live;
+  if (data.model) $("model").textContent = data.model;
+  renderLive();
+  renderChat();
+  $("msgs").scrollTop = $("msgs").scrollHeight;
+}
+
+async function loadEarlier() {
+  const box = $("msgs");
+  const fromBottom = box.scrollHeight - box.scrollTop;
+  const data = await request("GET", "/api/chat?limit=60&before=" + encodeURIComponent(state.before));
+  addItems(data.items);
+  state.before = data.before;
+  renderChat();
+  box.scrollTop = box.scrollHeight - fromBottom;
+}
+
+function connect() {
+  const source = new EventSource("/api/chat/events");
+  let failed = false;
+  source.onopen = () => { if (failed) { failed = false; showChatError(""); loadHistory().catch(() => {}); } };
+  source.onerror = () => { failed = true; showChatError("Lost the connection to cua-bot. Reconnecting…"); };
+  source.onmessage = (event) => {
+    const data = JSON.parse(event.data);
+    if (data.type === "items") { addItems(data.items); renderChat(); }
+    else if (data.type === "live") { state.live = data.live; renderLive(); renderChat(); }
+    else if (data.type === "computer") { state.computer = data.computer; renderComputer(); }
+  };
+}
+
+$("composer").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const input = $("input");
+  const text = input.value;
+  if (text.trim() === "") return;
+  input.value = "";
+  grow();
+  state.queued.push(text);
+  renderChat();
+  $("msgs").scrollTop = $("msgs").scrollHeight;
+  try {
+    await request("POST", "/api/chat", { text });
+    showChatError("");
+  } catch (error) {
+    state.queued.splice(state.queued.indexOf(text), 1);
+    input.value = text;
+    grow();
+    renderChat();
+    showChatError("Your message was not sent: " + error.message);
+  }
+});
+$("input").addEventListener("keydown", (event) => {
+  if (event.key === "Enter" && !event.shiftKey && !event.isComposing) { event.preventDefault(); $("composer").requestSubmit(); }
+});
+function grow() { const input = $("input"); input.style.height = "auto"; input.style.height = Math.min(input.scrollHeight, 200) + "px"; }
+$("input").addEventListener("input", grow);
+$("stop").addEventListener("click", async () => {
+  $("stop").disabled = true;
+  try { await request("POST", "/api/chat/stop"); state.queued = []; renderChat(); }
+  catch (error) { showChatError("Could not stop: " + error.message); }
+  finally { $("stop").disabled = false; }
+});
+
+/* ---------- views ---------- */
+document.querySelectorAll(".rail button[data-view]").forEach((button) => button.addEventListener("click", () => {
+  const view = button.dataset.view;
+  document.querySelectorAll(".rail button[data-view]").forEach((b) => b.setAttribute("aria-pressed", String(b === button)));
+  $("view-chat").hidden = view !== "chat";
+  $("view-routines").hidden = view !== "routines";
+  if (view === "routines") loadRoutines();
+  else $("input").focus();
+}));
+
+/* ---------- routines ---------- */
+let routines = [];
+let editing = null;
+let previewTimer = null;
+function showRoutineError(message) { $("routine-error").textContent = message; $("routine-error").hidden = !message; }
+
+async function loadRoutines() {
+  try {
+    const data = await request("GET", "/api/routines");
+    routines = data.routines;
+    $("routine-file").textContent = data.file;
+    showRoutineError("");
+    renderRoutines();
+  } catch (error) { showRoutineError(error.message); }
+}
+
+function renderRoutines() {
+  $("routine-count").textContent = routines.length === 1 ? "1 routine" : routines.length + " routines";
+  const rows = $("routine-rows");
+  rows.textContent = "";
+  if (routines.length === 0) {
+    const row = el("tr"), cell = el("td", "none", "No routines yet. Add one, or ask the bot in chat, for example \"every weekday at 7:30, email me my agenda\".");
+    cell.colSpan = 5; row.append(cell); rows.append(row);
+    return;
+  }
+  for (const r of routines) {
+    const row = el("tr");
+    const what = el("td"); what.append(el("b", "", r.title), el("small", "", r.prompt));
+    const when = el("td"); when.append(r.label, el("br"), el("code", "cron", r.cron));
+    const next = el("td", "", relative(r.nextFire)); next.title = shortDate(r.nextFire);
+    const last = el("td", "", r.lastFiredAt ? shortDate(r.lastFiredAt) : "Never");
+    const acts = el("td", "acts");
+    for (const [label, action, cls] of [["Run now", "run", ""], ["Edit", "edit", ""], ["Delete", "delete", " danger"]]) {
+      const b = el("button", "btn" + cls, label);
+      b.type = "button"; b.dataset.action = action; b.dataset.id = r.id;
+      b.setAttribute("aria-label", label + " " + r.title);
+      acts.append(b, " ");
+    }
+    row.append(what, when, next, last, acts);
+    rows.append(row);
+  }
+}
+
+$("routine-rows").addEventListener("click", async (event) => {
+  const target = event.target.closest("button[data-action]");
+  if (!target) return;
+  const routine = routines.find((r) => r.id === target.dataset.id);
+  if (!routine) return;
+  if (target.dataset.action === "edit") return openRoutine(routine);
+  if (target.dataset.action === "delete" && !window.confirm(`Delete "${routine.title}"?`)) return;
+  target.disabled = true;
+  try {
+    if (target.dataset.action === "delete") await request("DELETE", "/api/routines/" + encodeURIComponent(routine.id));
+    else await request("POST", "/api/routines/" + encodeURIComponent(routine.id) + "/run");
+    await loadRoutines();
+  } catch (error) { showRoutineError(error.message); target.disabled = false; }
+});
+
+function openRoutine(routine) {
+  editing = routine;
+  $("form-h").textContent = routine ? "Edit routine" : "New routine";
+  $("form-save").textContent = routine ? "Save changes" : "Add routine";
+  $("f-title").value = routine ? routine.title : "";
+  $("f-prompt").value = routine ? routine.prompt : "";
+  $("f-cron").value = routine ? routine.cron : "";
+  $("form-error").textContent = "";
+  updatePreview();
+  $("routine-dialog").showModal();
+  $("f-title").focus();
+}
+$("new-routine").addEventListener("click", () => openRoutine(null));
+$("form-cancel").addEventListener("click", () => $("routine-dialog").close());
+
+async function updatePreview() {
+  const value = $("f-cron").value.trim();
+  const target = $("preview");
+  target.className = "";
+  if (!value) { target.textContent = ""; return; }
+  try {
+    const data = await request("GET", "/api/preview?cron=" + encodeURIComponent(value));
+    target.textContent = `${data.label}. Next: ${data.next.map(shortDate).join(", ")}.`;
+  } catch (error) { target.className = "bad"; target.textContent = error.message; }
+}
+$("f-cron").addEventListener("input", () => { clearTimeout(previewTimer); previewTimer = setTimeout(updatePreview, 300); });
+
+$("routine-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const payload = { title: $("f-title").value, prompt: $("f-prompt").value, cron: $("f-cron").value };
+  $("form-save").disabled = true;
+  try {
+    if (editing) await request("PUT", "/api/routines/" + encodeURIComponent(editing.id), payload);
+    else await request("POST", "/api/routines", payload);
+    $("routine-dialog").close();
+    await loadRoutines();
+  } catch (error) { $("form-error").textContent = error.message; }
+  finally { $("form-save").disabled = false; }
+});
+
+/* ---------- start ---------- */
+loadHistory().catch((error) => showChatError("Could not load the conversation: " + error.message));
+request("GET", "/api/chat/computer").then((c) => { state.computer = c; renderComputer(); }).catch(() => {});
+connect();
+setInterval(() => { if (!$("view-routines").hidden) loadRoutines(); }, 30000);
+$("input").focus();
+</script>
+</body>
+</html>

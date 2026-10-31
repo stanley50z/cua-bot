@@ -4,10 +4,10 @@ cua-bot (formerly the Grokbot hackathon project) is a self-hosted assistant for 
 
 ## Architecture
 
-- `src/main.ts` opens a Pi Durable Harness on `data/grokbot.sqlite`, resumes unfinished and sleeping work, and serves one HTTP server on `127.0.0.1:43142`: `POST /say` (plain text in, plain text out) plus the routines web UI at `/` with its JSON API under `/api/` (see [src/web.ts](src/web.ts)). The chat API for the coming full web app lives beside it ([src/chat.ts](src/chat.ts)): `GET /api/chat` pages the transcript, `POST /api/chat` with `{"text"}` queues a message without waiting, `POST /api/chat/stop` stops the current turn, `GET /api/chat/events` is a server-sent event stream of the live reply, running tools, and new messages, and `/shots/<name>.png` serves computer-use screenshots.
+- `src/main.ts` opens a Pi Durable Harness on `data/grokbot.sqlite`, resumes unfinished and sleeping work, and serves one HTTP server on `127.0.0.1:43142`: `POST /say` (plain text in, plain text out) plus the web app at `/` ([src/app.html](src/app.html)) with its JSON API under `/api/` (see [src/web.ts](src/web.ts)). The chat API ([src/chat.ts](src/chat.ts)): `GET /api/chat` pages the transcript, `POST /api/chat` with `{"text"}` queues a message without waiting, `POST /api/chat/stop` stops the current turn, `GET /api/chat/events` is a server-sent event stream of the live reply, running tools, and new messages, `GET /api/chat/computer` returns the computer pane (Space name, newest screenshot, steps of the latest computer-use run, from [src/computer-view.ts](src/computer-view.ts)), and `/shots/<name>.png` serves computer-use screenshots.
 - `computer_use` runs in the foreground as a Grok subagent with Cua driver tools. On-screen work goes there, one task at a time.
 - `send_email` sends only to the owner, through Gmail SMTP.
-- Routines (`schedule`, `list_routines`, `run_routine`, `cancel_routine`) are durable sleeping tasks, one per routine. A schedule is a 5-field cron string, a nickname like `@daily`, or `@every 30m`, optionally prefixed `CRON_TZ=Area/City`, parsed with `croner` (see [src/cron.ts](src/cron.ts)). The legacy `everyMinutes`/`dailyAt`/`weeklyOn` objects are still accepted and converted. A deadline that passed while the bot was down fires once on restart; missed slots are not replayed. At most 50 routines. Definitions live in `routines.json` in the project root; the chat tools, the web UI, and hand edits all sync through that file (a watcher applies hand edits within a second or two).
+- Routines (`schedule`, `list_routines`, `run_routine`, `cancel_routine`) are durable sleeping tasks, one per routine. A schedule is a 5-field cron string, a nickname like `@daily`, or `@every 30m`, optionally prefixed `CRON_TZ=Area/City`, parsed with `croner` (see [src/cron.ts](src/cron.ts)). The legacy `everyMinutes`/`dailyAt`/`weeklyOn` objects are still accepted and converted. A deadline that passed while the bot was down fires once on restart; missed slots are not replayed. At most 50 routines. Definitions live in `routines.json` in the project root; the chat tools, the web app, and hand edits all sync through that file (a watcher applies hand edits within a second or two).
 - Outbound mail is plain SMTP. Google's official Gmail MCP is Developer Preview only and has no send tool.
 
 ## Self-host setup
@@ -30,7 +30,19 @@ Start it in the background. This does not open a terminal window.
 python start.py
 ```
 
-When the port accepts connections, the script prints the `/say` URL and the routines UI URL. If `data/grokbot.pid.json` already points at a live process, it refuses to start another one.
+When the port accepts connections, the script prints the `/say` URL and the web app URL. If `data/grokbot.pid.json` already points at a live process, it refuses to start another one.
+
+### The web app
+
+Open `http://127.0.0.1:43142/` in a browser. It has three parts:
+
+- **Chat** in the middle. Replies stream in as the bot writes them. Each tool the bot used shows as a chip above its reply; click a finished chip to see the tool's result, and screenshots appear as thumbnails. Routine runs show as a line in the conversation. Enter sends, Shift+Enter adds a line, and the stop button ends the current reply. A message sent while the bot is busy waits its turn.
+- **Computer** on the right. The latest screenshot of the paired Space and each click and keystroke of the most recent computer-use task. The frame turns amber while the bot is driving.
+- **Routines**, from the clock icon in the left rail. See the next section.
+
+The page is served on loopback only and has no login, the same trust as `/say`.
+
+### From the command line
 
 Send a message:
 
@@ -41,9 +53,9 @@ python say.py "Every weekday at 9:00, email me a short agenda."
 
 `say.py` POSTs the text to `/say` and prints the reply. It waits up to 10 minutes, because a computer-use turn can take that long.
 
-### Routines without chat: web UI and routines.json
+### Routines: web app and routines.json
 
-Open `http://127.0.0.1:43142/` for the routines page: add, edit, run now, and delete, with a live next-fire preview while you type a cron schedule. Everything saved there lands in `routines.json` in the project root, which you can also edit by hand:
+The Routines view in the web app lists every routine with its schedule, next run, and last run. Add, edit, run now, and delete from there, with a live preview of the next runs while you type a cron schedule. Everything saved there lands in `routines.json` in the project root, which you can also edit by hand:
 
 ```json
 [
@@ -71,7 +83,7 @@ That stops the recorded process and its children, checks that the process has ex
 - `data/logs/stdout.log` — stdout and stderr from the process `start.py` launched.
 - `data/crash/` — crash reports. The file name is the time, and the file contains the stack trace.
 - `data/grokbot.sqlite` — Harness database, including sleeping routines and their last-fired times.
-- `routines.json` — routine definitions (project root). Edit it directly or through the web UI; the bot syncs from it.
+- `routines.json` — routine definitions (project root). Edit it directly or in the web app; the bot syncs from it.
 - `data/shots/` — screenshots taken during computer use.
 
 ## Demo
