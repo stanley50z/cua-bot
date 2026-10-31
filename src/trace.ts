@@ -3,7 +3,7 @@
 import { defineExtension, hook, ToolTask } from "@earendil-works/pi-durable";
 import { log } from "./log.ts";
 
-const BOT_TOOLS = new Set(["computer_use", "send_email", "schedule", "list_routines", "run_routine", "cancel_routine", "remember", "forget", "recall"]);
+const BOT_TOOLS = new Set(["computer_use", "send_email", "schedule", "list_routines", "run_routine", "cancel_routine", "remember", "forget", "recall", "executor_search", "executor_describe", "executor_call", "executor_resume"]);
 const clip = (text: string) => (text.length > 140 ? `${text.slice(0, 140)}…` : text).replace(/\s+/g, " ");
 const who = (name: string) => (BOT_TOOLS.has(name) ? "bot" : "  child");
 

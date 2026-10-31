@@ -9,6 +9,7 @@ import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { AssistantEntry, createRegistry, Harness, MemoryStorage } from "@earendil-works/pi-durable";
 import { createTransport } from "nodemailer";
 import { listDriverToolNames } from "./computer.ts";
+import { connectExecutor } from "./executor.ts";
 import { CREDENTIAL_FILE, createBotModels } from "./xai-auth.ts";
 
 const REQUIRED_ENV = ["OWNER_EMAIL", "SMTP_USER", "SMTP_PASS"] as const;
@@ -43,7 +44,7 @@ function clip(text: string, max = 200): string {
 // Values that must never appear in check output: env secrets, plus token fields from the credential file.
 function secretValues(): string[] {
 	const found: string[] = [];
-	for (const name of ["SMTP_PASS", "XAI_API_KEY"]) {
+	for (const name of ["SMTP_PASS", "XAI_API_KEY", "EXECUTOR_API_KEY"]) {
 		const value = process.env[name]?.trim();
 		if (value !== undefined && value.length >= 8) found.push(value);
 	}
@@ -247,6 +248,31 @@ function checkData(): Check {
 	return report("INFO", "data", "data/grokbot.sqlite does not exist");
 }
 
-const checks = await Promise.all([checkEnv(), checkXai(), checkSmtp(), checkSpace(), checkPort(), checkData()]);
+// Signs in to Executor with the API key and looks for Gmail and Calendar tools. Read-only: search only.
+async function checkExecutor(): Promise<Check> {
+	const url = process.env.EXECUTOR_MCP_URL?.trim();
+	const key = process.env.EXECUTOR_API_KEY?.trim();
+	if (!url || !key) return report("INFO", "executor", "EXECUTOR_MCP_URL or EXECUTOR_API_KEY unset; Gmail and Calendar are off");
+	const fix = "Fix: copy the MCP URL from Executor's Connect card and a key from its API keys page";
+	try {
+		const client = await deadline(SPACE_TIMEOUT_MS, connectExecutor(url, key)(), "executor");
+		try {
+			const found: string[] = [];
+			for (const [name, query] of [["Gmail", "gmail messages list"], ["Calendar", "calendar events list"]] as const) {
+				const result = await client.callTool("search", { query });
+				const text = result.content.flatMap((part) => (part.type === "text" ? [part.text] : [])).join("");
+				if (result.isError !== true && text.includes(`.${name.toLowerCase()}.`)) found.push(name);
+			}
+			if (found.length < 2) return report("FAIL", "executor", `signed in; found ${found.join(" and ") || "neither Gmail nor Calendar"}. Fix: connect Gmail and Google Calendar at executor.sh`);
+			return report("PASS", "executor", "signed in; Gmail and Calendar tools found");
+		} finally {
+			await client.close();
+		}
+	} catch (error) {
+		return report("FAIL", "executor", `${messageOf(error)}. ${fix}`);
+	}
+}
+
+const checks = await Promise.all([checkEnv(), checkXai(), checkSmtp(), checkSpace(), checkExecutor(), checkPort(), checkData()]);
 for (const item of checks) console.log(`${item.status} ${item.name} — ${item.detail}`);
 process.exit(checks.some((item) => item.status === "FAIL") ? 1 : 0);

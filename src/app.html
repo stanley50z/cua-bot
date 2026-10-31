@@ -349,6 +349,14 @@ function toolLabel(call) {
     case "remember": return "Remembered: " + clip(pick("fact") || "");
     case "forget": return "Forgot: " + clip(pick("fact") || "");
     case "recall": return "Searched memory: " + clip(pick("query") || "");
+    case "executor_search": return "Looked up: " + clip(pick("query", "namespace") || "connected accounts");
+    case "executor_describe": return "Read tool details";
+    case "executor_resume": return "Answered an approval";
+    case "executor_call": {
+      // tools.google.api.gmail.users.gmailUsersMessagesList → "gmail users messages list"
+      const op = (pick("path") || "").split(".").at(-1) || "";
+      return op ? clip(op.replace(/([a-z])([A-Z])/g, "$1 $2").toLowerCase()) : "Using a connected account";
+    }
     default: {
       const detail = pick("query", "q", "title", "subject", "text");
       return call.name.replace(/_/g, " ").toLowerCase() + (detail ? ": " + clip(detail) : "");

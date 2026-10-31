@@ -11,6 +11,7 @@ import { createChat } from "./chat.ts";
 import { createComputerExtension, spaceLabel } from "./computer.ts";
 import { createComputerView } from "./computer-view.ts";
 import { createEmailExtension } from "./email.ts";
+import { connectExecutor, createExecutorExtension } from "./executor.ts";
 import { DATA_DIR, log } from "./log.ts";
 import { createMemory, createMemoryExtension } from "./memory.ts";
 import { bindRoutines, createRoutinesExtension, startRoutineFileWatch, syncRoutines } from "./routines.ts";
@@ -61,6 +62,18 @@ registry.install(createEmailExtension());
 registry.install(createRoutinesExtension());
 const memory = createMemory({ dir: join(DATA_DIR, "memory") });
 registry.install(createMemoryExtension(memory));
+const executorUrl = process.env.EXECUTOR_MCP_URL?.trim();
+const executorKey = process.env.EXECUTOR_API_KEY?.trim();
+if (executorUrl && executorKey) {
+	registry.install(
+		createExecutorExtension({
+			connect: connectExecutor(executorUrl, executorKey),
+			allowSendDelete: process.env.EXECUTOR_ALLOW_SEND_DELETE === "1",
+		}),
+	);
+} else {
+	log("executor: EXECUTOR_MCP_URL or EXECUTOR_API_KEY unset; Gmail and Calendar are off");
+}
 
 const storage = await openNodeSqliteStorage(join(DATA_DIR, "grokbot.sqlite"));
 const harness = await Harness.open(storage, { models, registry }, context);

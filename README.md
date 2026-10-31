@@ -9,7 +9,8 @@ cua-bot (formerly the Grokbot hackathon project) is a self-hosted assistant for 
 - `send_email` sends only to the owner, through Gmail SMTP.
 - Memory ([src/memory.ts](src/memory.ts)) is plain markdown under `data/memory/`, after Grok Bot's design: `profile.md` for lasting facts about the owner and `log/YYYY-MM.md` for dated ones, one fact per line as `- (YYYY-MM-DD) fact`. The bot saves with `remember`, removes with `forget`, and searches older facts with `recall`. Every request carries a memory section with the profile facts and the 30 most recent log facts, capped at 4,000 characters. The files are re-read on every request, so hand edits apply at once.
 - Routines (`schedule`, `list_routines`, `run_routine`, `cancel_routine`) are durable sleeping tasks, one per routine. A schedule is a 5-field cron string, a nickname like `@daily`, or `@every 30m`, optionally prefixed `CRON_TZ=Area/City`, parsed with `croner` (see [src/cron.ts](src/cron.ts)). The legacy `everyMinutes`/`dailyAt`/`weeklyOn` objects are still accepted and converted. A deadline that passed while the bot was down fires once on restart; missed slots are not replayed. At most 50 routines. Definitions live in `routines.json` in the project root; the chat tools, the web app, and hand edits all sync through that file (a watcher applies hand edits within a second or two).
-- Outbound mail is plain SMTP. Google's official Gmail MCP is Developer Preview only and has no send tool.
+- Gmail, Google Calendar, and any other account you connect go through [Executor](https://github.com/UsefulSoftwareCo/executor) Cloud ([src/executor.ts](src/executor.ts)). Executor holds the Google sign-in; the bot holds only an Executor API key and talks to its MCP endpoint: `executor_search` finds a tool and its input type, `executor_describe` reads its full signature, `executor_call` runs it, and `executor_resume` answers a call Executor paused for approval (the bot asks you first). Accounts you add in Executor later need no code change. Executor's `execute` tool (a JavaScript program over every tool) is not given to the bot, so every call goes through a path the bot can check: operations named send, delete, trash, clear, or remove are blocked unless `EXECUTOR_ALLOW_SEND_DELETE=1`. Call results are fenced as outside data, because mail and invites are written by other people.
+- Mail to the owner is plain SMTP (`send_email`), separate from Executor.
 
 ## Self-host setup
 
@@ -20,6 +21,9 @@ Node.js 22.19 or newer (this project is set up for Node 24) and pnpm.
 3. Create a Gmail app password for the account that will send mail.
 4. Sign in to xAI once with `node src/login.ts`. It runs the device-code flow for your SuperGrok or X Premium account (the same sign-in Grok Build uses) and saves the credential to `data/xai-credential.json`; the bot refreshes it on its own. An `XAI_API_KEY` in `.env` works instead.
 5. Copy `.env.example` to `.env` and set `OWNER_EMAIL`, `SMTP_USER`, and `SMTP_PASS`.
+6. For Gmail and Calendar: sign in at [executor.sh](https://executor.sh), add the Gmail and Google Calendar integrations and connect your Google account, then set `EXECUTOR_MCP_URL` to the URL on the Connect card and `EXECUTOR_API_KEY` to a key from the API keys page. Without them the bot runs with Gmail and Calendar off.
+
+Check everything with `node --env-file-if-exists=.env src/preflight.ts` while the bot is stopped. It prints one line per check (xAI, SMTP, the Space, Executor's connected accounts, the port) and never prints secrets.
 
 `GROKBOT_MODEL` defaults to `grok-4.7`. `GROKBOT_PORT` defaults to `43142`. The server listens on `127.0.0.1` only.
 
