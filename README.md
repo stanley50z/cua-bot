@@ -1,6 +1,6 @@
 # cua-bot
 
-cua-bot (formerly the Grokbot hackathon project) is a self-hosted assistant for one owner. It runs as an always-on Pi Durable service, uses a Cua Space when it needs a computer, and sends email when you are not in the chat. The main model is xAI Grok 4.7.
+cua-bot (formerly the Grokbot hackathon project) is a self-hosted assistant for one owner. It runs as an always-on Pi Durable service, uses a Cua Space when it needs a computer, and sends email when you are not in the chat. The model is a deployment on your Azure AI Foundry resource (Grok 4.6 by default), called through Foundry's OpenAI-compatible API ([src/models.ts](src/models.ts)). The computer-use helper uses the same model.
 
 ## Architecture
 
@@ -9,7 +9,8 @@ cua-bot (formerly the Grokbot hackathon project) is a self-hosted assistant for 
 - `send_email` sends only to the owner, through Gmail SMTP.
 - Memory ([src/memory.ts](src/memory.ts)) is plain markdown under `data/memory/`, after Grok Bot's design: `profile.md` for lasting facts about the owner and `log/YYYY-MM.md` for dated ones, one fact per line as `- (YYYY-MM-DD) fact`. The bot saves with `remember`, removes with `forget`, and searches older facts with `recall`. Every request carries a memory section with the profile facts and the 30 most recent log facts, capped at 4,000 characters. The files are re-read on every request, so hand edits apply at once.
 - Routines (`schedule`, `list_routines`, `run_routine`, `cancel_routine`) are durable sleeping tasks, one per routine. A schedule is a 5-field cron string, a nickname like `@daily`, or `@every 30m`, optionally prefixed `CRON_TZ=Area/City`, parsed with `croner` (see [src/cron.ts](src/cron.ts)). The legacy `everyMinutes`/`dailyAt`/`weeklyOn` objects are still accepted and converted. A deadline that passed while the bot was down fires once on restart; missed slots are not replayed. At most 50 routines. Definitions live in `routines.json` in the project root; the chat tools, the web app, and hand edits all sync through that file (a watcher applies hand edits within a second or two).
-- Gmail, Google Calendar, and any other account you connect go through [Executor](https://github.com/UsefulSoftwareCo/executor) Cloud ([src/executor.ts](src/executor.ts)). Executor holds the Google sign-in; the bot holds only an Executor API key and talks to its MCP endpoint: `executor_search` finds a tool and its input type, `executor_describe` reads its full signature, `executor_call` runs it, and `executor_resume` answers a call Executor paused for approval (the bot asks you first). Accounts you add in Executor later need no code change. Executor's `execute` tool (a JavaScript program over every tool) is not given to the bot, so every call goes through a path the bot can check: operations named send, delete, trash, clear, or remove are blocked unless `EXECUTOR_ALLOW_SEND_DELETE=1`. Call results are fenced as outside data, because mail and invites are written by other people.
+- Gmail, Google Calendar, and any other account you connect go through [Executor](https://github.com/UsefulSoftwareCo/executor) Cloud ([src/executor.ts](src/executor.ts)). Executor holds the Google sign-in; the bot holds only an Executor API key and talks to its MCP endpoint: `executor_search` finds a tool and its input type, `executor_describe` reads its full signature, `executor_call` runs it. Accounts you add in Executor later need no code change. Executor's `execute` tool (a JavaScript program over every tool) is not given to the bot, so every call goes through a path the bot can check. Call results are fenced as outside data, because mail and invites are written by other people.
+- Approval cards ([src/approvals.ts](src/approvals.ts)): an Executor operation named send, delete, trash, clear, or remove, or a call Executor itself pauses for approval, does not run. It becomes a card under the bot's reply in the web app. An email card shows the message decoded from what the bot actually wrote (To, Subject, and body are editable before sending, see [src/mime.ts](src/mime.ts)); other actions show the bot's one-line summary and the raw call under Details. Your click runs the call from the server, never from the model, and then the bot gets an `[approval]` message with the outcome. Waiting cards are kept in `data/approvals.json` across restarts and expire after 7 days. When Executor itself holds an approved call for approval, the server accepts the hold, since your click already approved it. Known issue (2026-10-31): sending mail through Executor's generic Google API integration (`tools.google.api.gmail…MessagesSend`) fails with HTTP 400 from Gmail, because Executor posts the message upload to Gmail's non-upload send URL. Executor's dedicated Gmail app (`@executor.sh/gmail` in its catalog) is the likely fix. `GET /api/approvals` lists them; `POST /api/approvals/<id>/approve` (optional JSON `{to, subject, body}` edits) and `POST /api/approvals/<id>/discard` decide one.
 - Mail to the owner is plain SMTP (`send_email`), separate from Executor.
 
 ## Self-host setup
@@ -19,13 +20,13 @@ Node.js 22.19 or newer (this project is set up for Node 24) and pnpm.
 1. Run `pnpm install` in the project root.
 2. Pair a Cua Space so it shows up in `~/.cua/spaces.json`. With `CUA_SPACE_ID` left blank, the bot uses the first space in that file.
 3. Create a Gmail app password for the account that will send mail.
-4. Sign in to xAI once with `node src/login.ts`. It runs the device-code flow for your SuperGrok or X Premium account (the same sign-in Grok Build uses) and saves the credential to `data/xai-credential.json`; the bot refreshes it on its own. An `XAI_API_KEY` in `.env` works instead.
+4. Set `AZURE_FOUNDRY_BASE_URL` to your Foundry resource's OpenAI endpoint (`https://<resource>.services.ai.azure.com/openai/v1`) and `AZURE_FOUNDRY_API_KEY` to its key, in `.env` or in your user environment. `GROKBOT_MODEL` picks the deployment: `grok-4.6` (default), `gpt-6-astra`, `GLM-5.3-Flash`, or `FW-Kimi-K3`; add others to the list in `src/models.ts`. To use xAI instead, set `GROKBOT_PROVIDER=xai`, then sign in once with `node src/login.ts` (SuperGrok or X Premium, saved to `data/xai-credential.json`) or set `XAI_API_KEY`.
 5. Copy `.env.example` to `.env` and set `OWNER_EMAIL`, `SMTP_USER`, and `SMTP_PASS`.
 6. For Gmail and Calendar: sign in at [executor.sh](https://executor.sh), add the Gmail and Google Calendar integrations and connect your Google account, then set `EXECUTOR_MCP_URL` to the URL on the Connect card and `EXECUTOR_API_KEY` to a key from the API keys page. Without them the bot runs with Gmail and Calendar off.
 
-Check everything with `node --env-file-if-exists=.env src/preflight.ts` while the bot is stopped. It prints one line per check (xAI, SMTP, the Space, Executor's connected accounts, the port) and never prints secrets.
+Check everything with `node --env-file-if-exists=.env src/preflight.ts` while the bot is stopped. It prints one line per check (the model, SMTP, the Space, Executor's connected accounts, the port) and never prints secrets.
 
-`GROKBOT_MODEL` defaults to `grok-4.7`. `GROKBOT_PORT` defaults to `43142`. The server listens on `127.0.0.1` only.
+`GROKBOT_PORT` defaults to `43142`. The server listens on `127.0.0.1` only.
 
 ## Usage
 
@@ -41,7 +42,7 @@ When the port accepts connections, the script prints the `/say` URL and the web 
 
 Open `http://127.0.0.1:43142/` in a browser. It has three parts:
 
-- **Chat** in the middle. Replies stream in as the bot writes them. Each tool the bot used shows as a chip above its reply; click a finished chip to see the tool's result, and screenshots appear as thumbnails. Routine runs show as a line in the conversation. Enter sends, Shift+Enter adds a line, and the stop button ends the current reply. A message sent while the bot is busy waits its turn.
+- **Chat** in the middle. Replies stream in as the bot writes them. Each tool the bot used shows as a chip above its reply; click a finished chip to see the tool's result, and screenshots appear as thumbnails. Routine runs show as a line in the conversation. Enter sends, Shift+Enter adds a line, and the stop button ends the current reply. A message sent while the bot is busy waits its turn. When the bot wants to send an email or delete something, an approval card appears under its reply: edit the email if you like, then send it or discard it. Nothing goes out until you click.
 - **Computer** on the right. The latest screenshot of the paired Space and each click and keystroke of the most recent computer-use task. The frame turns amber while the bot is driving.
 - **Routines**, from the clock icon in the left rail. See the next section.
 - **Memory**, from the page icon in the left rail. Everything the bot has saved about you, split into lasting facts and recent ones. Add a fact yourself or forget one with its ✕.
@@ -92,6 +93,7 @@ That stops the recorded process and its children, checks that the process has ex
 - `routines.json` — routine definitions (project root). Edit it directly or in the web app; the bot syncs from it.
 - `data/shots/` — screenshots taken during computer use.
 - `data/memory/` — what the bot remembers about you: `profile.md` and `log/YYYY-MM.md`.
+- `data/approvals.json` — approval cards: waiting ones, and the last 200 decided with Executor's answer.
 
 ## Demo
 

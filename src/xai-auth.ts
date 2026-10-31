@@ -67,8 +67,9 @@ class FileCredentialStore implements CredentialStore {
 	}
 }
 
-// The Models collection the bot and the login script share: the xAI provider over the file-backed store.
-export function createBotModels() {
+// A Models collection with the xAI provider over the file-backed store. src/models.ts adds the bot's other
+// providers; login.ts uses it alone.
+export function createXaiModels() {
 	const models = createModels({ credentials: new FileCredentialStore(CREDENTIAL_FILE) });
 	models.setProvider(xaiProvider());
 	return models;

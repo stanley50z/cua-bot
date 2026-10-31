@@ -16,8 +16,10 @@ import {
 	type ToolRegistration,
 } from "@earendil-works/pi-durable";
 import { toLlmContent, type CallToolResult, type LlmContent } from "@earendil-works/pi-mcp";
+import { MODEL } from "./models.ts";
 
-const CHILD_MODEL = { provider: "xai", modelId: "grok-4.7" } as const;
+// The computer-use child runs on the bot's own model.
+const CHILD_MODEL = MODEL;
 const SHOT_EDGE = 1200;
 const SHOTS_DIR = join(import.meta.dirname, "..", "data", "shots");
 const CHILD_BRIEF = [

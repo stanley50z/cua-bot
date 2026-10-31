@@ -32,6 +32,8 @@ export type ChatTool = { id: string; name: string; args: Record<string, unknown>
 export type ChatItem =
 	| { id: number; kind: "user"; text: string; at: number; images: number }
 	| { id: number; kind: "routine"; text: string; at: number }
+	/** The owner's decision on an approval card, as told to the bot. The card itself shows it. */
+	| { id: number; kind: "approval"; text: string; at: number }
 	| { id: number; kind: "assistant"; text: string; at: number; tools: ChatTool[]; error?: string; aborted: boolean }
 	| { id: number; kind: "tool"; callId: string; name: string; text: string; isError: boolean; shots: string[]; images: number }
 	| { id: number; kind: "marker"; text: string };
@@ -67,6 +69,7 @@ export function toChatItem(entry: EntryRecord): ChatItem | undefined {
 		const user = message as UserMessage;
 		const text = textOf(user.content);
 		if (text.startsWith("[routine]")) return { id, kind: "routine", text, at: user.timestamp };
+		if (text.startsWith("[approval]")) return { id, kind: "approval", text, at: user.timestamp };
 		return { id, kind: "user", text, at: user.timestamp, images: imageCount(user.content) };
 	}
 	if (AssistantEntry.is(entry) && message?.role === "assistant") {

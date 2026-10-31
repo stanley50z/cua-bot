@@ -10,7 +10,8 @@ import { AssistantEntry, createRegistry, Harness, MemoryStorage } from "@earendi
 import { createTransport } from "nodemailer";
 import { listDriverToolNames } from "./computer.ts";
 import { connectExecutor } from "./executor.ts";
-import { CREDENTIAL_FILE, createBotModels } from "./xai-auth.ts";
+import { createBotModels, MODEL } from "./models.ts";
+import { CREDENTIAL_FILE } from "./xai-auth.ts";
 
 const REQUIRED_ENV = ["OWNER_EMAIL", "SMTP_USER", "SMTP_PASS"] as const;
 const XAI_TIMEOUT_MS = 60_000;
@@ -44,7 +45,7 @@ function clip(text: string, max = 200): string {
 // Values that must never appear in check output: env secrets, plus token fields from the credential file.
 function secretValues(): string[] {
 	const found: string[] = [];
-	for (const name of ["SMTP_PASS", "XAI_API_KEY", "EXECUTOR_API_KEY"]) {
+	for (const name of ["SMTP_PASS", "XAI_API_KEY", "EXECUTOR_API_KEY", "AZURE_FOUNDRY_API_KEY"]) {
 		const value = process.env[name]?.trim();
 		if (value !== undefined && value.length >= 8) found.push(value);
 	}
@@ -129,34 +130,36 @@ function checkEnv(): Check {
 	return report("PASS", "env", `OWNER_EMAIL ${process.env.OWNER_EMAIL?.trim()}; SMTP_USER and SMTP_PASS set`);
 }
 
-// Confirms xAI auth with one short completion on an in-memory Harness. Does not open data/grokbot.sqlite.
-async function checkXai(): Promise<Check> {
-	const stored = credentialState();
-	const apiKey = (process.env.XAI_API_KEY?.trim() ?? "").length > 0;
-	if (stored === "invalid") {
-		return report("FAIL", "xai", "data/xai-credential.json is not valid JSON. Fix: run `node src/login.ts`");
+// Confirms the bot's model answers, with one short completion on an in-memory Harness. Does not open
+// data/grokbot.sqlite.
+async function checkModel(): Promise<Check> {
+	const name = `${MODEL.provider}/${MODEL.modelId}`;
+	let fix: string;
+	if (MODEL.provider === "azure-foundry") {
+		fix = "Fix: set AZURE_FOUNDRY_BASE_URL and AZURE_FOUNDRY_API_KEY, and GROKBOT_MODEL to a deployment name";
+		if (!process.env.AZURE_FOUNDRY_BASE_URL?.trim()) return report("FAIL", "model", `${name}: AZURE_FOUNDRY_BASE_URL is unset. ${fix}`);
+		if (!process.env.AZURE_FOUNDRY_API_KEY?.trim()) return report("FAIL", "model", `${name}: AZURE_FOUNDRY_API_KEY is unset. ${fix}`);
+	} else {
+		fix = "Fix: run `node src/login.ts` or set XAI_API_KEY";
+		const stored = credentialState();
+		if (stored === "invalid") return report("FAIL", "model", `data/xai-credential.json is not valid JSON. ${fix}`);
+		if (stored !== "present" && !process.env.XAI_API_KEY?.trim()) return report("FAIL", "model", `${name}: no xAI sign-in and XAI_API_KEY is unset. ${fix}`);
 	}
-	if (stored !== "present" && !apiKey) {
-		return report("FAIL", "xai", "no xai entry in data/xai-credential.json and XAI_API_KEY is unset. Fix: run `node src/login.ts`");
-	}
-	const modelId = process.env.GROKBOT_MODEL || "grok-4.7";
-	const via = stored === "present" ? "stored credential" : "XAI_API_KEY";
 	try {
-		const reply = await deadline(XAI_TIMEOUT_MS, askModel(modelId), "xai");
-		const shown = reply.length > 0 ? reply : "(empty)";
-		return report("PASS", "xai", `${modelId} via ${via} replied ${JSON.stringify(shown)}`);
+		const reply = await deadline(XAI_TIMEOUT_MS, askModel(), "model");
+		return report("PASS", "model", `${name} replied ${JSON.stringify(reply.length > 0 ? reply : "(empty)")}`);
 	} catch (error) {
-		return report("FAIL", "xai", `${modelId}: ${messageOf(error)}. Fix: run \`node src/login.ts\``);
+		return report("FAIL", "model", `${name}: ${messageOf(error)}. ${fix}`);
 	}
 }
 
-async function askModel(modelId: string): Promise<string> {
+async function askModel(): Promise<string> {
 	const models = createBotModels();
 	const registry = createRegistry();
 	const harness = await Harness.open(new MemoryStorage(), { models, registry }, BACKGROUND_CONTEXT);
 	try {
 		const root = await harness.root(BACKGROUND_CONTEXT, {
-			agent: { model: { provider: "xai", modelId }, thinkingLevel: "off" },
+			agent: { model: MODEL, thinkingLevel: "off" },
 		});
 		harness.resume();
 		const settled = await (
@@ -273,6 +276,6 @@ async function checkExecutor(): Promise<Check> {
 	}
 }
 
-const checks = await Promise.all([checkEnv(), checkXai(), checkSmtp(), checkSpace(), checkExecutor(), checkPort(), checkData()]);
+const checks = await Promise.all([checkEnv(), checkModel(), checkSmtp(), checkSpace(), checkExecutor(), checkPort(), checkData()]);
 for (const item of checks) console.log(`${item.status} ${item.name} — ${item.detail}`);
 process.exit(checks.some((item) => item.status === "FAIL") ? 1 : 0);

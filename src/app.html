@@ -83,6 +83,38 @@ code, pre, .mono { font-family: "Cascadia Code", Consolas, monospace; }
 .icon svg { width: 17px; height: 17px; }
 .icon.primary { background: var(--ink); border-color: var(--ink); color: #fff; }
 .icon:disabled { opacity: .4; cursor: default; }
+/* approval cards: a send or delete the bot prepared, waiting for the owner */
+.chip.wait { color: var(--drive); border-color: var(--drive-line); background: var(--drive-bg); }
+.card { margin: 10px 0 2px; max-width: 600px; border: 1px solid var(--drive-line); border-left: 4px solid var(--drive); border-radius: 10px; background: #fff; }
+.card.delete { border-color: #E5B6B1; border-left-color: var(--bad); }
+.card > header { display: flex; align-items: center; gap: 10px; padding: 10px 14px 8px; }
+.card .what { font: 600 14px "Bahnschrift", sans-serif; }
+.card .edited { font-size: 12px; color: var(--accent); }
+.card .status { margin-left: auto; font-size: 12.5px; color: var(--drive); display: flex; align-items: center; gap: 6px; }
+.card.delete .status { color: var(--bad); }
+.card .status::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+.card .fields { margin: 0 14px; border-top: 1px solid var(--line); }
+.card .row { display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 10px; padding: 7px 0; border-bottom: 1px solid var(--line); font-size: 13.5px; }
+.card .row > span:first-child { color: var(--muted); }
+.card .row input { border: 0; padding: 0; background: transparent; outline: none; width: 100%; font: inherit; color: var(--ink); }
+.card .row:focus-within { border-bottom-color: var(--accent); }
+.card .body { margin: 0 14px; padding: 10px 0 4px; white-space: pre-wrap; font-size: 13.5px; }
+.card textarea.body { display: block; width: calc(100% - 28px); border: 0; border-bottom: 1px solid transparent; resize: vertical; outline: none; background: transparent; font: inherit; font-size: 13.5px; color: var(--ink); padding-bottom: 8px; }
+.card textarea.body:focus { border-bottom-color: var(--accent); }
+.card .action { margin: 0 14px; border-top: 1px solid var(--line); padding: 10px 0 4px; font-size: 13.5px; }
+.card .action .summary { font-weight: 600; }
+.card .action .path { color: var(--muted); font-size: 12.5px; overflow-wrap: anywhere; }
+.card footer { display: flex; align-items: center; gap: 8px; padding: 10px 14px 12px; }
+.card footer .why { margin-left: auto; font-size: 12px; color: var(--muted); }
+.card .btn { font-size: 13px; padding: 5px 12px; }
+.btn.danger-fill { background: var(--bad); color: #fff; border-color: var(--bad); }
+.btn.link { border-color: transparent; background: transparent; color: var(--accent); padding: 4px 6px; }
+.card .result { margin: 0 14px; }
+.receipt { margin: 10px 0 2px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); border: 1px solid var(--line); border-radius: 8px; padding: 5px 12px; background: var(--bg); width: fit-content; max-width: 100%; }
+.receipt b { color: var(--ink); font-weight: 600; }
+.receipt.ok b { color: var(--ok); }
+.receipt.bad { border-color: #E5B6B1; background: var(--bad-bg); } .receipt.bad b { color: var(--bad); }
+.receipt .result { flex-basis: 100%; margin: 4px 0 2px; }
 .banner { flex: none; margin: 12px 22px 0; border: 1px solid #E5B6B1; background: var(--bad-bg); color: var(--bad); border-radius: 8px; padding: 8px 12px; font-size: 13px; }
 
 /* computer pane */
@@ -333,7 +365,7 @@ function markdown(text) {
 }
 
 /* ---------- chat state ---------- */
-const state = { items: [], ids: new Set(), before: null, live: { busy: false, partial: "", tools: [] }, queued: [], open: new Set(), computer: { steps: [] } };
+const state = { items: [], ids: new Set(), before: null, live: { busy: false, partial: "", tools: [] }, queued: [], open: new Set(), computer: { steps: [] }, approvals: [] };
 
 function toolLabel(call) {
   const a = call.args || {};
@@ -351,7 +383,6 @@ function toolLabel(call) {
     case "recall": return "Searched memory: " + clip(pick("query") || "");
     case "executor_search": return "Looked up: " + clip(pick("query", "namespace") || "connected accounts");
     case "executor_describe": return "Read tool details";
-    case "executor_resume": return "Answered an approval";
     case "executor_call": {
       // tools.google.api.gmail.users.gmailUsersMessagesList → "gmail users messages list"
       const op = (pick("path") || "").split(".").at(-1) || "";
@@ -382,9 +413,136 @@ function routineTitle(text) {
   return match ? match[1] : "A routine";
 }
 
+/* ---------- approval cards ---------- */
+// One node per card and status, reused across re-renders so a draft being edited survives live updates.
+const cards = new Map();
+const DESTRUCTIVE = /delete|trash|clear|remove/i;
+const approvalFor = (callId) => state.approvals.find((a) => a.callId === callId);
+
+async function loadApprovals() {
+  try { state.approvals = (await request("GET", "/api/approvals")).approvals; renderChat(); }
+  catch { /* 404: Executor is not configured, so there are no approvals */ }
+}
+
+function approvalWord(a) {
+  return { waiting: "waiting for you", running: "sending", done: a.email ? "sent" : "done", failed: "failed", discarded: "discarded", expired: "expired" }[a.status] || a.status;
+}
+
+function approvalCard(a) {
+  const cached = cards.get(a.id);
+  if (cached && cached.status === a.status) return cached.node;
+  const node = a.status === "waiting" || a.status === "running" ? waitingCard(a) : receipt(a);
+  cards.set(a.id, { node, status: a.status });
+  return node;
+}
+
+async function decide(a, action, edit, buttons) {
+  for (const button of buttons) button.disabled = true;
+  try {
+    await request("POST", "/api/approvals/" + encodeURIComponent(a.id) + "/" + action, edit || {});
+    showChatError("");
+  } catch (error) {
+    showChatError((action === "approve" ? "It didn't run: " : "Couldn't discard it: ") + error.message);
+    for (const button of buttons) button.disabled = false;
+  }
+  await loadApprovals();
+}
+
+function waitingCard(a) {
+  const running = a.status === "running";
+  const destructive = !a.email && DESTRUCTIVE.test(a.path.split(".").pop());
+  const card = el("article", "card" + (destructive ? " delete" : ""));
+  card.setAttribute("aria-label", a.title + ", waiting for your approval");
+  const head = el("header");
+  const edited = el("span", "edited", "Edited");
+  edited.hidden = !a.edited;
+  head.append(el("span", "what", a.title), edited, el("span", "status", running ? "Sending" : "Waiting for you"));
+  card.append(head);
+  let edit;
+  if (a.email) {
+    const email = a.email;
+    const draft = { to: email.to, subject: email.subject, body: email.body };
+    const fields = el("div", "fields");
+    const row = (label, value) => { const r = el("div", "row"); r.append(el("span", "", label), el("span", "", value)); fields.append(r); };
+    const changed = () => { edited.hidden = draft.to === email.to && draft.subject === email.subject && draft.body === email.body; };
+    const field = (label, key) => {
+      const r = el("label", "row");
+      const input = el("input");
+      input.value = draft[key];
+      input.disabled = running;
+      input.addEventListener("input", () => { draft[key] = input.value; changed(); });
+      r.append(el("span", "", label), input);
+      fields.append(r);
+    };
+    if (email.from) row("From", email.from);
+    if (email.editable) field("To", "to"); else row("To", email.to);
+    if (email.cc) row("Cc", email.cc);
+    if (email.editable) field("Subject", "subject"); else row("Subject", email.subject);
+    card.append(fields);
+    if (email.editable) {
+      const body = el("textarea", "body");
+      body.value = draft.body;
+      body.rows = Math.min(16, Math.max(4, draft.body.split("\n").length + 1));
+      body.disabled = running;
+      body.setAttribute("aria-label", "Email body");
+      body.addEventListener("input", () => { draft.body = body.value; changed(); });
+      card.append(body);
+      edit = () => draft;
+    } else card.append(el("div", "body", email.body));
+  } else {
+    const action = el("div", "action");
+    if (a.summary) action.append(el("div", "summary", a.summary));
+    action.append(el("div", "path", a.path.replace(/^tools\./, "")));
+    card.append(action);
+    const key = "ap:" + a.id;
+    if (state.open.has(key)) card.append(el("pre", "result", JSON.stringify(a.input, null, 2)));
+  }
+  const footer = el("footer");
+  const run = el("button", "btn " + (destructive ? "danger-fill" : "primary"), a.title);
+  const drop = el("button", "btn", "Discard");
+  run.type = drop.type = "button";
+  run.disabled = drop.disabled = running;
+  run.addEventListener("click", () => decide(a, "approve", edit && edit(), [run, drop]));
+  drop.addEventListener("click", () => decide(a, "discard", undefined, [run, drop]));
+  footer.append(run, drop);
+  if (!a.email) {
+    const key = "ap:" + a.id;
+    const details = el("button", "btn link", state.open.has(key) ? "Hide details" : "Details");
+    details.type = "button";
+    details.addEventListener("click", () => { state.open.has(key) ? state.open.delete(key) : state.open.add(key); cards.delete(a.id); renderChat(); });
+    footer.append(details);
+  }
+  if (edit) footer.append(el("span", "why", "Sends exactly what you see"));
+  card.append(footer);
+  return card;
+}
+
+function receipt(a) {
+  const ok = a.status === "done", bad = a.status === "failed";
+  const line = el("div", "receipt" + (ok ? " ok" : bad ? " bad" : ""));
+  const what = a.email ? `${a.title} to ${a.email.to}` : a.summary ? `${a.title}: ${a.summary}` : a.title;
+  const when = a.decidedAt ? ` at ${time(a.decidedAt)}` : "";
+  if (ok) line.append(el("b", "", a.email ? "✓ Sent" : "✓ Done"), (a.email ? ` to ${a.email.to}` : ` ${what}`) + when + (a.edited ? ", with your edits" : ""));
+  else if (bad) line.append(el("b", "", "Failed"), ` ${what}: ${(a.outcome || "").split("\n")[0].slice(0, 160)}`);
+  else if (a.status === "discarded") line.append(el("b", "", "Discarded"), ` ${what}`);
+  else line.append(el("b", "", "Expired"), ` ${what}. It waited 7 days without an answer.`);
+  if (a.email) {
+    const key = "ap:" + a.id;
+    const show = el("button", "btn link", state.open.has(key) ? "Hide email" : "Show email");
+    show.type = "button";
+    show.addEventListener("click", () => { state.open.has(key) ? state.open.delete(key) : state.open.add(key); cards.delete(a.id); renderChat(); });
+    line.append(show);
+    if (state.open.has(key)) line.append(el("pre", "result", `To: ${a.email.to}\nSubject: ${a.email.subject}\n\n${a.email.body}`));
+  }
+  return line;
+}
+
 function renderChat() {
   const box = $("msgs");
   const nearBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 80;
+  // Re-rendering detaches the card being typed in; put focus and the caret back afterwards.
+  const active = box.contains(document.activeElement) ? document.activeElement : null;
+  const caret = active && typeof active.selectionStart === "number" ? [active.selectionStart, active.selectionEnd] : null;
   box.textContent = "";
   if (state.before) {
     const more = el("button", "more", "Show earlier messages");
@@ -396,7 +554,7 @@ function renderChat() {
   for (const item of state.items) if (item.kind === "tool") results.set(item.callId, item);
   const running = new Map(state.live.tools.map((tool) => [tool.callId, tool]));
   let day = "";
-  const visible = state.items.filter((item) => item.kind !== "tool");
+  const visible = state.items.filter((item) => item.kind !== "tool" && item.kind !== "approval");
   if (visible.length === 0 && !state.live.busy && state.queued.length === 0) {
     const empty = el("div", "empty");
     empty.append(el("b", "", "Ask cua-bot anything"));
@@ -417,6 +575,15 @@ function renderChat() {
     } else if (item.kind === "marker") box.append(el("div", "marker", item.text));
     else if (item.kind === "assistant") box.append(renderReply(item, results, running));
   }
+  // Waiting cards whose reply isn't loaded (older history, or a turn still streaming) go last.
+  const shown = new Set(visible.flatMap((item) => (item.kind === "assistant" ? item.tools.map((t) => t.id) : [])));
+  for (const a of state.approvals) {
+    if ((a.status === "waiting" || a.status === "running") && !shown.has(a.callId)) {
+      const holder = el("div", "m bot");
+      holder.append(approvalCard(a));
+      box.append(holder);
+    }
+  }
   for (const text of state.queued) {
     const bubble = el("div", "m me queued", text);
     bubble.append(el("span", "note", state.live.busy ? "Queued until the current reply finishes" : "Sending…"));
@@ -436,6 +603,10 @@ function renderChat() {
       box.append(live);
     }
   }
+  if (active && active.isConnected && document.activeElement !== active) {
+    active.focus({ preventScroll: true });
+    if (caret) active.setSelectionRange(caret[0], caret[1]);
+  }
   if (nearBottom) box.scrollTop = box.scrollHeight;
 }
 
@@ -447,10 +618,13 @@ function renderReply(item, results, running) {
     for (const call of item.tools) {
       const result = results.get(call.id);
       const live = running.get(call.id);
-      const status = result ? (result.isError ? "error" : "done") : live && live.status !== "done" ? "run" : "done";
-      const chip = el("button", "chip " + status, toolLabel(call));
+      const approval = approvalFor(call.id);
+      const waiting = approval && (approval.status === "waiting" || approval.status === "running");
+      const status = result ? (result.isError ? "error" : waiting ? "wait" : "done") : live && live.status !== "done" ? "run" : "done";
+      const label = approval ? `${approval.title}: ${approvalWord(approval)}` : toolLabel(call);
+      const chip = el("button", "chip " + status, label);
       chip.type = "button";
-      chip.title = toolLabel(call);
+      chip.title = label;
       if (status === "run" || !result) { chip.disabled = true; chips.append(chip); continue; }
       const key = item.id + ":" + call.id;
       chip.setAttribute("aria-expanded", String(state.open.has(key)));
@@ -470,6 +644,10 @@ function renderReply(item, results, running) {
     node.append(chips, below);
   }
   if (item.text) node.append(markdown(item.text));
+  for (const call of item.tools) {
+    const approval = approvalFor(call.id);
+    if (approval) node.append(approvalCard(approval));
+  }
   if (item.error) node.append(el("div", "error", item.error));
   else if (item.aborted) node.append(el("div", "stopped", "Stopped."));
   return node;
@@ -547,13 +725,14 @@ async function loadEarlier() {
 function connect() {
   const source = new EventSource("/api/chat/events");
   let failed = false;
-  source.onopen = () => { if (failed) { failed = false; showChatError(""); loadHistory().catch(() => {}); } };
+  source.onopen = () => { if (failed) { failed = false; showChatError(""); loadHistory().catch(() => {}); loadApprovals(); } };
   source.onerror = () => { failed = true; showChatError("Lost the connection to cua-bot. Reconnecting…"); };
   source.onmessage = (event) => {
     const data = JSON.parse(event.data);
     if (data.type === "items") { addItems(data.items); renderChat(); }
     else if (data.type === "live") { state.live = data.live; renderLive(); renderChat(); }
     else if (data.type === "computer") { state.computer = data.computer; renderComputer(); }
+    else if (data.type === "approvals") { state.approvals = data.approvals; renderChat(); }
   };
 }
 
@@ -747,6 +926,7 @@ $("routine-form").addEventListener("submit", async (event) => {
 
 /* ---------- start ---------- */
 loadHistory().catch((error) => showChatError("Could not load the conversation: " + error.message));
+loadApprovals();
 request("GET", "/api/chat/computer").then((c) => { state.computer = c; renderComputer(); }).catch(() => {});
 connect();
 setInterval(() => { if (!$("view-routines").hidden) loadRoutines(); }, 30000);

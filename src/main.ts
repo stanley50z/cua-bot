@@ -5,21 +5,20 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
-import { AssistantEntry, createRegistry, defineExtension, Harness, section } from "@earendil-works/pi-durable";
+import { AssistantEntry, configure, createRegistry, defineExtension, Harness, section } from "@earendil-works/pi-durable";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { createChat } from "./chat.ts";
 import { createComputerExtension, spaceLabel } from "./computer.ts";
 import { createComputerView } from "./computer-view.ts";
 import { createEmailExtension } from "./email.ts";
-import { connectExecutor, createExecutorExtension } from "./executor.ts";
+import { type Approvals, createApprovals } from "./approvals.ts";
+import { connectExecutor, createExecutor, createExecutorExtension } from "./executor.ts";
 import { DATA_DIR, log } from "./log.ts";
 import { createMemory, createMemoryExtension } from "./memory.ts";
 import { bindRoutines, createRoutinesExtension, startRoutineFileWatch, syncRoutines } from "./routines.ts";
 import { traceExtension } from "./trace.ts";
 import { createBotServer } from "./web.ts";
-import { createBotModels } from "./xai-auth.ts";
-
-export const MODEL = { provider: "xai", modelId: process.env.GROKBOT_MODEL || "grok-4.7" } as const;
+import { createBotModels, MODEL } from "./models.ts";
 const PORT = Number(process.env.GROKBOT_PORT || 43142);
 const CRASH_DIR = join(DATA_DIR, "crash");
 mkdirSync(CRASH_DIR, { recursive: true });
@@ -34,7 +33,7 @@ process.on("uncaughtException", crash("uncaughtException"));
 process.on("unhandledRejection", crash("unhandledRejection"));
 
 const context = BACKGROUND_CONTEXT;
-const models = createBotModels(); // xAI subscription sign-in from `node src/login.ts`, else XAI_API_KEY
+const models = createBotModels(); // Azure AI Foundry by default; see src/models.ts
 
 const registry = createRegistry();
 registry.install(
@@ -64,13 +63,16 @@ const memory = createMemory({ dir: join(DATA_DIR, "memory") });
 registry.install(createMemoryExtension(memory));
 const executorUrl = process.env.EXECUTOR_MCP_URL?.trim();
 const executorKey = process.env.EXECUTOR_API_KEY?.trim();
+let approvals: Approvals | undefined;
 if (executorUrl && executorKey) {
-	registry.install(
-		createExecutorExtension({
-			connect: connectExecutor(executorUrl, executorKey),
-			allowSendDelete: process.env.EXECUTOR_ALLOW_SEND_DELETE === "1",
-		}),
-	);
+	const executor = createExecutor(connectExecutor(executorUrl, executorKey));
+	approvals = createApprovals({
+		file: join(DATA_DIR, "approvals.json"),
+		call: (name, args) => executor(name, args),
+		// The owner's decision reaches the bot as a message, after any turn in progress.
+		notify: (text) => root.submit({ type: "input", content: text, whenBusy: "followUp" }, context),
+	});
+	registry.install(createExecutorExtension({ executor, approvals }));
 } else {
 	log("executor: EXECUTOR_MCP_URL or EXECUTOR_API_KEY unset; Gmail and Calendar are off");
 }
@@ -78,6 +80,8 @@ if (executorUrl && executorKey) {
 const storage = await openNodeSqliteStorage(join(DATA_DIR, "grokbot.sqlite"));
 const harness = await Harness.open(storage, { models, registry }, context);
 const root = await harness.root(context, { agent: { model: MODEL, thinkingLevel: "medium" } });
+// root() sets the agent only when it creates the conversation; apply the configured model to an existing one too.
+await root.commit((tx) => configure(tx, root.id, { model: MODEL, thinkingLevel: "medium" }), context);
 bindRoutines({ harness, root });
 harness.resume();
 const synced = await syncRoutines(context);
@@ -110,7 +114,7 @@ const computer = createComputerView({
 	...(space === undefined ? {} : { space }),
 });
 const chat = createChat({ harness, root, context, computer });
-createBotServer({ say, chat, memory, model: MODEL.modelId, context, log }).listen(PORT, "127.0.0.1", () =>
+createBotServer({ say, chat, memory, model: MODEL.modelId, context, log, ...(approvals === undefined ? {} : { approvals }) }).listen(PORT, "127.0.0.1", () =>
 	log(`listening: web app http://127.0.0.1:${PORT}/ · chat POST http://127.0.0.1:${PORT}/say`),
 );
 

@@ -16,7 +16,6 @@ ROOT = Path(__file__).resolve().parent
 PID_PATH = ROOT / "data" / "grokbot.pid.json"
 LOG_PATH = ROOT / "data" / "logs" / "stdout.log"
 DEFAULT_PORT = 43142
-DEFAULT_MODEL = "grok-4.7"
 LISTEN_TIMEOUT_S = 10.0
 
 
@@ -99,8 +98,8 @@ def parse_port(raw: str) -> int:
     return port
 
 
-# Blank GROKBOT_PORT and GROKBOT_MODEL become the documented defaults in the child environment.
-# main.ts uses ??, so an empty string from .env.example would bind port 0 and an empty model id.
+# A blank GROKBOT_PORT becomes the documented default in the child environment, so an empty value from
+# .env.example never binds port 0. The model defaults live in src/models.ts.
 def child_environment(dotenv: dict[str, str]) -> tuple[dict[str, str], int]:
     env = os.environ.copy()
     port_raw = configured("GROKBOT_PORT", dotenv)
@@ -109,12 +108,6 @@ def child_environment(dotenv: dict[str, str]) -> tuple[dict[str, str], int]:
     else:
         port = parse_port(port_raw.strip())
     env["GROKBOT_PORT"] = str(port)
-
-    model_raw = configured("GROKBOT_MODEL", dotenv)
-    if model_raw is None or model_raw.strip() == "":
-        env["GROKBOT_MODEL"] = DEFAULT_MODEL
-    else:
-        env["GROKBOT_MODEL"] = model_raw.strip()
     return env, port
 
 

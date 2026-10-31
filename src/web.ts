@@ -7,6 +7,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { basename, join } from "node:path";
 import type { Context } from "@earendil-works/chord";
 import type { Cursor } from "@earendil-works/pi-durable";
+import { ApprovalError, type Approvals, type EmailEdit } from "./approvals.ts";
 import type { Chat } from "./chat.ts";
 import { type Memory, MemoryError } from "./memory.ts";
 import { DATA_DIR } from "./log.ts";
@@ -92,6 +93,8 @@ export type BotServerDeps = {
 	chat?: Chat;
 	/** Enables /api/memory*. */
 	memory?: Memory;
+	/** Enables /api/approvals* and approval events on the chat stream. Absent when Executor is not configured. */
+	approvals?: Approvals;
 	/** Shown in the chat header, e.g. "grok-4.7". */
 	model?: string;
 	shotsDir?: string;
@@ -118,17 +121,57 @@ function chatText(body: unknown): string {
 	return text;
 }
 
-// One SSE client: a `live` snapshot right away, then every chat event until the socket closes.
-function streamChat(req: IncomingMessage, res: ServerResponse, chat: Chat): void {
+// One SSE client: a `live` snapshot right away, then every chat event, and the full approvals list
+// whenever it changes, until the socket closes.
+function streamChat(req: IncomingMessage, res: ServerResponse, chat: Chat, approvals: Approvals | undefined): void {
 	res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-store", connection: "keep-alive" });
 	const send = (event: unknown) => res.write(`data: ${JSON.stringify(event)}\n\n`);
 	send({ type: "live", live: chat.live });
 	const unsubscribe = chat.subscribe(send);
+	const unwatch = approvals?.subscribe((list) => send({ type: "approvals", approvals: list }));
 	const ping = setInterval(() => res.write(": ping\n\n"), 25_000);
 	req.on("close", () => {
 		clearInterval(ping);
 		unsubscribe();
+		unwatch?.();
 	});
+}
+
+function emailEdit(body: unknown): EmailEdit | undefined {
+	if (body === null || typeof body !== "object" || Array.isArray(body)) return undefined;
+	const { to, subject, body: text } = body as Record<string, unknown>;
+	if (to === undefined && subject === undefined && text === undefined) return undefined;
+	if (typeof to !== "string" || typeof subject !== "string" || typeof text !== "string") throw new HttpError(400, "to, subject, and body must be strings");
+	return { to, subject, body: text };
+}
+
+// Approval cards: list them, and run or drop one. Running happens here, on the owner's click.
+async function routeApprovals(req: IncomingMessage, res: ServerResponse, deps: BotServerDeps, url: URL, method: string) {
+	const approvals = deps.approvals;
+	if (approvals === undefined) throw new HttpError(404, "not found");
+	if (method === "GET" && url.pathname === "/api/approvals") {
+		sendJson(res, 200, { approvals: await approvals.list() });
+		return;
+	}
+	const match = url.pathname.match(/^\/api\/approvals\/([\w-]+)\/(approve|discard)$/);
+	if (method === "POST" && match?.[1] !== undefined) {
+		const id = match[1];
+		try {
+			if (match[2] === "approve") {
+				const edit = emailEdit(await readJson(req));
+				deps.log?.(`approval (web): approve ${id}${edit === undefined ? "" : " with the owner's edits"}`);
+				sendJson(res, 200, await approvals.approve(id, edit));
+			} else {
+				deps.log?.(`approval (web): discard ${id}`);
+				sendJson(res, 200, await approvals.discard(id));
+			}
+		} catch (error) {
+			if (error instanceof ApprovalError) throw new HttpError(409, error.message);
+			throw error;
+		}
+		return;
+	}
+	throw new HttpError(404, "not found");
 }
 
 /** Build the bot's HTTP server. The caller listens on 127.0.0.1 and owns shutdown. */
@@ -173,6 +216,7 @@ async function route(req: IncomingMessage, res: ServerResponse, deps: BotServerD
 	}
 	if (url.pathname.startsWith("/api/chat")) return routeChat(req, res, deps, url, method);
 	if (url.pathname.startsWith("/api/memory")) return routeMemory(req, res, deps, url, method);
+	if (url.pathname.startsWith("/api/approvals")) return routeApprovals(req, res, deps, url, method);
 	if (url.pathname.startsWith("/api/")) return routeApi(req, res, deps, url, method);
 	throw new HttpError(404, "not found");
 }
@@ -237,7 +281,7 @@ async function routeChat(req: IncomingMessage, res: ServerResponse, deps: BotSer
 		res.writeHead(204).end();
 		return;
 	}
-	if (method === "GET" && url.pathname === "/api/chat/events") return streamChat(req, res, chat);
+	if (method === "GET" && url.pathname === "/api/chat/events") return streamChat(req, res, chat, deps.approvals);
 	if (method === "GET" && url.pathname === "/api/chat/computer") {
 		sendJson(res, 200, (await chat.computer()) ?? { steps: [] });
 		return;

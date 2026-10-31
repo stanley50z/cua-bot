@@ -1,9 +1,9 @@
 // One-time sign-in: `node src/login.ts`. Runs xAI's device-code flow with your SuperGrok / X Premium account
 // and saves the credential to data/xai-credential.json for the bot. Stop the bot first; one process owns the file.
 import { spawn } from "node:child_process";
-import { CREDENTIAL_FILE, createBotModels } from "./xai-auth.ts";
+import { CREDENTIAL_FILE, createXaiModels } from "./xai-auth.ts";
 
-const models = createBotModels();
+const models = createXaiModels();
 await models.login("xai", "oauth", {
 	prompt: async (prompt) => {
 		throw new Error(`Unexpected login prompt: ${prompt.type}`);
