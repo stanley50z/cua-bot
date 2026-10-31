@@ -1,4 +1,4 @@
-// The bot's single log: log(...) appends one line to data/logs/grokbot.log and echoes it to stdout.
+// The bot's single log: log(...) appends one line to data/logs/cua-bot.log and echoes it to stdout.
 import { appendFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 
@@ -8,6 +8,6 @@ mkdirSync(LOG_DIR, { recursive: true });
 
 export function log(...parts: unknown[]): void {
 	const line = `${new Date().toISOString()} ${parts.map((p) => (typeof p === "string" ? p : JSON.stringify(p))).join(" ")}`;
-	appendFileSync(join(LOG_DIR, "grokbot.log"), `${line}\n`);
+	appendFileSync(join(LOG_DIR, "cua-bot.log"), `${line}\n`);
 	console.log(line);
 }

@@ -4,3 +4,7 @@ data/
 routines.json
 routines.json.tmp
 docs/mocks/
+
+# Early design notes, kept locally only.
+docs/brainstorm-*.html
+models.json

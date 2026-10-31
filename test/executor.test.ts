@@ -130,9 +130,12 @@ test("send and delete detection reads the operation, not the namespace", () => {
 	for (const path of [SEND, `${GMAIL}.gmailUsersDraftsSend`, `${GMAIL}.gmailUsersMessagesTrash`, `${GMAIL}.gmailUsersMessagesBatchDelete`, `${CALENDAR}.calendarEventsDelete`, `${CALENDAR}.calendarCalendarsClear`]) {
 		assert.equal(sendsOrDeletes(path), true, path);
 	}
-	for (const path of [`${GMAIL}.gmailUsersDraftsCreate`, `${CALENDAR}.calendarEventsInsert`, `${CALENDAR}.calendarEventsList`, "tools.sender-app.delete-me.itemsGet"]) {
+	for (const path of [`${GMAIL}.gmailUsersDraftsCreate`, `${CALENDAR}.calendarEventsInsert`, `${CALENDAR}.calendarEventsList`, "tools.sender-app.delete-me.itemsGet", "tools.google.gmail.draft"]) {
 		assert.equal(sendsOrDeletes(path), false, path);
 	}
+	assert.equal(sendsOrDeletes("tools.google.gmail.send", { to: ["a@b.c"], body: "hi" }), true);
+	assert.equal(sendsOrDeletes("tools.google.gmail.modify", { threadIds: ["t"], trash: true }), true, "modify can move threads to trash");
+	assert.equal(sendsOrDeletes("tools.google.gmail.modify", { threadIds: ["t"], read: true }), false, "marking read is fine");
 });
 
 test("a dropped session reopens on the next call, and an unreachable Executor is a tool error", () =>

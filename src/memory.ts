@@ -1,7 +1,7 @@
 // Long-term memory about the owner, as plain markdown the owner can read and edit.
 // main.ts builds one store with createMemory({ dir: data/memory }), installs createMemoryExtension(store)
 // so the bot gets remember / forget / recall and sees its memory in every request, and hands the
-// store to the web app (GET/POST /api/memory). Layout, after Grok Bot's memory:
+// store to the web app (GET/POST /api/memory). Layout:
 //   profile.md          enduring facts about the owner ("About the owner")
 //   log/YYYY-MM.md      dated facts, one file per month
 // Each fact is one line: `- (YYYY-MM-DD) fact`. Other lines are left alone. The files are the source of

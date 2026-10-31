@@ -2,7 +2,7 @@
 // and state written by the pre-cron (v1) code. Run from the repo root:
 //   node --test test/routines.test.ts
 import assert from "node:assert/strict";
-import { copyFile, mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
@@ -36,7 +36,7 @@ after(async () => {
 });
 
 async function freshRoutineFile(): Promise<string> {
-	const dir = await mkdtemp(join(tmpdir(), "grokbot-routines-file-"));
+	const dir = await mkdtemp(join(tmpdir(), "cua-bot-routines-file-"));
 	tempDirs.push(dir);
 	return join(dir, "routines.json");
 }
@@ -168,7 +168,7 @@ async function sleepDeadline(harness: Harness): Promise<number> {
 		const inspection = await harness.inspect(context);
 		for (const task of inspection.tasks) {
 			const state = task.record.state;
-			if (task.record.kind === "grokbot.routine" && state.status === "sleeping") {
+			if (task.record.kind === "cua-bot.routine" && state.status === "sleeping") {
 				until = state.until;
 				return true;
 			}
@@ -180,7 +180,7 @@ async function sleepDeadline(harness: Harness): Promise<number> {
 
 async function routineTaskCount(harness: Harness): Promise<number> {
 	const inspection = await harness.inspect(context);
-	return inspection.tasks.filter((task) => task.record.kind === "grokbot.routine").length;
+	return inspection.tasks.filter((task) => task.record.kind === "cua-bot.routine").length;
 }
 
 function scheduledId(log: string): { id: string; taskId: number } {
@@ -244,7 +244,7 @@ test("advancing the clock fires a [routine] turn", { timeout: 20_000 }, async ()
 });
 
 test("a routine sleeping in sqlite still fires after reopen", { timeout: 20_000 }, async () => {
-	const directory = await mkdtemp(join(tmpdir(), "grokbot-routines-"));
+	const directory = await mkdtemp(join(tmpdir(), "cua-bot-routines-"));
 	const database = join(directory, "session.sqlite");
 	const clock = { now: BASE };
 	const models = scriptedModel();
@@ -296,7 +296,7 @@ test("cancel_routine aborts the sleeper before it can fire", { timeout: 20_000 }
 });
 
 test("weekday cron survives a restart and a missed weekend fires once", { timeout: 20_000 }, async () => {
-	const directory = await mkdtemp(join(tmpdir(), "grokbot-routines-"));
+	const directory = await mkdtemp(join(tmpdir(), "cua-bot-routines-"));
 	const database = join(directory, "session.sqlite");
 	const clock = { now: BASE };
 	const models = scriptedModel();
@@ -417,34 +417,5 @@ test("the 51st routine is refused at the 50 cap", { timeout: 30_000 }, async () 
 		assertNoFaults(session);
 	} finally {
 		await session.harness.close(context);
-	}
-});
-
-test("state written by the legacy v1 code migrates and still fires", { timeout: 20_000 }, async () => {
-	const directory = await mkdtemp(join(tmpdir(), "grokbot-routines-v1-"));
-	const database = join(directory, "session.sqlite");
-	await copyFile(join(import.meta.dirname, "fixtures", "routines-v1.sqlite"), database);
-	const clock = { now: BASE };
-	const session = await openSession(await openNodeSqliteStorage(database), clock, scriptedModel(), join(directory, "routines.json"));
-	try {
-		// The fixture holds one everyMinutes(1) routine sleeping until BASE + 60s, stored the v1 way.
-		assert.equal(await sleepDeadline(session.harness), BASE + 60_000);
-		// No config file existed, so the migrated routine was adopted into one.
-		const adopted = JSON.parse(await readFile(session.routineFile, "utf8")) as Array<{ title: string; cron: string }>;
-		assert.equal(adopted.length, 1);
-		assert.equal(adopted[0]?.title, TITLE);
-		assert.equal(adopted[0]?.cron, "@every 1m");
-		await say(session.root, "list routines");
-		const listed = await transcript(session.root);
-		assert.match(listed, /Morning sweep/);
-		assert.match(listed, /@every 1m/);
-
-		clock.now = BASE + 60_000;
-		session.harness.resume();
-		await eventually(async () => wakeCount(await transcript(session.root)) === 1);
-		assertNoFaults(session);
-	} finally {
-		await session.harness.close(context);
-		await rm(directory, { recursive: true, force: true });
 	}
 });

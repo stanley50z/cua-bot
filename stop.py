@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Stop the grokbot pid recorded in data/grokbot.pid.json, and its children."""
+"""Stop the cua-bot pid recorded in data/cua-bot.pid.json, and its children."""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
-PID_PATH = ROOT / "data" / "grokbot.pid.json"
+PID_PATH = ROOT / "data" / "cua-bot.pid.json"
 GRACE_S = 5.0
 
 
@@ -153,7 +153,7 @@ def terminate(pid: int) -> None:
 def main() -> int:
     configure_stdio()
     if not PID_PATH.is_file():
-        print("grokbot is not running")
+        print("cua-bot is not running")
         return 0
     try:
         data = json.loads(PID_PATH.read_text(encoding="utf-8"))

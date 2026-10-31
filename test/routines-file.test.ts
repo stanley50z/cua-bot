@@ -62,7 +62,7 @@ type Session = {
 };
 
 async function open(): Promise<Session> {
-	const dir = await mkdtemp(join(tmpdir(), "grokbot-routine-file-"));
+	const dir = await mkdtemp(join(tmpdir(), "cua-bot-routine-file-"));
 	const file = join(dir, "routines.json");
 	const clock = { now: BASE };
 	const registry = createRegistry();
@@ -98,7 +98,7 @@ async function sleeping(session: Session, count: number): Promise<Array<{ id: Ta
 		const inspection = await session.harness.inspect(context);
 		found = [];
 		for (const task of inspection.tasks) {
-			if (task.record.kind === "grokbot.routine" && task.record.state.status === "sleeping") {
+			if (task.record.kind === "cua-bot.routine" && task.record.state.status === "sleeping") {
 				found.push({ id: task.record.id, until: task.record.state.until });
 			}
 		}

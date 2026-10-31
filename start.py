@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Start grokbot in the background. Prints the /say and web app URLs, or the stdout log on failure."""
+"""Start cua-bot in the background. Prints the /say and web app URLs, or the stdout log on failure."""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
-PID_PATH = ROOT / "data" / "grokbot.pid.json"
+PID_PATH = ROOT / "data" / "cua-bot.pid.json"
 LOG_PATH = ROOT / "data" / "logs" / "stdout.log"
 DEFAULT_PORT = 43142
 LISTEN_TIMEOUT_S = 10.0
@@ -92,22 +92,22 @@ def parse_port(raw: str) -> int:
     try:
         port = int(raw)
     except ValueError:
-        raise SystemExit(f"GROKBOT_PORT is not an integer: {raw!r}")
+        raise SystemExit(f"CUABOT_PORT is not an integer: {raw!r}")
     if port < 1 or port > 65535:
-        raise SystemExit(f"GROKBOT_PORT is out of range: {port}")
+        raise SystemExit(f"CUABOT_PORT is out of range: {port}")
     return port
 
 
-# A blank GROKBOT_PORT becomes the documented default in the child environment, so an empty value from
+# A blank CUABOT_PORT becomes the documented default in the child environment, so an empty value from
 # .env.example never binds port 0. The model defaults live in src/models.ts.
 def child_environment(dotenv: dict[str, str]) -> tuple[dict[str, str], int]:
     env = os.environ.copy()
-    port_raw = configured("GROKBOT_PORT", dotenv)
+    port_raw = configured("CUABOT_PORT", dotenv)
     if port_raw is None or port_raw.strip() == "":
         port = DEFAULT_PORT
     else:
         port = parse_port(port_raw.strip())
-    env["GROKBOT_PORT"] = str(port)
+    env["CUABOT_PORT"] = str(port)
     return env, port
 
 
@@ -182,7 +182,7 @@ def main() -> int:
         if process_alive(existing_pid):
             port = existing.get("port", DEFAULT_PORT)
             print(
-                f"grokbot is already running (pid {existing_pid}) at http://127.0.0.1:{port}/say",
+                f"cua-bot is already running (pid {existing_pid}) at http://127.0.0.1:{port}/say",
                 file=sys.stderr,
             )
             return 1
@@ -230,10 +230,10 @@ def main() -> int:
         return 0
 
     if exited:
-        print(f"grokbot exited before it accepted connections on 127.0.0.1:{port}", file=sys.stderr)
+        print(f"cua-bot exited before it accepted connections on 127.0.0.1:{port}", file=sys.stderr)
     else:
         print(
-            f"grokbot (pid {process.pid}) did not accept connections on 127.0.0.1:{port} within 10s. "
+            f"cua-bot (pid {process.pid}) did not accept connections on 127.0.0.1:{port} within 10s. "
             "It is still running; python stop.py will stop it.",
             file=sys.stderr,
         )

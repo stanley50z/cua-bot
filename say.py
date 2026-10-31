@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""POST a message to grokbot /say and print the plain-text answer."""
+"""POST a message to cua-bot /say and print the plain-text answer."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ import urllib.request
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
-PID_PATH = ROOT / "data" / "grokbot.pid.json"
+PID_PATH = ROOT / "data" / "cua-bot.pid.json"
 DEFAULT_PORT = 43142
 TIMEOUT_S = 600
 
@@ -55,9 +55,9 @@ def parse_port(raw: str) -> int:
     try:
         port = int(raw)
     except ValueError:
-        raise SystemExit(f"GROKBOT_PORT is not an integer: {raw!r}")
+        raise SystemExit(f"CUABOT_PORT is not an integer: {raw!r}")
     if port < 1 or port > 65535:
-        raise SystemExit(f"GROKBOT_PORT is out of range: {port}")
+        raise SystemExit(f"CUABOT_PORT is out of range: {port}")
     return port
 
 
@@ -72,10 +72,10 @@ def resolve_port() -> int:
             raise SystemExit(f"{PID_PATH} must be a JSON object with pid and port")
         return parse_port(str(data.get("port")))
 
-    if "GROKBOT_PORT" in os.environ:
-        raw = os.environ["GROKBOT_PORT"]
+    if "CUABOT_PORT" in os.environ:
+        raw = os.environ["CUABOT_PORT"]
     else:
-        raw = load_dotenv(ROOT / ".env").get("GROKBOT_PORT")
+        raw = load_dotenv(ROOT / ".env").get("CUABOT_PORT")
     if raw is None or raw.strip() == "":
         return DEFAULT_PORT
     return parse_port(raw.strip())

@@ -30,7 +30,7 @@ const clockAt = (iso: string) => {
 	return { clock, now: () => clock.now };
 };
 
-test("facts land in profile.md and monthly log files in the Grok Bot line format", () =>
+test("facts land in profile.md and monthly log files, one dated line each", () =>
 	withDir(async (dir) => {
 		const { clock, now } = clockAt("2026-10-31T09:00:00");
 		const memory = createMemory({ dir, now });

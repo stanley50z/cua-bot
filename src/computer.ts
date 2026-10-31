@@ -16,10 +16,8 @@ import {
 	type ToolRegistration,
 } from "@earendil-works/pi-durable";
 import { toLlmContent, type CallToolResult, type LlmContent } from "@earendil-works/pi-mcp";
-import { MODEL } from "./models.ts";
+import { botModel } from "./models.ts";
 
-// The computer-use child runs on the bot's own model.
-const CHILD_MODEL = MODEL;
 const SHOT_EDGE = 1200;
 const SHOTS_DIR = join(import.meta.dirname, "..", "data", "shots");
 const CHILD_BRIEF = [
@@ -176,7 +174,7 @@ const computerUse = defineTool({
 			const existing = (await tx.scanConversations({ ownerTaskId: api.taskId }, 1)).items[0];
 			const id = existing?.id ?? (await tx.createConversation({ ownership: { kind: "task", taskId: api.taskId } })).id;
 			await configure(tx, id, {
-				model: CHILD_MODEL,
+				model: botModel(), // the bot's own model
 				extensions: [traceExtension, computerExtension],
 				tools: childTools,
 				modelTools: childTools,

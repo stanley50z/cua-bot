@@ -36,7 +36,7 @@ test("send_email delivers to OWNER_EMAIL", async () => {
 	process.env.OWNER_EMAIL = OWNER;
 	process.env.SMTP_USER = FROM;
 	process.env.SMTP_PASS = "test-app-password";
-	const directory = await mkdtemp(join(tmpdir(), "grokbot-email-"));
+	const directory = await mkdtemp(join(tmpdir(), "cua-bot-email-"));
 	const shot = join(directory, "shot.png");
 	await writeFile(shot, "png");
 
@@ -121,7 +121,7 @@ test("send_email rejects a missing attachment and names missing env", async () =
 		const tool = extension.tools?.[0];
 		assert.ok(tool);
 		const missingFile = await tool.execute(
-			{ subject: SUBJECT, body: BODY, attachments: ["C:\\no\\such\\grokbot-shot.png"] },
+			{ subject: SUBJECT, body: BODY, attachments: ["C:\\no\\such\\cua-bot-shot.png"] },
 			undefined as never,
 			BACKGROUND_CONTEXT,
 		);

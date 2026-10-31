@@ -1,13 +1,13 @@
 {
-  "name": "grokbot",
+  "name": "cua-bot",
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Self-hosted Grok bot: Pi Durable service + Cua Spaces computer use + proactive email",
+  "description": "Self-hosted personal agent: Pi Durable service, Cua Spaces computer use, Gmail and Calendar through Executor",
   "scripts": {
     "start": "node --env-file-if-exists=.env src/main.ts",
     "check": "tsc --noEmit",
-    "test": "node --test test/cron.test.ts test/routines.test.ts test/routines-file.test.ts test/web.test.ts test/chat.test.ts test/computer-view.test.ts test/memory.test.ts test/executor.test.ts test/approvals.test.ts test/email.test.ts"
+    "test": "node --test test/cron.test.ts test/routines.test.ts test/routines-file.test.ts test/web.test.ts test/chat.test.ts test/computer-view.test.ts test/memory.test.ts test/models.test.ts test/executor.test.ts test/approvals.test.ts test/email.test.ts"
   },
   "engines": {
     "node": ">=22.19.0"

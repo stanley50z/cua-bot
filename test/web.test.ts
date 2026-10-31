@@ -42,7 +42,7 @@ function scriptedModel() {
 type Session = { dir: string; file: string; base: string; harness: Harness; root: Conversation; server: Server };
 
 async function open(): Promise<Session> {
-	const dir = await mkdtemp(join(tmpdir(), "grokbot-web-"));
+	const dir = await mkdtemp(join(tmpdir(), "cua-bot-web-"));
 	const file = join(dir, "routines.json");
 	const clock = { now: BASE };
 	const registry = createRegistry();

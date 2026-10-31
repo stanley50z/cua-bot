@@ -1,16 +1,16 @@
 # cua-bot
 
-cua-bot (formerly the Grokbot hackathon project) is a self-hosted assistant for one owner. It runs as an always-on Pi Durable service, uses a Cua Space when it needs a computer, and sends email when you are not in the chat. The model is a deployment on your Azure AI Foundry resource (Grok 4.6 by default), called through Foundry's OpenAI-compatible API ([src/models.ts](src/models.ts)). The computer-use helper uses the same model.
+cua-bot is a self-hosted assistant for one owner. It runs as an always-on Pi Durable service, uses a Cua Space when it needs a computer, and sends email when you are not in the chat. Models come from any OpenAI-compatible endpoint you list in `models.json`, in the same shape as Pi's custom providers ([src/models.ts](src/models.ts)). The computer-use helper uses the same model as the bot.
 
 ## Architecture
 
-- `src/main.ts` opens a Pi Durable Harness on `data/grokbot.sqlite`, resumes unfinished and sleeping work, and serves one HTTP server on `127.0.0.1:43142`: `POST /say` (plain text in, plain text out) plus the web app at `/` ([src/app.html](src/app.html)) with its JSON API under `/api/` (see [src/web.ts](src/web.ts)). The chat API ([src/chat.ts](src/chat.ts)): `GET /api/chat` pages the transcript, `POST /api/chat` with `{"text"}` queues a message without waiting, `POST /api/chat/stop` stops the current turn, `GET /api/chat/events` is a server-sent event stream of the live reply, running tools, and new messages, `GET /api/chat/computer` returns the computer pane (Space name, newest screenshot, steps of the latest computer-use run, from [src/computer-view.ts](src/computer-view.ts)), and `/shots/<name>.png` serves computer-use screenshots.
-- `computer_use` runs in the foreground as a Grok subagent with Cua driver tools. On-screen work goes there, one task at a time.
+- `src/main.ts` opens a Pi Durable Harness on `data/cua-bot.sqlite`, resumes unfinished and sleeping work, and serves one HTTP server on `127.0.0.1:43142`: `POST /say` (plain text in, plain text out) plus the web app at `/` ([src/app.html](src/app.html)) with its JSON API under `/api/` (see [src/web.ts](src/web.ts)). The chat API ([src/chat.ts](src/chat.ts)): `GET /api/chat` pages the transcript, `POST /api/chat` with `{"text"}` queues a message without waiting, `POST /api/chat/stop` stops the current turn, `GET /api/chat/events` is a server-sent event stream of the live reply, running tools, and new messages, `GET /api/chat/computer` returns the computer pane (Space name, newest screenshot, steps of the latest computer-use run, from [src/computer-view.ts](src/computer-view.ts)), and `/shots/<name>.png` serves computer-use screenshots.
+- `computer_use` runs in the foreground as a subagent on the bot's model with Cua driver tools. On-screen work goes there, one task at a time.
 - `send_email` sends only to the owner, through Gmail SMTP.
-- Memory ([src/memory.ts](src/memory.ts)) is plain markdown under `data/memory/`, after Grok Bot's design: `profile.md` for lasting facts about the owner and `log/YYYY-MM.md` for dated ones, one fact per line as `- (YYYY-MM-DD) fact`. The bot saves with `remember`, removes with `forget`, and searches older facts with `recall`. Every request carries a memory section with the profile facts and the 30 most recent log facts, capped at 4,000 characters. The files are re-read on every request, so hand edits apply at once.
+- Memory ([src/memory.ts](src/memory.ts)) is plain markdown under `data/memory/`: `profile.md` for lasting facts about the owner and `log/YYYY-MM.md` for dated ones, one fact per line as `- (YYYY-MM-DD) fact`. The bot saves with `remember`, removes with `forget`, and searches older facts with `recall`. Every request carries a memory section with the profile facts and the 30 most recent log facts, capped at 4,000 characters. The files are re-read on every request, so hand edits apply at once.
 - Routines (`schedule`, `list_routines`, `run_routine`, `cancel_routine`) are durable sleeping tasks, one per routine. A schedule is a 5-field cron string, a nickname like `@daily`, or `@every 30m`, optionally prefixed `CRON_TZ=Area/City`, parsed with `croner` (see [src/cron.ts](src/cron.ts)). The legacy `everyMinutes`/`dailyAt`/`weeklyOn` objects are still accepted and converted. A deadline that passed while the bot was down fires once on restart; missed slots are not replayed. At most 50 routines. Definitions live in `routines.json` in the project root; the chat tools, the web app, and hand edits all sync through that file (a watcher applies hand edits within a second or two).
 - Gmail, Google Calendar, and any other account you connect go through [Executor](https://github.com/UsefulSoftwareCo/executor) Cloud ([src/executor.ts](src/executor.ts)). Executor holds the Google sign-in; the bot holds only an Executor API key and talks to its MCP endpoint: `executor_search` finds a tool and its input type, `executor_describe` reads its full signature, `executor_call` runs it. Accounts you add in Executor later need no code change. Executor's `execute` tool (a JavaScript program over every tool) is not given to the bot, so every call goes through a path the bot can check. Call results are fenced as outside data, because mail and invites are written by other people.
-- Approval cards ([src/approvals.ts](src/approvals.ts)): an Executor operation named send, delete, trash, clear, or remove, or a call Executor itself pauses for approval, does not run. It becomes a card under the bot's reply in the web app. An email card shows the message decoded from what the bot actually wrote (To, Subject, and body are editable before sending, see [src/mime.ts](src/mime.ts)); other actions show the bot's one-line summary and the raw call under Details. Your click runs the call from the server, never from the model, and then the bot gets an `[approval]` message with the outcome. Waiting cards are kept in `data/approvals.json` across restarts and expire after 7 days. When Executor itself holds an approved call for approval, the server accepts the hold, since your click already approved it. Known issue (2026-10-31): sending mail through Executor's generic Google API integration (`tools.google.api.gmail…MessagesSend`) fails with HTTP 400 from Gmail, because Executor posts the message upload to Gmail's non-upload send URL. Executor's dedicated Gmail app (`@executor.sh/gmail` in its catalog) is the likely fix. `GET /api/approvals` lists them; `POST /api/approvals/<id>/approve` (optional JSON `{to, subject, body}` edits) and `POST /api/approvals/<id>/discard` decide one.
+- Approval cards ([src/approvals.ts](src/approvals.ts)): an Executor operation named send, delete, trash, clear, or remove, or a call Executor itself pauses for approval, does not run. It becomes a card under the bot's reply in the web app. An email card shows the message decoded from what the bot actually wrote (To, Subject, and body are editable before sending, see [src/mime.ts](src/mime.ts)); other actions show the bot's one-line summary and the raw call under Details. Your click runs the call from the server, never from the model, and then the bot gets an `[approval]` message with the outcome. Waiting cards are kept in `data/approvals.json` across restarts and expire after 7 days. When Executor itself holds an approved call for approval, the server accepts the hold, since your click already approved it. The bot sends mail with Executor's `tools.google.gmail.send` (or `tools.gmail.send` from the Gmail app), which takes To, Cc, Subject, and body as fields and keeps replies in their thread; Gmail `modify` with `trash: true` also needs a card. Known issue (2026-10-31): the raw Gmail API send (`tools.google.api.gmail…MessagesSend`) fails with HTTP 400, because Executor posts the upload to Gmail's non-upload URL; cards still decode it, but use the field send. `GET /api/approvals` lists them; `POST /api/approvals/<id>/approve` (optional JSON `{to, subject, body}` edits) and `POST /api/approvals/<id>/discard` decide one.
 - Mail to the owner is plain SMTP (`send_email`), separate from Executor.
 
 ## Self-host setup
@@ -20,13 +20,13 @@ Node.js 22.19 or newer (this project is set up for Node 24) and pnpm.
 1. Run `pnpm install` in the project root.
 2. Pair a Cua Space so it shows up in `~/.cua/spaces.json`. With `CUA_SPACE_ID` left blank, the bot uses the first space in that file.
 3. Create a Gmail app password for the account that will send mail.
-4. Set `AZURE_FOUNDRY_BASE_URL` to your Foundry resource's OpenAI endpoint (`https://<resource>.services.ai.azure.com/openai/v1`) and `AZURE_FOUNDRY_API_KEY` to its key, in `.env` or in your user environment. `GROKBOT_MODEL` picks the deployment: `grok-4.6` (default), `gpt-6-astra`, `GLM-5.3-Flash`, or `FW-Kimi-K3`; add others to the list in `src/models.ts`. To use xAI instead, set `GROKBOT_PROVIDER=xai`, then sign in once with `node src/login.ts` (SuperGrok or X Premium, saved to `data/xai-credential.json`) or set `XAI_API_KEY`.
+4. Copy `models.example.json` to `models.json` and list your model endpoints. Each provider has a `baseUrl` (for Azure AI Foundry, `https://<resource>.services.ai.azure.com/openai/v1`), an `api` (`openai-responses` or `openai-completions`, also settable per model), an `apiKey` (`"$NAME"` reads environment variable `NAME`, so the key can stay in `.env` or your user environment), and its `models`, each with the deployment name as `id` plus optional `reasoning`, `thinkingLevelMap`, `input`, `contextWindow`, `maxTokens`, and `cost`. `"default"` is the model the bot runs on, as `"provider/model"`; `CUABOT_MODEL` overrides it. xAI is also built in as `xai/<model>`: sign in once with `node src/login.ts` or set `XAI_API_KEY`. `models.json` is gitignored.
 5. Copy `.env.example` to `.env` and set `OWNER_EMAIL`, `SMTP_USER`, and `SMTP_PASS`.
 6. For Gmail and Calendar: sign in at [executor.sh](https://executor.sh), add the Gmail and Google Calendar integrations and connect your Google account, then set `EXECUTOR_MCP_URL` to the URL on the Connect card and `EXECUTOR_API_KEY` to a key from the API keys page. Without them the bot runs with Gmail and Calendar off.
 
 Check everything with `node --env-file-if-exists=.env src/preflight.ts` while the bot is stopped. It prints one line per check (the model, SMTP, the Space, Executor's connected accounts, the port) and never prints secrets.
 
-`GROKBOT_PORT` defaults to `43142`. The server listens on `127.0.0.1` only.
+`CUABOT_PORT` defaults to `43142`. The server listens on `127.0.0.1` only.
 
 ## Usage
 
@@ -36,7 +36,7 @@ Start it in the background. This does not open a terminal window.
 python start.py
 ```
 
-When the port accepts connections, the script prints the `/say` URL and the web app URL. If `data/grokbot.pid.json` already points at a live process, it refuses to start another one.
+When the port accepts connections, the script prints the `/say` URL and the web app URL. If `data/cua-bot.pid.json` already points at a live process, it refuses to start another one.
 
 ### The web app
 
@@ -82,14 +82,14 @@ Stop it:
 python stop.py
 ```
 
-That stops the recorded process and its children, checks that the process has exited and the port is free, then removes `data/grokbot.pid.json`. It only signals the pid in that file.
+That stops the recorded process and its children, checks that the process has exited and the port is free, then removes `data/cua-bot.pid.json`. It only signals the pid in that file.
 
 ## Debugging artifacts
 
-- `data/logs/grokbot.log` — service log, one line per event.
+- `data/logs/cua-bot.log` — service log, one line per event.
 - `data/logs/stdout.log` — stdout and stderr from the process `start.py` launched.
 - `data/crash/` — crash reports. The file name is the time, and the file contains the stack trace.
-- `data/grokbot.sqlite` — Harness database, including sleeping routines and their last-fired times.
+- `data/cua-bot.sqlite` — Harness database, including sleeping routines and their last-fired times.
 - `routines.json` — routine definitions (project root). Edit it directly or in the web app; the bot syncs from it.
 - `data/shots/` — screenshots taken during computer use.
 - `data/memory/` — what the bot remembers about you: `profile.md` and `log/YYYY-MM.md`.
@@ -99,4 +99,4 @@ That stops the recorded process and its children, checks that the process has ex
 
 1. Start the bot with `python start.py`, then schedule a routine one minute out that screenshots Notes on the Mac and emails the shot: `python say.py "Schedule a routine for one minute from now. Screenshot Notes on the Mac and email it to me."`
 2. While the routine is sleeping, run `python stop.py`, then `python start.py`.
-3. The email still arrives on time. The schedule is stored in `data/grokbot.sqlite`, and startup resumes sleeping work.
+3. The email still arrives on time. The schedule is stored in `data/cua-bot.sqlite`, and startup resumes sleeping work.

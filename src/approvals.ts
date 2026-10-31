@@ -39,16 +39,62 @@ export type EmailEdit = { to: string; subject: string; body: string };
 
 export class ApprovalError extends Error {}
 
-// gmailUsersMessagesTrash → "Trash gmail messages"; the send operations get plain names.
+// gmailUsersMessagesTrash → "Trash gmail messages", calendar.events.delete → "Delete calendar events".
 export function titleFor(path: string): string {
 	const op = path.split(".").at(-1) ?? path;
 	if (/MessagesSend$/.test(op)) return "Send email";
 	if (/DraftsSend$/.test(op)) return "Send draft";
 	const words = op.split(/(?=[A-Z])/).filter((word) => word !== "Users");
 	const verb = words.pop() ?? op;
-	return [verb, ...words.map((word) => word.toLowerCase())].join(" ");
+	const rest = words.length > 0 ? words : (path.split(".").slice(-2, -1) as string[]);
+	return [verb.charAt(0).toUpperCase() + verb.slice(1), ...rest.map((word) => word.toLowerCase())].join(" ");
 }
 
+// Executor's Gmail helpers (tools.google.gmail.send, tools.gmail.send) take the message as fields.
+type FieldsSend = { to?: string[] | null; cc?: string[] | null; subject?: string | null; body: string; html?: boolean | null; replyToMessageId?: string | null };
+
+const addresses = (text: string) =>
+	text
+		.split(/[,;]/)
+		.map((part) => part.trim())
+		.filter((part) => part !== "");
+
+/** A send as the card shows it, and how the owner's edit changes the call. Undefined when it isn't mail. */
+function emailForm(path: string, input: unknown): { input: unknown; view?: EmailView; apply?: (edit: EmailEdit) => unknown } | undefined {
+	if (/MessagesSend$/.test(path)) {
+		const upload = asUpload(input);
+		if (upload === undefined) return undefined;
+		let view: EmailView | undefined;
+		try {
+			view = readRaw(upload.input.body);
+		} catch {
+			view = undefined;
+		}
+		return { input: upload, ...(view === undefined ? {} : { view }), apply: (edit) => ({ ...upload, input: { ...upload.input, body: writeRaw(upload.input.body, edit) } }) };
+	}
+	const fields = input as FieldsSend | undefined;
+	if (!/\.send$/.test(path) || typeof fields?.body !== "string") return undefined;
+	const reply = typeof fields.replyToMessageId === "string" && fields.replyToMessageId !== "";
+	const view: EmailView = {
+		to: (fields.to ?? []).join(", "),
+		...(fields.cc?.length ? { cc: fields.cc.join(", ") } : {}),
+		subject: fields.subject ?? "",
+		body: fields.body,
+		editable: fields.html !== true,
+		...(reply ? { reply: true } : {}),
+	};
+	return {
+		input,
+		view,
+		// A reply left without To or Subject keeps Gmail's defaults: the original sender, "Re: …".
+		apply: (edit) => ({
+			...fields,
+			to: addresses(edit.to).length > 0 ? addresses(edit.to) : (fields.to ?? null),
+			subject: edit.subject !== "" ? edit.subject : (fields.subject ?? null),
+			body: edit.body,
+		}),
+	};
+}
 
 type SendInput = { input: { contentType: "message/rfc822"; body: string; [key: string]: unknown }; [key: string]: unknown };
 
@@ -141,7 +187,7 @@ export function createApprovals(options: { file: string; call: ExecutorCall; not
 
 	function describe(approval: Approval): string {
 		const email = approval.email;
-		if (email !== undefined) return `${approval.title} to ${email.to}: "${email.subject}"`;
+		if (email !== undefined) return `${approval.title} to ${email.to || "the original sender"}: "${email.subject || "Re: the original subject"}"`;
 		return approval.summary === undefined ? approval.title : `${approval.title}: ${approval.summary}`;
 	}
 
@@ -156,21 +202,14 @@ export function createApprovals(options: { file: string; call: ExecutorCall; not
 		/** File a request for the owner. Called by the executor extension instead of running the call. */
 		request: (input: { callId: string; path: string; input: unknown; summary?: string; pausedRequestId?: string }) =>
 			change((all) => {
-				const upload = /MessagesSend$/.test(input.path) ? asUpload(input.input) : undefined;
-				let email: EmailView | undefined;
-				if (upload !== undefined) {
-					try {
-						email = readRaw(upload.input.body);
-					} catch {
-						email = undefined;
-					}
-				}
+				const form = emailForm(input.path, input.input);
+				const email = form?.view;
 				const approval: Approval = {
 					id: `ap_${now().toString(36)}${Math.random().toString(36).slice(2, 8)}`,
 					callId: input.callId,
 					path: input.path,
-					input: upload ?? input.input,
-					title: titleFor(input.path),
+					input: form?.input ?? input.input,
+					title: email === undefined ? titleFor(input.path) : email.reply ? "Send reply" : "Send email",
 					...(input.summary === undefined || input.summary.trim() === "" ? {} : { summary: input.summary.trim() }),
 					...(email === undefined ? {} : { email }),
 					...(input.pausedRequestId === undefined ? {} : { pausedRequestId: input.pausedRequestId }),
@@ -186,14 +225,14 @@ export function createApprovals(options: { file: string; call: ExecutorCall; not
 			const started = await change((all) => {
 				const approval = find(all, id);
 				// Also converts a send filed by an older version in another form.
-				const upload = /MessagesSend$/.test(approval.path) ? asUpload(approval.input) : undefined;
-				if (upload !== undefined) approval.input = upload;
+				const form = emailForm(approval.path, approval.input);
+				if (form !== undefined) approval.input = form.input;
 				if (edit !== undefined) {
-					if (upload === undefined || approval.email?.editable !== true) throw new ApprovalError("This request can't be edited.");
-					if (edit.to.trim() === "") throw new ApprovalError("To can't be empty.");
+					if (form?.apply === undefined || approval.email?.editable !== true) throw new ApprovalError("This request can't be edited.");
+					if (edit.to.trim() === "" && approval.email.reply !== true) throw new ApprovalError("To can't be empty.");
 					const changed = edit.to !== approval.email.to || edit.subject !== approval.email.subject || edit.body !== approval.email.body;
 					if (changed) {
-						approval.input = { ...upload, input: { ...upload.input, body: writeRaw(upload.input.body, edit) } };
+						approval.input = form.apply(edit);
 						approval.email = { ...approval.email, to: edit.to, subject: edit.subject, body: edit.body };
 						approval.edited = true;
 					}

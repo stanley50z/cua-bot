@@ -469,6 +469,8 @@ function waitingCard(a) {
       const r = el("label", "row");
       const input = el("input");
       input.value = draft[key];
+      // A reply left blank keeps Gmail's defaults.
+      if (email.reply) input.placeholder = key === "to" ? "The original sender" : "Re: the original subject";
       input.disabled = running;
       input.addEventListener("input", () => { draft[key] = input.value; changed(); });
       r.append(el("span", "", label), input);
@@ -520,9 +522,10 @@ function waitingCard(a) {
 function receipt(a) {
   const ok = a.status === "done", bad = a.status === "failed";
   const line = el("div", "receipt" + (ok ? " ok" : bad ? " bad" : ""));
-  const what = a.email ? `${a.title} to ${a.email.to}` : a.summary ? `${a.title}: ${a.summary}` : a.title;
+  const to = a.email ? a.email.to || "the original sender" : "";
+  const what = a.email ? `${a.title} to ${to}` : a.summary ? `${a.title}: ${a.summary}` : a.title;
   const when = a.decidedAt ? ` at ${time(a.decidedAt)}` : "";
-  if (ok) line.append(el("b", "", a.email ? "✓ Sent" : "✓ Done"), (a.email ? ` to ${a.email.to}` : ` ${what}`) + when + (a.edited ? ", with your edits" : ""));
+  if (ok) line.append(el("b", "", a.email ? "✓ Sent" : "✓ Done"), (a.email ? ` to ${to}` : ` ${what}`) + when + (a.edited ? ", with your edits" : ""));
   else if (bad) line.append(el("b", "", "Failed"), ` ${what}: ${(a.outcome || "").split("\n")[0].slice(0, 160)}`);
   else if (a.status === "discarded") line.append(el("b", "", "Discarded"), ` ${what}`);
   else line.append(el("b", "", "Expired"), ` ${what}. It waited 7 days without an answer.`);
@@ -532,7 +535,7 @@ function receipt(a) {
     show.type = "button";
     show.addEventListener("click", () => { state.open.has(key) ? state.open.delete(key) : state.open.add(key); cards.delete(a.id); renderChat(); });
     line.append(show);
-    if (state.open.has(key)) line.append(el("pre", "result", `To: ${a.email.to}\nSubject: ${a.email.subject}\n\n${a.email.body}`));
+    if (state.open.has(key)) line.append(el("pre", "result", `To: ${to}\nSubject: ${a.email.subject || "Re: the original subject"}\n\n${a.email.body}`));
   }
   return line;
 }

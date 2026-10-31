@@ -51,8 +51,11 @@ export function createExecutor(connect: () => Promise<McpClient>) {
 
 export type Executor = ReturnType<typeof createExecutor>;
 
-/** True when calling the tool at this path would send something or delete something. */
-export const sendsOrDeletes = (path: string) => SEND_OR_DELETE.test(path.split(".").at(-1) ?? "");
+/** True when this call would send something or delete something, including Gmail modify with trash. */
+export function sendsOrDeletes(path: string, input?: unknown): boolean {
+	const op = path.split(".").at(-1) ?? "";
+	return SEND_OR_DELETE.test(op) || (op === "modify" && (input as { trash?: unknown } | undefined)?.trash === true);
+}
 
 const text = (value: string) => ({ output: [{ type: "text" as const, text: value }] });
 const failure = (value: string) => ({ ...text(value), isError: true as const });
@@ -110,7 +113,7 @@ export function createExecutorExtension(options: { executor: Executor; approvals
 	const call = defineTool({
 		name: "executor_call",
 		description:
-			"Call one tool at an exact path from executor_search, with input matching its input type (including accountId). Sending mail and deleting don't run right away: they become an approval card for the owner. To send an email, call gmailUsersMessagesSend with input { path: { userId: 'me' }, contentType: 'message/rfc822', body } where body is the base64 of an RFC 2822 message (To, Subject, then a blank line and the plain-text body).",
+			"Call one tool at an exact path from executor_search, with input matching its input type (including accountId). Sending mail and deleting don't run right away: they become an approval card for the owner. To send an email, use tools.google.gmail.send with { to: [addresses], subject, body }; for a reply, pass replyToMessageId and leave out to and subject unless they should change.",
 		parameters: Type.Object({
 			path: Type.String({ description: "Exact path from executor_search, such as tools.google.api.gmail.users.gmailUsersMessagesList" }),
 			input: Type.Unknown({ description: "The tool's input, matching its input type" }),
@@ -120,7 +123,7 @@ export function createExecutorExtension(options: { executor: Executor; approvals
 		}),
 		execute: async (args, api, context) => {
 			const request = { callId: api.callId, path: args.path, input: args.input, ...(args.summary === undefined ? {} : { summary: args.summary }) };
-			if (sendsOrDeletes(args.path)) {
+			if (sendsOrDeletes(args.path, args.input)) {
 				await approvals.request(request);
 				return text(WAITING);
 			}

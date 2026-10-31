@@ -5,8 +5,6 @@
 // into the Durable doc and sleeper tasks; the chat tools and the web UI both go through it, so
 // hand edits, GUI edits, and model edits converge. The host calls bindRoutines({harness, root})
 // after Harness.open, then syncRoutines() once at startup.
-// Stored state is version 2 (cron strings); version 1 stored the legacy schedule objects from
-// @trycua/cua/spaces/routines, and both migrates below convert them with legacyToCron.
 import { watch } from "node:fs";
 import { basename, dirname } from "node:path";
 import type { Context } from "@earendil-works/chord";
@@ -22,7 +20,7 @@ import {
 	section,
 	type TaskId,
 } from "@earendil-works/pi-durable";
-import { cronLabel, legacyToCron, nextFire, toCronSpec, type LegacySchedule } from "./cron.ts";
+import { cronLabel, nextFire, toCronSpec, type LegacySchedule } from "./cron.ts";
 import {
 	DEFAULT_ROUTINE_FILE,
 	MAX_ROUTINES,
@@ -44,69 +42,14 @@ type RoutinesState = {
 	items: { [id: string]: RoutineItem };
 };
 
-function asRecord(value: unknown, what: string): Record<string, unknown> {
-	if (value === null || typeof value !== "object" || Array.isArray(value)) {
-		throw new Error(`stored ${what} is not an object`);
-	}
-	return value as Record<string, unknown>;
-}
-
-function asString(value: unknown, what: string): string {
-	if (typeof value !== "string") throw new Error(`stored ${what} is not a string`);
-	return value;
-}
-
-function asNumber(value: unknown, what: string): number {
-	if (typeof value !== "number" || !Number.isFinite(value)) throw new Error(`stored ${what} is not a number`);
-	return value;
-}
-
-function asLegacySchedule(value: unknown): LegacySchedule {
-	const record = asRecord(value, "schedule");
-	switch (record.kind) {
-		case "everyMinutes":
-			return { kind: "everyMinutes", minutes: asNumber(record.minutes, "schedule minutes") };
-		case "dailyAt":
-			return {
-				kind: "dailyAt",
-				hour: asNumber(record.hour, "schedule hour"),
-				minute: asNumber(record.minute, "schedule minute"),
-			};
-		case "weeklyOn":
-			return {
-				kind: "weeklyOn",
-				weekday: asNumber(record.weekday, "schedule weekday"),
-				hour: asNumber(record.hour, "schedule hour"),
-				minute: asNumber(record.minute, "schedule minute"),
-			};
-		default:
-			throw new Error(`stored schedule kind ${JSON.stringify(record.kind)} is unknown`);
-	}
-}
-
 const RoutinesDoc = defineDoc<RoutinesState>({
-	kind: "grokbot.routines",
-	version: 2,
+	kind: "cua-bot.routines",
+	version: 1,
 	scope: "conversation",
 	history: "latest",
 	// A fork is a different chat. It does not inherit routines whose tasks still belong to the parent.
 	fork: "initial",
 	initial: () => ({ items: {} }),
-	migrate: (value, fromVersion) => {
-		if (fromVersion !== 1) throw new Error(`cannot migrate grokbot.routines from version ${fromVersion}`);
-		const items = asRecord(asRecord(value, "routines doc").items, "routines doc items");
-		const migrated: RoutinesState = { items: {} };
-		for (const [id, raw] of Object.entries(items)) {
-			const item = asRecord(raw, `routine ${id}`);
-			migrated.items[id] = {
-				title: asString(item.title, `routine ${id} title`),
-				prompt: asString(item.prompt, `routine ${id} prompt`),
-				cron: legacyToCron(asLegacySchedule(item.schedule)),
-				taskId: asNumber(item.taskId, `routine ${id} taskId`) as TaskId,
-			};
-		}
-		return migrated;
-	},
 	checkpointWhen: () => false,
 });
 
@@ -147,29 +90,10 @@ function routineTurnText(
 	].join("\n");
 }
 
-function migrateRoutineCheckpoint(value: unknown): RoutineState {
-	const record = asRecord(value, "routine checkpoint");
-	if (record.phase === "wait") return { phase: "wait" };
-	if (record.phase === "fire") return { phase: "fire", due: asNumber(record.due, "routine checkpoint due") };
-	throw new Error(`stored routine checkpoint phase ${JSON.stringify(record.phase)} is unknown`);
-}
-
 const RoutineTask = defineTask<RoutineInput, RoutineState, null>({
-	name: "grokbot.routine",
-	version: 2,
+	name: "cua-bot.routine",
+	version: 1,
 	initial: () => ({ phase: "wait" }),
-	migrate: (input, checkpoint, fromVersion) => {
-		if (fromVersion !== 1) throw new Error(`cannot migrate grokbot.routine from version ${fromVersion}`);
-		const old = asRecord(input, "routine input");
-		return {
-			input: {
-				title: asString(old.title, "routine input title"),
-				prompt: asString(old.prompt, "routine input prompt"),
-				cron: legacyToCron(asLegacySchedule(old.schedule)),
-			},
-			checkpoint: migrateRoutineCheckpoint(checkpoint),
-		};
-	},
 	phases: {
 		// Sleep until the next slot. The phase ends once the sleep is stored.
 		wait: async (task, runtime, ctx) => {

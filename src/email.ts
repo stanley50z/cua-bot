@@ -30,7 +30,7 @@ async function rejectedAttachments(paths: readonly string[]): Promise<string[]> 
 	return problems;
 }
 
-// Installed by the grokbot service (`registry.install(createEmailExtension())`).
+// Installed by the cua-bot service (`registry.install(createEmailExtension())`).
 // Gives the agent send_email, which always writes to OWNER_EMAIL.
 export function createEmailExtension(options?: { transport?: Transporter }): Extension {
 	let gmail: Transporter | undefined;

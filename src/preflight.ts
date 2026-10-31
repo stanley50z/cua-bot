@@ -6,11 +6,11 @@ import { existsSync, readFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { join } from "node:path";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
-import { AssistantEntry, createRegistry, Harness, MemoryStorage } from "@earendil-works/pi-durable";
+import { AssistantEntry, createRegistry, Harness, MemoryStorage, type ModelRef } from "@earendil-works/pi-durable";
 import { createTransport } from "nodemailer";
 import { listDriverToolNames } from "./computer.ts";
 import { connectExecutor } from "./executor.ts";
-import { createBotModels, MODEL } from "./models.ts";
+import { botModel, createBotModels } from "./models.ts";
 import { CREDENTIAL_FILE } from "./xai-auth.ts";
 
 const REQUIRED_ENV = ["OWNER_EMAIL", "SMTP_USER", "SMTP_PASS"] as const;
@@ -45,7 +45,7 @@ function clip(text: string, max = 200): string {
 // Values that must never appear in check output: env secrets, plus token fields from the credential file.
 function secretValues(): string[] {
 	const found: string[] = [];
-	for (const name of ["SMTP_PASS", "XAI_API_KEY", "EXECUTOR_API_KEY", "AZURE_FOUNDRY_API_KEY"]) {
+	for (const name of ["SMTP_PASS", "XAI_API_KEY", "EXECUTOR_API_KEY", "AZURE_FOUNDRY_API_KEY", "AZURE_FOUNDRY_2_API_KEY"]) {
 		const value = process.env[name]?.trim();
 		if (value !== undefined && value.length >= 8) found.push(value);
 	}
@@ -131,35 +131,37 @@ function checkEnv(): Check {
 }
 
 // Confirms the bot's model answers, with one short completion on an in-memory Harness. Does not open
-// data/grokbot.sqlite.
+// data/cua-bot.sqlite.
 async function checkModel(): Promise<Check> {
-	const name = `${MODEL.provider}/${MODEL.modelId}`;
-	let fix: string;
-	if (MODEL.provider === "azure-foundry") {
-		fix = "Fix: set AZURE_FOUNDRY_BASE_URL and AZURE_FOUNDRY_API_KEY, and GROKBOT_MODEL to a deployment name";
-		if (!process.env.AZURE_FOUNDRY_BASE_URL?.trim()) return report("FAIL", "model", `${name}: AZURE_FOUNDRY_BASE_URL is unset. ${fix}`);
-		if (!process.env.AZURE_FOUNDRY_API_KEY?.trim()) return report("FAIL", "model", `${name}: AZURE_FOUNDRY_API_KEY is unset. ${fix}`);
-	} else {
+	let model: ModelRef;
+	try {
+		model = botModel();
+	} catch (error) {
+		return report("FAIL", "model", messageOf(error));
+	}
+	const name = `${model.provider}/${model.modelId}`;
+	let fix = "Fix: check the provider's baseUrl, apiKey, and model id in models.json";
+	if (model.provider === "xai") {
 		fix = "Fix: run `node src/login.ts` or set XAI_API_KEY";
 		const stored = credentialState();
 		if (stored === "invalid") return report("FAIL", "model", `data/xai-credential.json is not valid JSON. ${fix}`);
 		if (stored !== "present" && !process.env.XAI_API_KEY?.trim()) return report("FAIL", "model", `${name}: no xAI sign-in and XAI_API_KEY is unset. ${fix}`);
 	}
 	try {
-		const reply = await deadline(XAI_TIMEOUT_MS, askModel(), "model");
+		const reply = await deadline(XAI_TIMEOUT_MS, askModel(model), "model");
 		return report("PASS", "model", `${name} replied ${JSON.stringify(reply.length > 0 ? reply : "(empty)")}`);
 	} catch (error) {
 		return report("FAIL", "model", `${name}: ${messageOf(error)}. ${fix}`);
 	}
 }
 
-async function askModel(): Promise<string> {
+async function askModel(model: ModelRef): Promise<string> {
 	const models = createBotModels();
 	const registry = createRegistry();
 	const harness = await Harness.open(new MemoryStorage(), { models, registry }, BACKGROUND_CONTEXT);
 	try {
 		const root = await harness.root(BACKGROUND_CONTEXT, {
-			agent: { model: MODEL, thinkingLevel: "off" },
+			agent: { model, thinkingLevel: "off" },
 		});
 		harness.resume();
 		const settled = await (
@@ -225,10 +227,10 @@ async function checkSpace(): Promise<Check> {
 }
 
 function checkPort(): Promise<Check> {
-	const raw = process.env.GROKBOT_PORT;
+	const raw = process.env.CUABOT_PORT;
 	const port = raw === undefined || raw.trim() === "" ? 43142 : Number(raw);
 	if (!Number.isInteger(port) || port < 1 || port > 65535) {
-		return Promise.resolve(report("FAIL", "port", `GROKBOT_PORT ${JSON.stringify(raw ?? "")} is not a usable port`));
+		return Promise.resolve(report("FAIL", "port", `CUABOT_PORT ${JSON.stringify(raw ?? "")} is not a usable port`));
 	}
 	return new Promise((resolve) => {
 		const server = createServer();
@@ -246,9 +248,9 @@ function checkPort(): Promise<Check> {
 }
 
 function checkData(): Check {
-	const exists = existsSync(join(import.meta.dirname, "..", "data", "grokbot.sqlite"));
-	if (exists) return report("INFO", "data", "data/grokbot.sqlite exists; existing conversation will be reused");
-	return report("INFO", "data", "data/grokbot.sqlite does not exist");
+	const exists = existsSync(join(import.meta.dirname, "..", "data", "cua-bot.sqlite"));
+	if (exists) return report("INFO", "data", "data/cua-bot.sqlite exists; existing conversation will be reused");
+	return report("INFO", "data", "data/cua-bot.sqlite does not exist");
 }
 
 // Signs in to Executor with the API key and looks for Gmail and Calendar tools. Read-only: search only.

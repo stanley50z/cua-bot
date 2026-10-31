@@ -129,6 +129,23 @@ test("when Executor holds an approved send for its own approval, the owner's cli
 		(call) => (call.name === "call" ? textResult('{"status":"approval-required","requestId":"apr_9"}') : OK),
 	));
 
+test("Executor's field-based Gmail send shows as an email, and edits change the fields", () =>
+	withStore(async ({ approvals, calls }) => {
+		const path = "tools.google.gmail.send";
+		const card = await approvals.request({ callId: "f", path, input: { to: ["sarah@studio.org"], subject: "Friday", body: "2 PM?" } });
+		assert.equal(card.title, "Send email");
+		assert.deepEqual(card.email, { to: "sarah@studio.org", subject: "Friday", body: "2 PM?", editable: true });
+		await approvals.approve(card.id, { to: "sarah@studio.org, dana@studio.org", subject: "Friday review", body: "2 PM works?" });
+		assert.deepEqual((calls[0]?.args as { calls: { input: unknown } }).calls.input, { to: ["sarah@studio.org", "dana@studio.org"], subject: "Friday review", body: "2 PM works?" });
+
+		// A reply leaves To and Subject to Gmail unless the owner fills them in.
+		const reply = await approvals.request({ callId: "r", path, input: { replyToMessageId: "m1", body: "Sounds good." } });
+		assert.equal(reply.title, "Send reply");
+		assert.deepEqual(reply.email, { to: "", subject: "", body: "Sounds good.", editable: true, reply: true });
+		await approvals.approve(reply.id, { to: "", subject: "", body: "Sounds good, see you then." });
+		assert.deepEqual((calls[1]?.args as { calls: { input: unknown } }).calls.input, { replyToMessageId: "m1", to: null, subject: null, body: "Sounds good, see you then." });
+	}));
+
 test("discarding runs nothing, and a failed call is reported as failed", () =>
 	withStore(
 		async ({ approvals, calls, notes }) => {

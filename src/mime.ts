@@ -8,8 +8,10 @@ export type EmailView = {
 	cc?: string;
 	subject: string;
 	body: string;
-	/** False for multipart mail (HTML, attachments): shown, but only sendable as written. */
+	/** False for multipart or HTML mail: shown, but only sendable as written. */
 	editable: boolean;
+	/** A reply in an existing thread; blank To and Subject mean Gmail's defaults (the sender, "Re: …"). */
+	reply?: boolean;
 };
 
 type Header = { name: string; value: string };

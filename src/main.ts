@@ -1,5 +1,5 @@
-// grokbot service entry point. Run with `pnpm start` (or start.py). Opens the Pi Durable Harness on
-// data/grokbot.sqlite, resumes any unfinished or sleeping work, and accepts owner messages on
+// cua-bot service entry point. Run with `pnpm start` (or start.py). Opens the Pi Durable Harness on
+// data/cua-bot.sqlite, resumes any unfinished or sleeping work, and accepts owner messages on
 // POST http://127.0.0.1:43142/say (body: plain text; reply: the bot's answer as plain text).
 // The same server hosts the routines GUI at http://127.0.0.1:43142/ (see src/web.ts).
 import { mkdirSync, writeFileSync } from "node:fs";
@@ -18,8 +18,8 @@ import { createMemory, createMemoryExtension } from "./memory.ts";
 import { bindRoutines, createRoutinesExtension, startRoutineFileWatch, syncRoutines } from "./routines.ts";
 import { traceExtension } from "./trace.ts";
 import { createBotServer } from "./web.ts";
-import { createBotModels, MODEL } from "./models.ts";
-const PORT = Number(process.env.GROKBOT_PORT || 43142);
+import { botModel, createBotModels } from "./models.ts";
+const PORT = Number(process.env.CUABOT_PORT || 43142);
 const CRASH_DIR = join(DATA_DIR, "crash");
 mkdirSync(CRASH_DIR, { recursive: true });
 
@@ -33,7 +33,8 @@ process.on("uncaughtException", crash("uncaughtException"));
 process.on("unhandledRejection", crash("unhandledRejection"));
 
 const context = BACKGROUND_CONTEXT;
-const models = createBotModels(); // Azure AI Foundry by default; see src/models.ts
+const models = createBotModels(); // providers from models.json; see src/models.ts
+const MODEL = botModel();
 
 const registry = createRegistry();
 registry.install(
@@ -44,7 +45,7 @@ registry.install(
 				"preamble",
 				() =>
 					[
-						"You are Grokbot, a self-hosted personal agent that runs 24/7 for one owner.",
+						"You are cua-bot, a self-hosted personal agent that runs 24/7 for one owner.",
 						`The owner's email is ${process.env.OWNER_EMAIL || "(unset)"}. Email is how you reach the owner when they are not chatting with you.`,
 						"You never operate a computer yourself: delegate every on-screen task to computer_use, one at a time.",
 						"For recurring or future work, create a routine with schedule. A message starting with [routine] is a routine firing: do the work, and email the owner only if the outcome is worth it.",
@@ -77,7 +78,7 @@ if (executorUrl && executorKey) {
 	log("executor: EXECUTOR_MCP_URL or EXECUTOR_API_KEY unset; Gmail and Calendar are off");
 }
 
-const storage = await openNodeSqliteStorage(join(DATA_DIR, "grokbot.sqlite"));
+const storage = await openNodeSqliteStorage(join(DATA_DIR, "cua-bot.sqlite"));
 const harness = await Harness.open(storage, { models, registry }, context);
 const root = await harness.root(context, { agent: { model: MODEL, thinkingLevel: "medium" } });
 // root() sets the agent only when it creates the conversation; apply the configured model to an existing one too.
@@ -91,7 +92,7 @@ log(
 const stopWatching = startRoutineFileWatch(context, (error) =>
 	log("routine file sync failed:", error instanceof Error ? error.message : String(error)),
 );
-log(`grokbot up: model ${MODEL.provider}/${MODEL.modelId}, root ${root.id}`);
+log(`cua-bot up: model ${MODEL.provider}/${MODEL.modelId}, root ${root.id}`);
 
 // Submits one owner message to the root conversation and returns the answer text.
 async function say(text: string): Promise<string> {
