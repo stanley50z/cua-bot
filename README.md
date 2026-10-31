@@ -7,7 +7,7 @@ cua-bot (formerly the Grokbot hackathon project) is a self-hosted assistant for 
 - `src/main.ts` opens a Pi Durable Harness on `data/grokbot.sqlite`, resumes unfinished and sleeping work, and answers `POST /say` with plain text.
 - `computer_use` runs in the foreground as a Grok subagent with Cua driver tools. On-screen work goes there, one task at a time.
 - `send_email` sends only to the owner, through Gmail SMTP.
-- `schedule`, `list`, and `cancel` are durable sleeping tasks. They use Cua's `RoutineSchedule` and `nextFireDate`, and they survive a restart.
+- Routines (`schedule`, `list_routines`, `run_routine`, `cancel_routine`) are durable sleeping tasks, one per routine. A schedule is a 5-field cron string, a nickname like `@daily`, or `@every 30m`, optionally prefixed `CRON_TZ=Area/City`, parsed with `croner` (see [src/cron.ts](src/cron.ts)). The legacy `everyMinutes`/`dailyAt`/`weeklyOn` objects are still accepted and converted. A deadline that passed while the bot was down fires once on restart; missed slots are not replayed. At most 50 routines.
 - Outbound mail is plain SMTP. Google's official Gmail MCP is Developer Preview only and has no send tool.
 
 ## Self-host setup

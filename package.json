@@ -6,7 +6,8 @@
   "description": "Self-hosted Grok bot: Pi Durable service + Cua Spaces computer use + proactive email",
   "scripts": {
     "start": "node --env-file-if-exists=.env src/main.ts",
-    "check": "tsc --noEmit"
+    "check": "tsc --noEmit",
+    "test": "node --test test/cron.test.ts test/routines.test.ts test/email.test.ts"
   },
   "engines": {
     "node": ">=22.19.0"
@@ -17,6 +18,7 @@
     "@earendil-works/pi-durable": "^1.4.0",
     "@earendil-works/pi-mcp": "^1.4.0",
     "@trycua/cua": "^0.9.0",
+    "croner": "^11.0.0",
     "nodemailer": "^10.2.1"
   },
   "devDependencies": {

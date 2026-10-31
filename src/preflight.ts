@@ -1,4 +1,4 @@
-// Demo pre-flight. Run from the project root while the bot is stopped:
+// Pre-flight check. Run from the project root while the bot is stopped:
 //   node --env-file-if-exists=.env src/preflight.ts
 // Prints one line per check. Exits 0 when every check passes, and 1 otherwise.
 // Never prints tokens or passwords. OWNER_EMAIL is safe to print.
