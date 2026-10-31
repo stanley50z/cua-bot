@@ -2,10 +2,10 @@
 // and state written by the pre-cron (v1) code. Run from the repo root:
 //   node --test test/routines.test.ts
 import assert from "node:assert/strict";
-import { copyFile, mkdtemp, rm } from "node:fs/promises";
+import { copyFile, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { test } from "node:test";
+import { after, test } from "node:test";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { type AssistantMessage, type FauxResponseStep, type Message } from "@earendil-works/pi-ai";
 import { createModels } from "@earendil-works/pi-ai/models";
@@ -21,7 +21,7 @@ import {
 	type TaskId,
 } from "@earendil-works/pi-durable";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
-import { bindRoutines, createRoutinesExtension } from "../src/routines.ts";
+import { bindRoutines, createRoutinesExtension, syncRoutines } from "../src/routines.ts";
 
 const context = BACKGROUND_CONTEXT;
 const TITLE = "Morning sweep";
@@ -29,6 +29,17 @@ const PROMPT = "Triage the inbox";
 const MODEL = { provider: "faux", modelId: "faux-1" } as const;
 // Tue 2023-11-14T22:13:20Z. The v1 fixture was generated at this instant too.
 const BASE = 1_700_000_000_000;
+
+const tempDirs: string[] = [];
+after(async () => {
+	for (const dir of tempDirs) await rm(dir, { recursive: true, force: true });
+});
+
+async function freshRoutineFile(): Promise<string> {
+	const dir = await mkdtemp(join(tmpdir(), "grokbot-routines-file-"));
+	tempDirs.push(dir);
+	return join(dir, "routines.json");
+}
 
 function messageText(message: Message): string {
 	const content = message.content;
@@ -101,9 +112,15 @@ type Opened = {
 	reports: string[];
 	harness: Harness;
 	root: Conversation;
+	routineFile: string;
 };
 
-async function openSession(storage: Storage, clock: { now: number }, models: ReturnType<typeof scriptedModel>): Promise<Opened> {
+async function openSession(
+	storage: Storage,
+	clock: { now: number },
+	models: ReturnType<typeof scriptedModel>,
+	routineFile?: string,
+): Promise<Opened> {
 	const reports: string[] = [];
 	const registry = createRegistry();
 	registry.install(createRoutinesExtension());
@@ -118,10 +135,12 @@ async function openSession(storage: Storage, clock: { now: number }, models: Ret
 		},
 	};
 	const harness = await Harness.open(storage, options, context);
-	bindRoutines(harness);
 	const root = await harness.root(context, { agent: { model: MODEL } });
+	const file = routineFile ?? (await freshRoutineFile());
+	bindRoutines({ harness, root, filePath: file, now: () => clock.now });
 	harness.resume();
-	return { clock, reports, harness, root };
+	await syncRoutines(context);
+	return { clock, reports, harness, root, routineFile: file };
 }
 
 async function say(root: Conversation, content: string): Promise<void> {
@@ -193,6 +212,11 @@ test("schedule returns before the routine fires", { timeout: 20_000 }, async () 
 		assert.match(listed, /Morning sweep/);
 		assert.match(listed, /@every 1m/);
 		assert.match(listed, /next /);
+		const saved = JSON.parse(await readFile(session.routineFile, "utf8")) as Array<{ id: string; title: string; cron: string }>;
+		assert.equal(saved.length, 1);
+		assert.equal(saved[0]?.title, TITLE);
+		assert.equal(saved[0]?.cron, "@every 1m");
+		assert.equal(saved[0]?.id, scheduledId(log).id);
 		assertNoFaults(session);
 	} finally {
 		await session.harness.close(context);
@@ -224,13 +248,14 @@ test("a routine sleeping in sqlite still fires after reopen", { timeout: 20_000 
 	const database = join(directory, "session.sqlite");
 	const clock = { now: BASE };
 	const models = scriptedModel();
-	let session = await openSession(await openNodeSqliteStorage(database), clock, models);
+	const routineFile = join(directory, "routines.json");
+	let session = await openSession(await openNodeSqliteStorage(database), clock, models, routineFile);
 	try {
 		await say(session.root, "please schedule a routine");
 		const until = await sleepDeadline(session.harness);
 		await session.harness.close(context);
 
-		session = await openSession(await openNodeSqliteStorage(database), clock, models);
+		session = await openSession(await openNodeSqliteStorage(database), clock, models, routineFile);
 		session.harness.resume();
 		const still = await sleepDeadline(session.harness);
 		assert.equal(still, until);
@@ -258,6 +283,7 @@ test("cancel_routine aborts the sleeper before it can fire", { timeout: 20_000 }
 		assert.equal(record?.state.status, "terminal");
 		if (record?.state.status === "terminal") assert.equal(record.state.outcome.status, "aborted");
 		assert.match(await transcript(session.root), /Cancelled /);
+		assert.deepEqual(JSON.parse(await readFile(session.routineFile, "utf8")), []);
 
 		clock.now = until + 60_000;
 		session.harness.resume();
@@ -276,13 +302,14 @@ test("weekday cron survives a restart and a missed weekend fires once", { timeou
 	const models = scriptedModel();
 	// From Tue 2023-11-14T22:13:20Z, weekdays 07:30 UTC next fires Wed 2023-11-15T07:30:00Z.
 	const firstDue = Date.UTC(2023, 10, 15, 7, 30);
-	let session = await openSession(await openNodeSqliteStorage(database), clock, models);
+	const routineFile = join(directory, "routines.json");
+	let session = await openSession(await openNodeSqliteStorage(database), clock, models, routineFile);
 	try {
 		await say(session.root, "schedule weekdays please");
 		assert.equal(await sleepDeadline(session.harness), firstDue);
 		await session.harness.close(context);
 
-		session = await openSession(await openNodeSqliteStorage(database), clock, models);
+		session = await openSession(await openNodeSqliteStorage(database), clock, models, routineFile);
 		assert.equal(await sleepDeadline(session.harness), firstDue);
 
 		// Sleep through the slot and the weekend: Sat 2023-11-18T07:30:00Z. One fire, no replay.
@@ -398,10 +425,15 @@ test("state written by the legacy v1 code migrates and still fires", { timeout: 
 	const database = join(directory, "session.sqlite");
 	await copyFile(join(import.meta.dirname, "fixtures", "routines-v1.sqlite"), database);
 	const clock = { now: BASE };
-	const session = await openSession(await openNodeSqliteStorage(database), clock, scriptedModel());
+	const session = await openSession(await openNodeSqliteStorage(database), clock, scriptedModel(), join(directory, "routines.json"));
 	try {
 		// The fixture holds one everyMinutes(1) routine sleeping until BASE + 60s, stored the v1 way.
 		assert.equal(await sleepDeadline(session.harness), BASE + 60_000);
+		// No config file existed, so the migrated routine was adopted into one.
+		const adopted = JSON.parse(await readFile(session.routineFile, "utf8")) as Array<{ title: string; cron: string }>;
+		assert.equal(adopted.length, 1);
+		assert.equal(adopted[0]?.title, TITLE);
+		assert.equal(adopted[0]?.cron, "@every 1m");
 		await say(session.root, "list routines");
 		const listed = await transcript(session.root);
 		assert.match(listed, /Morning sweep/);

@@ -72,6 +72,19 @@ test("toCronSpec normalizes whitespace and accepts both input shapes", () => {
 	assert.equal(toCronSpec({ kind: "everyMinutes", minutes: 1 }), "@every 1m");
 });
 
+test("labels name day lists, ranges, and weekday names", () => {
+	assert.equal(cronLabel("0 9 * * 2,5"), "Tuesdays and Fridays 09:00");
+	assert.equal(cronLabel("0 9 * * tue,fri"), "Tuesdays and Fridays 09:00");
+	assert.equal(cronLabel("0 9 * * FRI,TUE"), "Tuesdays and Fridays 09:00");
+	assert.equal(cronLabel("0 9 * * 1,3,5"), "Mondays, Wednesdays and Fridays 09:00");
+	assert.equal(cronLabel("0 9 * * 1-3"), "Mondays, Tuesdays and Wednesdays 09:00");
+	assert.equal(cronLabel("0 9 * * 0,6"), "weekends 09:00");
+	assert.equal(cronLabel("0 9 * * sat,sun"), "weekends 09:00");
+	assert.equal(cronLabel("0 9 * * fri"), "Fridays 09:00");
+	assert.equal(cronLabel("0 9 * * 0-6"), "daily 09:00");
+	assert.equal(cronLabel("0 9 * * 2,2,5"), "Tuesdays and Fridays 09:00");
+});
+
 test("labels name the common shapes and keep the raw spec otherwise", () => {
 	assert.equal(cronLabel("30 7 * * 1-5"), "weekdays 07:30");
 	assert.equal(cronLabel("5 8 * * *"), "daily 08:05");

@@ -26,6 +26,7 @@ const NICKNAME_LABELS: Record<string, string> = {
 	"@annually": "yearly Jan 1 00:00",
 };
 const WEEKDAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+const DOW_NAMES: Record<string, number> = { sun: 0, mon: 1, tue: 2, wed: 3, thu: 4, fri: 5, sat: 6 };
 const UNIT_MS: Record<string, number> = { s: 1_000, m: 60_000, h: 3_600_000, d: 86_400_000 };
 
 function invalid(raw: string, detail: string): Error {
@@ -153,8 +154,49 @@ export function cronLabel(spec: string): string {
 	if (/^\d+$/.test(minute) && /^\d+$/.test(hour) && dayOfMonth === "*" && month === "*") {
 		const at = `${hour.padStart(2, "0")}:${minute.padStart(2, "0")}`;
 		if (dayOfWeek === "*") return `daily ${at}${suffix}`;
-		if (dayOfWeek === "1-5") return `weekdays ${at}${suffix}`;
-		if (/^[0-7]$/.test(dayOfWeek)) return `${WEEKDAYS[Number(dayOfWeek) % 7]}s ${at}${suffix}`;
+		const days = dowSet(dayOfWeek);
+		if (days !== undefined) return `${daysLabel(days)} ${at}${suffix}`;
 	}
 	return `${expression}${suffix}`;
+}
+
+// Sorted unique weekdays (0 = Sunday) for a simple list/range/name day-of-week field, else undefined.
+function dowSet(field: string): number[] | undefined {
+	const days = new Set<number>();
+	for (const part of field.split(",")) {
+		const range = part.match(/^([a-z]{3}|\d)-([a-z]{3}|\d)$/i);
+		const single = part.match(/^([a-z]{3}|\d)$/i);
+		if (range?.[1] !== undefined && range[2] !== undefined) {
+			const lo = dowToken(range[1]);
+			const hi = dowToken(range[2]);
+			if (lo === undefined || hi === undefined || hi < lo) return undefined;
+			for (let day = lo; day <= hi; day++) days.add(day % 7);
+		} else if (single?.[1] !== undefined) {
+			const day = dowToken(single[1]);
+			if (day === undefined) return undefined;
+			days.add(day % 7);
+		} else {
+			return undefined;
+		}
+	}
+	return [...days].sort((a, b) => a - b);
+}
+
+function dowToken(token: string): number | undefined {
+	if (/^\d$/.test(token)) {
+		const day = Number(token);
+		return day <= 7 ? day : undefined;
+	}
+	return DOW_NAMES[token.toLowerCase()];
+}
+
+// `weekdays`, `weekends`, or plural names joined in week order: `Tuesdays and Fridays`.
+function daysLabel(days: number[]): string {
+	const key = days.join(",");
+	if (key === "0,1,2,3,4,5,6") return "daily";
+	if (key === "1,2,3,4,5") return "weekdays";
+	if (key === "0,6") return "weekends";
+	const names = days.map((day) => `${WEEKDAYS[day]}s`);
+	if (names.length <= 2) return names.join(" and ");
+	return `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`;
 }
