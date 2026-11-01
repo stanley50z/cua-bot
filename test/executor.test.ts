@@ -34,8 +34,10 @@ async function setup(dir: string, reply: (call: Call) => CallToolResult) {
 	const executor = createExecutor(fake.connect);
 	const notes: string[] = [];
 	const approvals = createApprovals({ file: join(dir, "approvals.json"), call: (name, args) => executor(name, args), notify: async (text) => notes.push(text) });
-	return { fake, executor, approvals, notes, extension: createExecutorExtension({ executor, approvals }) };
+	return { fake, executor, approvals, notes, extension: createExecutorExtension({ executor, approvals, ownerEmail: OWNER }) };
 }
+
+const OWNER = "Owner@Example.org";
 
 // Runs one bot turn whose model makes `toolCalls`, and returns the tool results the model saw.
 async function runTurn(extension: ReturnType<typeof createExecutorExtension>, toolCalls: ReturnType<typeof fauxToolCall>[]) {
@@ -106,6 +108,62 @@ test("a send becomes an approval card instead of reaching Executor", () =>
 			assert.equal(card?.callId, "s");
 			assert.equal(card?.title, "Send email");
 			assert.deepEqual(card?.email, { to: "Sarah Kim <sarah@studio.org>", subject: "Friday review", body: "Can we move it to 2 PM?", editable: true });
+		},
+	));
+
+test("mail addressed only to the owner sends right away", () =>
+	withBot(
+		() => textResult('{"status":"completed","execution":{"ok":true}}'),
+		async ({ fake, approvals, extension }) => {
+			const input = { to: ["Me <owner@example.org>"], subject: "Morning agenda", body: "Nothing today." };
+			const result = await runTurn(extension, [fauxToolCall("executor_call", { path: "tools.google.gmail.send", input }, { id: "o" })]);
+			assert.match(result("o").text, /"ok":true/);
+			assert.deepEqual(fake.calls, [{ name: "call", args: { calls: { path: "tools.google.gmail.send", input } } }]);
+			assert.deepEqual(await approvals.list(), []);
+		},
+	));
+
+test("Executor's hold on mail only to the owner is accepted without a card", () =>
+	withBot(
+		(call) => textResult(call.name === "call" ? '{"status":"approval-required","requestId":"apr_own"}' : '{"status":"completed","execution":{"ok":true}}'),
+		async ({ fake, approvals, extension }) => {
+			const result = await runTurn(extension, [
+				fauxToolCall("executor_call", { path: "tools.google.gmail.send", input: { to: [OWNER], subject: "Agenda", body: "x" } }, { id: "s" }),
+				fauxToolCall("executor_call", { path: "tools.google.gmail.draft", input: { to: [OWNER], subject: "Shot", body: "y" } }, { id: "d" }),
+			]);
+			for (const id of ["s", "d"]) assert.match(result(id).text, /"ok":true/, id);
+			assert.deepEqual(
+				fake.calls.filter((call) => call.name === "resume"),
+				[0, 1].map(() => ({ name: "resume", args: { requestId: "apr_own", response: { action: "accept" } } })),
+			);
+			assert.deepEqual(await approvals.list(), []);
+		},
+	));
+
+test("Executor's hold on a draft for someone else still becomes a card", () =>
+	withBot(
+		() => textResult('{"status":"approval-required","requestId":"apr_x"}'),
+		async ({ fake, approvals, extension }) => {
+			const result = await runTurn(extension, [fauxToolCall("executor_call", { path: "tools.google.gmail.draft", input: { to: ["dana@studio.org"], body: "y" } }, { id: "d" })]);
+			assert.match(result("d").text, /^Waiting for the owner/);
+			assert.equal(fake.calls.filter((call) => call.name === "resume").length, 0);
+			assert.equal((await approvals.list())[0]?.pausedRequestId, "apr_x");
+		},
+	));
+
+test("mail that reaches anyone besides the owner still waits on a card", () =>
+	withBot(
+		() => textResult("sent"),
+		async ({ fake, approvals, extension }) => {
+			const path = "tools.google.gmail.send";
+			const result = await runTurn(extension, [
+				fauxToolCall("executor_call", { path, input: { to: [OWNER], cc: ["dana@studio.org"], subject: "Hi", body: "x" } }, { id: "cc" }),
+				fauxToolCall("executor_call", { path, input: { replyToMessageId: "m1", body: "Thanks!" } }, { id: "re" }),
+				fauxToolCall("executor_call", { path, input: { to: [OWNER, "dana@studio.org"], subject: "Hi", body: "x" } }, { id: "two" }),
+			]);
+			for (const id of ["cc", "re", "two"]) assert.match(result(id).text, /^Waiting for the owner/, id);
+			assert.deepEqual(fake.calls, [], "nothing ran");
+			assert.equal((await approvals.list()).length, 3);
 		},
 	));
 

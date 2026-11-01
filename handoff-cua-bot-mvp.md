@@ -1,76 +1,104 @@
-# Handoff: cua-bot MVP (Executor Gmail/Calendar, approval cards, models.json)
+# Handoff: cua-bot MVP, first live run on gpt-6.1-terra
 
-Written 2026-10-31. Repo: github.com/stanley50z/cua-bot (private, `main`, HTTPS remote). Working tree was clean at `782a810` when this was written.
+Updated 2026-10-31. Repo: github.com/stanley50z/cua-bot (private, `main`, HTTPS remote). The handoff was last updated after `22fda52` (pushed, tree clean).
 
 ## What the project is
 
-A self-hosted assistant for one owner on Pi Durable and Cua Spaces. MVP scope is memory, cron routines, and Gmail/Calendar through Executor Cloud. Proactive notifications are out of scope.
+cua-bot is a self-hosted assistant for one owner, built on Pi Durable and Cua Spaces. The MVP scope is memory, cron routines, and Gmail/Calendar through Executor Cloud. Proactive notifications are out of scope.
 
-The current architecture, setup, and debugging paths are in [README.md](README.md). Read it first. These three commits did the recent work, and their diffs show it:
+Read [README.md](README.md) first. It covers the architecture, setup, approval cards, and debugging paths. The recent work is in these commits:
 
-- `f63fc61`: Gmail and Google Calendar through Executor Cloud (`src/executor.ts`)
-- `f380efd`: approval cards for sends and deletes (`src/approvals.ts`, `src/mime.ts`, the card UI in `src/app.html`, routes in `src/web.ts`), and the move to Azure AI Foundry
-- `782a810`: Pi-style `models.json` (`src/models.ts`), the `azure-foundry-2` provider, Gmail field send, and the rename to cua-bot
+- `f63fc61`: Executor (`src/executor.ts`).
+- `f380efd`: approval cards (`src/approvals.ts`, `src/mime.ts`, the card UI in `src/app.html`, the routes in `src/web.ts`).
+- `782a810`: Pi-style `models.json` (`src/models.ts`) and the rename to cua-bot.
+- `22fda52`: Executor became the only email path.
 
-## State at handoff
+## Live run result (2026-10-31 evening, uncommitted)
 
-- **Default model** is `azure-foundry-2/gpt-6.1-terra`, set in `models.json`. That file is gitignored, so this change has no commit. Preflight passed: `node --env-file-if-exists=.env src/preflight.ts` gets a reply from the model.
-- **The bot is stopped.** On the next `python start.py`, `main.ts` commits a `configure()` that moves the existing root conversation onto the new model. `Harness.root()` only sets the agent when it creates the conversation, which is why the `configure()` is needed. A full chat turn has not run on gpt-6.1-terra yet, so do that first.
-- **Tests:** `pnpm test` passes 65/65, and `tsc` is clean.
-- **`.env` (gitignored)** holds the key names `EXECUTOR_MCP_URL`, `EXECUTOR_API_KEY`, `AZURE_FOUNDRY_2_API_KEY`, and `OWNER_EMAIL` (plus the now-unused SMTP pair). `AZURE_FOUNDRY_API_KEY` is a Windows user environment variable, shared with Pi's `~/.pi/agent/models.json`. Never print the values. To collect a new secret, use T3's `request_secret` with `delivery: "file"`.
-- **Local-only, untracked files:** `docs/brainstorm-*.html` (gitignored) and `docs/mocks/2026-10-31-app-directions.html`.
+All six steps below passed on gpt-6.1-terra after two fixes. `pnpm test` is now 66 tests.
 
-### Verified live
+- **No date in the prompt.** The bot ran `computer_use` on the Mac just to read the clock. Fix: a `today` section in the persona (`src/today.ts`, test in `test/today.test.ts`).
+- **Screenshots stayed on the Mac.** The child passed `screenshot_out_file`, so the driver returned no image: the child acted blind and nothing reached `data/shots/`. Fix: `shotArgs` in `src/computer.ts` drops that argument and hides it from the schema (`test/computer.test.ts`).
+- **Executor holds `tools.google.gmail.draft` for approval** (an `apr_…` paused request), so a draft shows a card too. The prompt in `src/executor.ts` and the README no longer say "no card". Changing that is an Executor dashboard policy, so it's the owner's call.
+- Minor, not fixed: tool chips read "calendar calendar list list", and the log says "with the owner's edits" on every approve of an editable card, even when nothing was edited.
 
-- Executor calendar and mail reads.
-- A discarded card, run through the API.
-- An approved send with edits through `tools.google.gmail.send`. It reached the owner's inbox with the edit in place.
-- Preflight replies from azure-foundry `grok-4.6`, azure-foundry-2 `gpt-6.1-terra`, and azure-foundry-2 `FW-MiniMax-M2.5`.
+## Next step (done, kept for reference): run the bot end to end on gpt-6.1-terra
 
-### Not verified live
+Everything so far was checked through preflight, the API, or tests. The bot has not had a real chat turn on its new default model, and the email flows changed in `22fda52`. Work through the checks below, fixing what breaks, and report what you saw.
 
-- A Calendar insert that Executor holds for its own approval. Only `test/executor.test.ts` covers it.
-- Trash through Gmail `modify`.
+1. **Check, then start.**
+   - Run `node --env-file-if-exists=.env src/preflight.ts`. The last run was all PASS: env, model, Space, Executor, and the port.
+   - Then run `python start.py` and open `http://127.0.0.1:43142/`.
+   - On start, `main.ts` runs `configure()`, which moves the existing root conversation from xAI onto `azure-foundry-2/gpt-6.1-terra`. `data/logs/cua-bot.log` should say `cua-bot up: model azure-foundry-2/gpt-6.1-terra`.
+2. **Have a plain chat turn.** Check that the reply streams in, that tool chips show, and that memory recall works.
+3. **Read Gmail and Calendar.** For example, ask "what's on my calendar tomorrow" and "any unread mail from today". Watch for wrong tool paths or guessed `accountId` values. gpt-6.1-terra uses `openai-responses` with a `thinkingLevelMap` (off→"none" … max→"max"), and the bot asks for `thinkingLevel: "medium"`. If tool calling or reasoning misbehaves, look there first.
+4. **Send an email to the owner.**
+   - It should become an editable approval card using `tools.google.gmail.send`, and nothing should go out before the click.
+   - Approve it once, then check that the bot acknowledges the `[approval]` message.
+   - Send only to `OWNER_EMAIL`. Never send to anyone else without the user's go-ahead.
+5. **Email a screenshot.** This is the new path from `22fda52`.
+   - Ask the bot to screenshot something on the Mac and email it.
+   - It should save a draft with `tools.google.gmail.draft` (no card) and give the absolute path of the file under `data/shots/` to attach.
+   - This step drives the paired Space through `computer_use`. That is the bot's own tool, which is fine. You yourself must not use computer use.
+6. **Stop.** Run `python stop.py` and check that port 43142 is free.
 
-## Decisions made after the first draft of this handoff
+The guidance the model sees lives in the persona in `src/main.ts`, the section and `executor_call` description in `src/executor.ts`, and the routine guidance in `src/routines.ts`. Keep prompt edits small, and add a test when behaviour changes.
 
-1. **No history rewrite.** The user said no. Don't offer it again.
-2. **Executor is the only email path.** SMTP `send_email`, nodemailer, and the `SMTP_*` variables were removed (uncommitted at this point; `pnpm test` 63/63, `tsc` clean, preflight all PASS). Every send, including reports to the owner, waits on an approval card.
-3. **Screenshots and other files go in drafts.** Executor's Gmail send has no attachments. The bot saves a draft with `tools.google.gmail.draft`, which needs no card, and tells the owner which files to attach.
-4. **The Gmail catalog app is gone.** The user deleted it from Executor. All mail goes through the Google integration (`tools.google.gmail.*`).
+## Owner-only sends (decided 2026-10-31: skip the card)
 
-## Still open
+The user said yes. `onlyToOwner` in `src/executor.ts` lets a `tools.google.gmail.send` whose To, Cc and Bcc are all `OWNER_EMAIL` skip cua-bot's card (tests in `test/executor.test.ts`, 68 total). Executor's Google app declares `approval: always()` on `gmail.send`, `gmail.draft` and `gmail.modify` (its source, `tools/gmail.ts`; there is no dashboard toggle). The user chose to keep that gate: for owner-only sends and drafts, `executor_call` accepts Executor's hold itself via `acceptHolds` in `src/approvals.ts` (70 tests). Verified live 2026-10-31: an owner send went out with no card. A brief `never()` edit to the Executor app was pushed and reverted without deploying (latest is `aaebf46`, same as the original). An older test card (`ap_mvx6147eeqqog5`) is still waiting in the app.
 
-- Should a send whose only recipient is `OWNER_EMAIL` skip the card, so routines can email the owner unattended? I asked and the user didn't answer. The default is a card for every send.
-- `.env` still has the unused `SMTP_USER` and `SMTP_PASS`. The owner may want to revoke that Gmail app password.
+## Decision to raise with the user (superseded by the section above)
+
+Every send now waits on a card, including a routine's report to the owner. A morning-agenda routine therefore leaves a card in the app instead of emailing on its own. I asked whether a send addressed only to `OWNER_EMAIL` should skip the card, and the user hasn't answered yet. Bring it up once the live run shows how it feels. Don't build it unasked.
+
+Also still untested live: a Calendar insert that Executor holds for its own approval (only `test/executor.test.ts` covers it), and a trash through Gmail `modify`.
+
+## Settled decisions (don't reopen)
+
+- **No git history rewrite.** The user said no.
+- **Executor is the only email path.** Don't add SMTP or any other sender back.
+- **Files go in drafts.** Executor's Gmail send has no attachments field. A screenshot goes into a draft, and the owner attaches it.
+- **The Gmail catalog app is gone.** The user deleted it, so all mail uses the Google integration (`tools.google.gmail.*`). Executor's connected Google account is the owner's CMU Workspace account.
+- **Model:** the default is `azure-foundry-2/gpt-6.1-terra`, set in the gitignored `models.json`. `CUABOT_MODEL` overrides it. `start.py` deliberately pins no model.
+
+## Environment and secrets
+
+- **`.env` (gitignored)** holds `OWNER_EMAIL`, `EXECUTOR_MCP_URL`, `EXECUTOR_API_KEY`, and `AZURE_FOUNDRY_2_API_KEY`. It also still holds the unused `SMTP_USER` and `SMTP_PASS`; the owner may want to revoke that app password.
+- **`AZURE_FOUNDRY_API_KEY`** is a Windows user environment variable, shared with Pi.
+- **Never print secret values or the owner's addresses.** To collect a new secret, use T3's `request_secret` with `delivery: "file"`.
+- **Logs:**
+  - `data/logs/cua-bot.log`
+  - `data/logs/stdout.log`
+  - `data/crash/`
+  - Approval cards are in `data/approvals.json`.
 
 ## Gotchas
 
-- **Executor Cloud v2 differs from the open-source repo.** Its MCP tools are `skills`, `search`, `describe`, `call`, `execute`, and `resume`, and `?mode=passthrough` is ignored. The bot gets only search, describe, and call. A paused call returns `"status":"approval-required"` with an `apr_…` request id.
-- **Executor bug with the raw Gmail send.** `tools.google.api.gmail.users.gmailUsersMessagesSend` returns HTTP 400 because Executor posts the upload to the non-upload URL. Use `tools.google.gmail.send`, whose fields are `to[]`, `cc`, `bcc`, `subject`, `body`, `replyToMessageId`, and `replyAll`. The README records this bug.
-- **`start.py` no longer pins a model.** Pinning a model there once made the bot run an id that doesn't exist. The model comes from `CUABOT_MODEL` if set, otherwise the `models.json` default.
+- **Executor Cloud v2 differs from the open-source repo.** Its MCP tools are `skills`, `search`, `describe`, `call`, `execute`, and `resume`. The bot gets only search, describe, and call. A paused call returns `"status":"approval-required"` with an `apr_…` id, and the server accepts that id after the owner clicks.
+- **Raw Gmail send is broken.** `tools.google.api.gmail.users.gmailUsersMessagesSend` returns HTTP 400 because of an Executor bug. Use `tools.google.gmail.send`.
+- **The model is only set when the conversation is created.** `Harness.root()` sets the agent only on creation, so the `configure()` commit on start is what changes the model of an existing conversation.
 - **Reference checkouts:**
   - Pi: `~/github repo ref/pi`
   - The Cua fork: `~/cua`
-  - The other reference checkout (ideas only, no licence) is listed in the project memory. Never name it in the repo.
-- **Cua Space:** the paired Space is the Mac mini over Tailscale (`~/.cua/spaces.json`).
-- **Port:** the default is 43142. After stopping a test server, check that the port is free.
+  - The paired Space is the Mac mini over Tailscale (`~/.cua/spaces.json`).
 
 ## Standing constraints from the user
 
-- The project is **cua-bot**. Never call it Grokbot or describe it as a clone of, or built on, leaked code. This applies in code, docs, prompts, and env names (`CUABOT_*`).
-- Don't propose Google's hosted MCP servers or a Gmail path with your own OAuth client. Don't re-add notifications.
-- No computer use unless the user explicitly asks.
-- Make targeted edits with the Edit tool, not sed, Python, or `node -e` string replacement.
-- Mock UI first and let the user pick a direction before touching real components.
-- Answers longer than a few paragraphs go in an HTML report.
-- Search the web when the user half-remembers a product name. Don't guess.
+- **Naming:** the project is **cua-bot**. Never call it Grokbot or describe it as a clone of, or as built on, leaked code. This applies in code, docs, prompts, and env names.
+- **Out of bounds:** don't propose Google's hosted MCP servers or a Gmail path with your own OAuth client. Don't re-add notifications.
+- **No computer use by the agent** unless the user explicitly asks. The bot's own `computer_use` tool is separate.
+- **Edits:** make targeted edits with the Edit tool, not sed, Python, or `node -e`.
+- **UI:** mock first, and let the user pick before you touch real components.
+- **Long answers:** anything longer than a few paragraphs goes in an HTML report.
+- **Look things up:** search the web instead of guessing product names or facts.
+- **Commits:** commit only when the user asks.
 
 ## Suggested skills
 
-- `tdd`: for any feature or fix. Tests are `node:test` under `test/`, with a fake Executor in `test/fake-executor.ts`.
-- `unslop`: for README text, prompts, and chat replies.
-- `diagnosing-bugs`: if the first run on gpt-6.1-terra misbehaves (tool-call format, reasoning levels).
-- `browser-harness`: for the Executor dashboard. Close the tabs afterwards.
-- `frontend-design` and `prototype`: for any change to the approval cards or the web app (mock first).
-- `commit`: when the user asks to commit.
+- `diagnosing-bugs`: if the live run misbehaves (tool paths, reasoning, approval flow).
+- `tdd`: for any fix. Tests are `node:test` under `test/`, with a fake Executor in `test/fake-executor.ts`. Run `pnpm test` (63 tests) and `pnpm check`.
+- `browser-harness`: to drive the web app at `127.0.0.1:43142` during the live run, or the Executor dashboard. Close the tabs afterwards.
+- `unslop`: for prompt text, README changes, and replies.
+- `frontend-design` and `prototype`: for any change to the cards or the app. Mock first.
+- `commit`: only when the user asks.

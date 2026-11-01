@@ -15,6 +15,7 @@ import { connectExecutor, createExecutor, createExecutorExtension } from "./exec
 import { DATA_DIR, log } from "./log.ts";
 import { createMemory, createMemoryExtension } from "./memory.ts";
 import { bindRoutines, createRoutinesExtension, startRoutineFileWatch, syncRoutines } from "./routines.ts";
+import { today } from "./today.ts";
 import { traceExtension } from "./trace.ts";
 import { createBotServer } from "./web.ts";
 import { botModel, createBotModels } from "./models.ts";
@@ -52,6 +53,7 @@ registry.install(
 					].join("\n"),
 				{ tag: false },
 			),
+			section("today", () => today(new Date()), { tag: false }),
 		],
 	}),
 );
@@ -71,7 +73,7 @@ if (executorUrl && executorKey) {
 		// The owner's decision reaches the bot as a message, after any turn in progress.
 		notify: (text) => root.submit({ type: "input", content: text, whenBusy: "followUp" }, context),
 	});
-	registry.install(createExecutorExtension({ executor, approvals }));
+	registry.install(createExecutorExtension({ executor, approvals, ...(process.env.OWNER_EMAIL ? { ownerEmail: process.env.OWNER_EMAIL } : {}) }));
 } else {
 	log("executor: EXECUTOR_MCP_URL or EXECUTOR_API_KEY unset; Gmail and Calendar are off");
 }

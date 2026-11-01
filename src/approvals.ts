@@ -14,6 +14,21 @@ const KEEP_DECIDED = 200;
 
 export type ExecutorCall = (name: string, args: Record<string, unknown>) => Promise<CallToolResult>;
 
+/**
+ * Accepts Executor's own holds on `result`, up to three in a row, and returns the last answer, which may still be
+ * held. Used by approve() after the owner's click, and by executor_call for mail only to the owner.
+ */
+export async function acceptHolds(call: ExecutorCall, result: CallToolResult) {
+	let answer = textOf(result);
+	for (let hop = 0; hop < 3; hop++) {
+		const held = PAUSED.exec(answer)?.[0];
+		if (held === undefined) break;
+		result = await call("resume", { requestId: held, response: { action: "accept" } });
+		answer = textOf(result);
+	}
+	return { result, answer };
+}
+
 export type Approval = {
 	id: string;
 	/** The bot's tool call that asked; the card renders under the reply that made it. */
@@ -243,18 +258,13 @@ export function createApprovals(options: { file: string; call: ExecutorCall; not
 			let status: Approval["status"];
 			let outcome: string;
 			try {
-				let result =
+				// Executor may hold the call for its own approval. The owner's click is that approval.
+				const { result, answer } = await acceptHolds(
+					options.call,
 					started.pausedRequestId === undefined
 						? await options.call("call", { calls: { path: started.path, input: started.input } })
-						: await options.call("resume", { requestId: started.pausedRequestId, response: { action: "accept" } });
-				let answer = textOf(result);
-				// Executor may hold the call for its own approval. The owner's click is that approval.
-				for (let hop = 0; hop < 3; hop++) {
-					const held = PAUSED.exec(answer)?.[0];
-					if (held === undefined) break;
-					result = await options.call("resume", { requestId: held, response: { action: "accept" } });
-					answer = textOf(result);
-				}
+						: await options.call("resume", { requestId: started.pausedRequestId, response: { action: "accept" } }),
+				);
 				const stillHeld = PAUSED.test(answer);
 				status = stillHeld || failed(result, answer) ? "failed" : "done";
 				outcome = stillHeld ? "Executor is still holding it for approval; finish it at executor.sh." : status === "failed" ? readable(answer) : answer;

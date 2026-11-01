@@ -146,7 +146,7 @@ export async function captureScreenshot(): Promise<string> {
 			? (infos.find((info) => info.name === "get_desktop_state") ?? infos.find((info) => info.name === "screenshot"))
 			: undefined;
 	if (chosen !== undefined) {
-		const args = withShotCap(parseSchema(chosen.inputSchemaJson), {});
+		const args = shotArgs(parseSchema(chosen.inputSchemaJson), {});
 		const result = await space.callTool(chosen.name, JSON.stringify(args), toolService, undefined);
 		const content = rememberShots(llmContent(result));
 		const saved = firstSaved(content);
@@ -309,6 +309,7 @@ async function populateDriverTools(): Promise<void> {
 function driverTool(info: DriverInfo, used: Set<string>): ToolRegistration {
 	const name = sanitizeToolName(info.name, used);
 	const schema = parseSchema(info.inputSchemaJson);
+	const { screenshot_out_file: _, ...properties } = objectProperties(schema.properties); // shotArgs drops it anyway
 	const description = clip(info.description.trim().length > 0 ? info.description.trim() : `Driver tool ${info.name}`);
 	const labeled = name === info.name ? description : `${description}\n(driver tool ${info.name})`;
 	return defineTool({
@@ -317,14 +318,14 @@ function driverTool(info: DriverInfo, used: Set<string>): ToolRegistration {
 		parameters: Type.Unsafe<Record<string, unknown>>({
 			...schema,
 			type: "object",
-			properties: objectProperties(schema.properties),
+			properties,
 		}),
 		deferred: true,
 		executionMode: "sequential",
 		outputLimits: { maxBytes: 256 * 1024, maxLines: 4000, retain: "tail" },
 		execute: async (args) => {
 			const space = await connectSpace();
-			const callArgs = withShotCap(schema, args);
+			const callArgs = shotArgs(schema, args);
 			const result = await space.callTool(info.name, JSON.stringify(callArgs), toolService, undefined);
 			const output = rememberShots(llmContent(result));
 			if (output.length === 0) output.push({ type: "text", text: result.text.length > 0 ? result.text : "(no output)" });
@@ -389,9 +390,14 @@ function objectProperties(value: unknown): Record<string, unknown> {
 	return {};
 }
 
-function withShotCap(schema: Record<string, unknown>, args: Record<string, unknown>): Record<string, unknown> {
+/**
+ * Used before every driver call (and by captureScreenshot). Caps the screenshot edge unless the model set one, and
+ * drops screenshot_out_file: that writes the PNG on the Mac and returns no image, so the child would act blind and
+ * nothing would reach data/shots.
+ */
+export function shotArgs(schema: Record<string, unknown>, args: Record<string, unknown>): Record<string, unknown> {
 	const properties = objectProperties(schema.properties);
-	const next = { ...args };
+	const { screenshot_out_file: _, ...next } = args;
 	if ("max_image_dimension" in properties && next.max_image_dimension === undefined) next.max_image_dimension = SHOT_EDGE;
 	else if ("max_dimension" in properties && next.max_dimension === undefined) next.max_dimension = SHOT_EDGE;
 	else if ("maxDimension" in properties && next.maxDimension === undefined) next.maxDimension = SHOT_EDGE;
