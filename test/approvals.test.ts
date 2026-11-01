@@ -191,6 +191,8 @@ test("the web app lists, approves with edits, and discards", () =>
 			assert.equal((await post(`/api/approvals/${other.id}/discard`, {})).status, 200);
 			assert.equal((await post(`/api/approvals/${other.id}/approve`, { to: 5 })).status, 400);
 			assert.equal(calls.length, 1);
+			const bare = await approvals.request({ callId: "c3", path: SEND, input: email(REPLY) });
+			assert.equal((await fetch(`${base}/api/approvals/${bare.id}/approve`, { method: "POST" })).status, 200, "the JSON body is optional");
 		} finally {
 			await new Promise<void>((resolve) => server.close(() => resolve()));
 		}

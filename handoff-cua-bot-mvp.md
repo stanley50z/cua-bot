@@ -19,8 +19,9 @@ All six steps below passed on gpt-6.1-terra after two fixes. `pnpm test` is now 
 
 - **No date in the prompt.** The bot ran `computer_use` on the Mac just to read the clock. Fix: a `today` section in the persona (`src/today.ts`, test in `test/today.test.ts`).
 - **Screenshots stayed on the Mac.** The child passed `screenshot_out_file`, so the driver returned no image: the child acted blind and nothing reached `data/shots/`. Fix: `shotArgs` in `src/computer.ts` drops that argument and hides it from the schema (`test/computer.test.ts`).
-- **Executor holds `tools.google.gmail.draft` for approval** (an `apr_…` paused request), so a draft shows a card too. The prompt in `src/executor.ts` and the README no longer say "no card". Changing that is an Executor dashboard policy, so it's the owner's call.
-- Minor, not fixed: tool chips read "calendar calendar list list", and the log says "with the owner's edits" on every approve of an editable card, even when nothing was edited.
+- **Executor holds `tools.google.gmail.draft` for approval** (an `apr_…` paused request), so a draft shows a card too. The prompt in `src/executor.ts` and the README no longer say "no card". Settled since: drafts and sends only to the owner have their hold accepted by cua-bot (see "Owner-only sends" below).
+- Later fixed: chips now read "Calendar: list events" instead of "calendar calendar list list"; the approve log names edits only when the owner changed something; `POST /api/approvals/<id>/approve` accepts an empty body.
+- Later verified live (2026-10-31 night): a routine's "Run now" emailed the owner with no card; a Calendar insert held by Executor became a card and created the event once approved; deleting that event and trashing a test email each became a card and ran once approved. The bot trashed with the raw `gmailUsersMessagesTrash`, so Gmail `modify` with `trash: true` is still covered only by tests.
 
 ## Next step (done, kept for reference): run the bot end to end on gpt-6.1-terra
 
@@ -52,7 +53,7 @@ The user said yes. `onlyToOwner` in `src/executor.ts` lets a `tools.google.gmail
 
 Every send now waits on a card, including a routine's report to the owner. A morning-agenda routine therefore leaves a card in the app instead of emailing on its own. I asked whether a send addressed only to `OWNER_EMAIL` should skip the card, and the user hasn't answered yet. Bring it up once the live run shows how it feels. Don't build it unasked.
 
-Also still untested live: a Calendar insert that Executor holds for its own approval (only `test/executor.test.ts` covers it), and a trash through Gmail `modify`.
+The Calendar insert Executor holds, and a trash, were verified live later the same night (see the live run result above).
 
 ## Settled decisions (don't reopen)
 
@@ -64,7 +65,7 @@ Also still untested live: a Calendar insert that Executor holds for its own appr
 
 ## Environment and secrets
 
-- **`.env` (gitignored)** holds `OWNER_EMAIL`, `EXECUTOR_MCP_URL`, `EXECUTOR_API_KEY`, and `AZURE_FOUNDRY_2_API_KEY`. It also still holds the unused `SMTP_USER` and `SMTP_PASS`; the owner may want to revoke that app password.
+- **`.env` (gitignored)** holds `OWNER_EMAIL`, `EXECUTOR_MCP_URL`, `EXECUTOR_API_KEY`, and `AZURE_FOUNDRY_2_API_KEY`. The unused `SMTP_USER` and `SMTP_PASS` were deleted on 2026-10-31.
 - **`AZURE_FOUNDRY_API_KEY`** is a Windows user environment variable, shared with Pi.
 - **Never print secret values or the owner's addresses.** To collect a new secret, use T3's `request_secret` with `delivery: "file"`.
 - **Logs:**

@@ -383,9 +383,19 @@ function toolLabel(call) {
     case "executor_search": return "Looked up: " + clip(pick("query", "namespace") || "connected accounts");
     case "executor_describe": return "Read tool details";
     case "executor_call": {
-      // tools.google.api.gmail.users.gmailUsersMessagesList → "gmail users messages list"
-      const op = (pick("path") || "").split(".").at(-1) || "";
-      return op ? clip(op.replace(/([a-z])([A-Z])/g, "$1 $2").toLowerCase()) : "Using a connected account";
+      // tools.google.api.gmail.users.gmailUsersMessagesList → "Gmail: list messages";
+      // tools.google.gmail.readMessage → "Gmail: read message". Raw API names end in the verb; helper names start with it.
+      const parts = (pick("path") || "").split(".");
+      const op = parts.at(-1) || "";
+      if (!op) return "Using a connected account";
+      const api = parts.indexOf("api");
+      const product = (api >= 0 ? parts[api + 1] : parts.at(-2)) || "";
+      const words = op.split(/(?=[A-Z])/).map((w) => w.toLowerCase());
+      if (words[0] === product.toLowerCase() && words.length > 1) words.shift();
+      const kept = words.filter((w) => w !== "users");
+      if (api >= 0 && kept.length > 1) kept.unshift(kept.pop());
+      const name = product.charAt(0).toUpperCase() + product.slice(1);
+      return clip((name ? name + ": " : "") + kept.join(" "));
     }
     default: {
       const detail = pick("query", "q", "title", "subject", "text");

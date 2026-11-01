@@ -68,6 +68,7 @@ async function readBody(req: IncomingMessage): Promise<string> {
 
 async function readJson(req: IncomingMessage): Promise<unknown> {
 	const body = await readBody(req);
+	if (body.trim() === "") return undefined;
 	try {
 		return JSON.parse(body) as unknown;
 	} catch {
@@ -158,9 +159,9 @@ async function routeApprovals(req: IncomingMessage, res: ServerResponse, deps: B
 		const id = match[1];
 		try {
 			if (match[2] === "approve") {
-				const edit = emailEdit(await readJson(req));
-				deps.log?.(`approval (web): approve ${id}${edit === undefined ? "" : " with the owner's edits"}`);
-				sendJson(res, 200, await approvals.approve(id, edit));
+				const settled = await approvals.approve(id, emailEdit(await readJson(req)));
+				deps.log?.(`approval (web): approved ${id}${settled.edited === true ? " with the owner's edits" : ""}: ${settled.status}`);
+				sendJson(res, 200, settled);
 			} else {
 				deps.log?.(`approval (web): discard ${id}`);
 				sendJson(res, 200, await approvals.discard(id));
