@@ -156,13 +156,11 @@ dialog .row .btn.danger { margin-right: auto; }
 .side { display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--bg); }
 .side .bar { background: var(--bg); }
 .side .bar .state { margin-left: auto; }
-.screen { flex: none; margin: 16px 16px 0; border-radius: 8px; overflow: hidden; aspect-ratio: 16 / 10; background: #E3E7EC; border: 1px solid var(--line); position: relative; display: grid; place-items: center; }
+.screen { flex: none; margin: 16px 16px 0; border-radius: 8px; overflow: hidden; aspect-ratio: 16 / 10; background: #000; border: 1px solid var(--line); position: relative; display: grid; place-items: center; }
 .screen.drive { outline: 3px solid var(--drive); outline-offset: -1px; border-color: var(--drive); }
-.screen img, .screen canvas { width: 100%; height: 100%; object-fit: contain; display: block; background: #1F262E; }
-.screen a, .screen .shot { display: contents; }
-.screen canvas, .screen.live .shot { display: none; }
+/* The canvas hides while the stream is down, so a stale frame never lingers over the black pane. */
+.screen canvas { width: 100%; height: 100%; object-fit: contain; display: none; }
 .screen.live canvas { display: block; }
-.screen .none { color: var(--muted); font-size: 13px; text-align: center; padding: 0 30px; }
 .screen .tag { position: absolute; right: 8px; bottom: 8px; background: var(--drive); color: #fff; font: 600 11.5px "Bahnschrift", sans-serif; padding: 3px 8px; border-radius: 5px; }
 .shot-time { flex: none; margin: 6px 16px 0; font-size: 12px; color: var(--muted); }
 .steps { margin: 12px 16px 16px; overflow: auto; flex: 1; min-height: 0; }
@@ -302,7 +300,7 @@ dialog .row { display: flex; gap: 8px; justify-content: flex-end; margin-top: 18
 
  <aside class="side" aria-labelledby="space-h">
   <div class="bar"><h1 id="space-h">Computer</h1><span class="state" id="space-state"></span><button class="btn" id="take-control" type="button" title="Open the live desktop in a new tab, with your mouse and keyboard">Take control</button></div>
-  <div class="screen" id="screen"><canvas id="live-screen" aria-label="Live screen of the computer"></canvas><div class="shot" id="shot"></div><span class="tag" hidden>Bot is driving</span></div>
+  <div class="screen" id="screen"><canvas id="live-screen" aria-label="Live screen of the computer"></canvas><span class="tag" hidden>Bot is driving</span></div>
   <div class="shot-time" id="shot-time"></div>
   <div class="steps"><h2 id="steps-h">Steps</h2><ol id="steps"></ol></div>
  </aside>
@@ -795,19 +793,9 @@ function renderLive() {
   if (tag) tag.hidden = !driving;
 }
 
-// The latest screenshot sits under the live canvas and shows whenever the live stream is down.
 function renderComputer() {
   const c = state.computer;
   $("space-h").textContent = c.space || "Computer";
-  const shot = $("shot");
-  shot.textContent = "";
-  if (c.shot) {
-    const link = el("a"); link.href = "/shots/" + encodeURIComponent(c.shot.name); link.target = "_blank"; link.rel = "noopener";
-    const img = el("img"); img.src = link.href; img.alt = "Latest screenshot of " + (c.space || "the computer");
-    link.append(img); shot.append(link);
-  } else {
-    shot.append(el("p", "none", "No screenshots yet. Ask the bot to do something on the computer and its screen shows up here."));
-  }
   captionScreen();
   const list = $("steps");
   list.textContent = "";
@@ -824,16 +812,15 @@ function renderComputer() {
 }
 
 function captionScreen() {
-  const c = state.computer;
   $("shot-time").textContent = liveScreen.playing ? "Live"
-    : c.shot ? `Latest screenshot: ${dayLabel(c.shot.at)} at ${time(c.shot.at)}` : "";
+    : typeof VideoDecoder === "undefined" ? "This browser can't play the live screen" : "Connecting…";
 }
 
 /* ---------- live screen ---------- */
 // GET /api/computer/live (src/live-screen.ts) streams the Mac's screen as H.264 access units, each a
 // 1-byte flag (1 = keyframe), a 4-byte big-endian length, then Annex-B bytes. WebCodecs decodes them onto
 // the pane's canvas. The pane streams only while this tab is visible, and reconnects with backoff after a
-// failure. Without WebCodecs, or while the stream is down, it shows the latest screenshot instead.
+// failure. Without WebCodecs, or while the stream is down, the pane stays black.
 const liveScreen = { playing: false, abort: null, retry: null, delay: 2000 };
 
 // "avc1.PPCCLL" from the SPS (NAL type 7) that leads each keyframe.
