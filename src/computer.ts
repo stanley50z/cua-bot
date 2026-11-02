@@ -16,6 +16,7 @@ import {
 	type ToolRegistration,
 } from "@earendil-works/pi-durable";
 import { toLlmContent, type CallToolResult, type LlmContent } from "@earendil-works/pi-mcp";
+import type { OpenLiveStream } from "./live-screen.ts";
 import { botModel } from "./models.ts";
 
 const SHOT_EDGE = 1200;
@@ -260,6 +261,39 @@ export async function viewerLink(): Promise<{ url: string; expiresAt: string }> 
 	const expiresAt = "expiresAt" in minted && typeof minted.expiresAt === "string" ? minted.expiresAt : "";
 	return { url: new URL(minted.viewerPath, client.endpoint()).href, expiresAt };
 }
+
+/**
+ * Used by src/main.ts as createLiveScreen's opener (src/live-screen.ts). A view-only H.264 stream of the
+ * Mac's primary display, decoded by the web app. The SDK's own streamSession needs the Cua Spaces app's
+ * streaming client, so this mints a media ticket and attaches to it directly.
+ */
+export const openLiveStream: OpenLiveStream = async (sink) => {
+	const space = await connectSpace();
+	const ticket = await space.openStream({ codecs: ["h264"], maxFps: 15, maxDimension: 1280, audio: false, policy: "view_only" });
+	const session = await space
+		.attachStream(
+			ticket,
+			{
+				// The SDK may reuse the buffer after onFrame returns, so each frame is copied out.
+				onFrame: (frame) => sink.frame({ keyframe: frame.keyframe, data: new Uint8Array(frame.data.slice(0)) }),
+				onEvent: (event) => {
+					if (event.kind === "closed") sink.closed(`the Mac closed the live stream: ${event.json}`);
+				},
+			},
+			undefined,
+		)
+		.catch(async (error: unknown) => {
+			await space.closeStream(ticket.mediaSessionId).catch(() => {});
+			throw error;
+		});
+	return {
+		requestKeyframe: () => void session.requestKeyframe().catch(() => {}),
+		close: async () => {
+			await session.close().catch(() => {});
+			await space.closeStream(ticket.mediaSessionId).catch(() => {});
+		},
+	};
+};
 
 function registrySpaces(): { id: string; name?: string }[] {
 	const home = process.env.CUA_HOME?.trim() || join(homedir(), ".cua");

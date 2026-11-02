@@ -243,3 +243,39 @@ test("POST /api/computer/control returns a fresh viewer link, and 404 without a 
 		await close(session);
 	}
 });
+
+test("GET /api/computer/live frames each access unit as flag, length, bytes, and 404s without a Space", { timeout: 20_000 }, async () => {
+	let unsubscribed = 0;
+	const server = createBotServer({
+		say: async () => "",
+		context,
+		live: {
+			subscribe: (send, end) => {
+				send({ keyframe: true, data: new Uint8Array([0, 0, 1, 0x67]) });
+				send({ keyframe: false, data: new Uint8Array([9, 9]) });
+				setImmediate(() => end("done"));
+				return () => void unsubscribed++;
+			},
+		},
+	});
+	await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+	const address = server.address();
+	assert.ok(address !== null && typeof address === "object");
+	try {
+		const response = await fetch(`http://127.0.0.1:${address.port}/api/computer/live`);
+		assert.equal(response.status, 200);
+		assert.equal(response.headers.get("content-type"), "application/octet-stream");
+		assert.deepEqual([...new Uint8Array(await response.arrayBuffer())], [1, 0, 0, 0, 4, 0, 0, 1, 0x67, 0, 0, 0, 0, 2, 9, 9]);
+		await new Promise((resolve) => setImmediate(resolve));
+		assert.equal(unsubscribed, 1);
+	} finally {
+		await new Promise<void>((resolve) => server.close(() => resolve()));
+	}
+
+	const session = await open();
+	try {
+		assert.equal((await api(session, "GET", "/api/computer/live")).status, 404);
+	} finally {
+		await close(session);
+	}
+});

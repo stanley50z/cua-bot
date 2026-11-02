@@ -1,6 +1,6 @@
 // The bot's HTTP surface on 127.0.0.1: the web app at GET / with its service worker at /sw.js, its JSON
 // API under /api/ (the bot list and its edits, routines CRUD, each bot's chat history/send/stop, a server-sent
-// event stream of one bot's live chat state, and Web Push subscriptions), screenshots under /shots/, and the original POST /say. Loopback only, no auth, same trust as /say always had.
+// event stream of one bot's live chat state, Web Push subscriptions, and the Mac's live screen), screenshots under /shots/, and the original POST /say. Loopback only, no auth, same trust as /say always had.
 // Mutations go through the routines manager and the chat module, so every surface agrees.
 import { readFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
@@ -12,6 +12,7 @@ import { BotError, type BotInput, type Bots } from "./bots.ts";
 import type { Chat } from "./chat.ts";
 import { type Memory, MemoryError } from "./memory.ts";
 import { DATA_DIR } from "./log.ts";
+import type { LiveScreen } from "./live-screen.ts";
 import { isSubscription, type Push } from "./push.ts";
 import {
 	addRoutine,
@@ -105,12 +106,16 @@ export type BotServerDeps = {
 	shotsDir?: string;
 	/** Enables POST /api/computer/control: mints a link to the Mac's live viewer for the owner. */
 	viewer?: () => Promise<{ url: string; expiresAt: string }>;
+	/** Enables GET /api/computer/live: the Mac's screen as a stream of H.264 access units. */
+	live?: LiveScreen;
 	/** Enables GET/POST /api/push: the VAPID public key, and a browser's push subscription. */
 	push?: Push;
 	log?: (...parts: unknown[]) => void;
 };
 
 const SHOT_NAME = /^[\w.-]+\.png$/;
+// A pane whose socket holds this much unsent video skips to the next keyframe.
+const LIVE_BACKLOG_BYTES = 1024 * 1024;
 const HISTORY_LIMIT = 50;
 
 // History cursors travel as base64url JSON so the browser treats them as opaque strings.
@@ -146,6 +151,27 @@ function streamChat(req: IncomingMessage, res: ServerResponse, chat: Chat, bots:
 		unwatch?.();
 		unwatchBots();
 	});
+}
+
+// One pane's live screen: each access unit as a 1-byte flag (1 = keyframe), a 4-byte big-endian length,
+// then the Annex-B bytes. The response ends when the stream does, and the page reconnects.
+function streamLive(res: ServerResponse, live: LiveScreen, log: BotServerDeps["log"]): void {
+	res.writeHead(200, { "content-type": "application/octet-stream", "cache-control": "no-store" });
+	const unsubscribe = live.subscribe(
+		(frame) => {
+			const head = Buffer.alloc(5);
+			head.writeUInt8(frame.keyframe ? 1 : 0, 0);
+			head.writeUInt32BE(frame.data.byteLength, 1);
+			res.write(head);
+			res.write(frame.data);
+			return res.writableLength < LIVE_BACKLOG_BYTES;
+		},
+		(reason) => {
+			log?.(`live screen ended: ${reason}`);
+			res.end();
+		},
+	);
+	res.on("close", unsubscribe);
 }
 
 function botInput(body: unknown): BotInput {
@@ -274,6 +300,11 @@ async function route(req: IncomingMessage, res: ServerResponse, deps: BotServerD
 		const link = await deps.viewer();
 		deps.log?.("owner (web): took control of the computer");
 		sendJson(res, 200, link);
+		return;
+	}
+	if (method === "GET" && url.pathname === "/api/computer/live") {
+		if (deps.live === undefined) throw new HttpError(404, "not found");
+		streamLive(res, deps.live, deps.log);
 		return;
 	}
 	if (url.pathname === "/api/push") return routePush(req, res, deps, method);

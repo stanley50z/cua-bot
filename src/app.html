@@ -158,8 +158,10 @@ dialog .row .btn.danger { margin-right: auto; }
 .side .bar .state { margin-left: auto; }
 .screen { flex: none; margin: 16px 16px 0; border-radius: 8px; overflow: hidden; aspect-ratio: 16 / 10; background: #E3E7EC; border: 1px solid var(--line); position: relative; display: grid; place-items: center; }
 .screen.drive { outline: 3px solid var(--drive); outline-offset: -1px; border-color: var(--drive); }
-.screen img { width: 100%; height: 100%; object-fit: contain; display: block; background: #1F262E; }
-.screen a { display: contents; }
+.screen img, .screen canvas { width: 100%; height: 100%; object-fit: contain; display: block; background: #1F262E; }
+.screen a, .screen .shot { display: contents; }
+.screen canvas, .screen.live .shot { display: none; }
+.screen.live canvas { display: block; }
 .screen .none { color: var(--muted); font-size: 13px; text-align: center; padding: 0 30px; }
 .screen .tag { position: absolute; right: 8px; bottom: 8px; background: var(--drive); color: #fff; font: 600 11.5px "Bahnschrift", sans-serif; padding: 3px 8px; border-radius: 5px; }
 .shot-time { flex: none; margin: 6px 16px 0; font-size: 12px; color: var(--muted); }
@@ -291,7 +293,7 @@ dialog .row { display: flex; gap: 8px; justify-content: flex-end; margin-top: 18
 
  <aside class="side" aria-labelledby="space-h">
   <div class="bar"><h1 id="space-h">Computer</h1><span class="state" id="space-state"></span><button class="btn" id="take-control" type="button" title="Open the live desktop in a new tab, with your mouse and keyboard">Take control</button></div>
-  <div class="screen" id="screen"><p class="none">No screenshots yet. Ask the bot to do something on the computer and its screen shows up here.</p></div>
+  <div class="screen" id="screen"><canvas id="live-screen" aria-label="Live screen of the computer"></canvas><div class="shot" id="shot"></div><span class="tag" hidden>Bot is driving</span></div>
   <div class="shot-time" id="shot-time"></div>
   <div class="steps"><h2 id="steps-h">Steps</h2><ol id="steps"></ol></div>
  </aside>
@@ -783,21 +785,20 @@ function renderLive() {
   if (tag) tag.hidden = !driving;
 }
 
+// The latest screenshot sits under the live canvas and shows whenever the live stream is down.
 function renderComputer() {
   const c = state.computer;
   $("space-h").textContent = c.space || "Computer";
-  const screen = $("screen");
-  screen.textContent = "";
+  const shot = $("shot");
+  shot.textContent = "";
   if (c.shot) {
     const link = el("a"); link.href = "/shots/" + encodeURIComponent(c.shot.name); link.target = "_blank"; link.rel = "noopener";
     const img = el("img"); img.src = link.href; img.alt = "Latest screenshot of " + (c.space || "the computer");
-    link.append(img); screen.append(link);
-    const tag = el("span", "tag", "Bot is driving"); screen.append(tag);
-    $("shot-time").textContent = `Latest screenshot: ${dayLabel(c.shot.at)} at ${time(c.shot.at)}`;
+    link.append(img); shot.append(link);
   } else {
-    screen.append(el("p", "none", "No screenshots yet. Ask the bot to do something on the computer and its screen shows up here."));
-    $("shot-time").textContent = "";
+    shot.append(el("p", "none", "No screenshots yet. Ask the bot to do something on the computer and its screen shows up here."));
   }
+  captionScreen();
   const list = $("steps");
   list.textContent = "";
   $("steps-h").textContent = c.steps.length > 0 ? "Steps of the last computer task" : "Steps";
@@ -811,6 +812,93 @@ function renderComputer() {
   list.lastElementChild?.scrollIntoView({ block: "nearest" });
   renderLive();
 }
+
+function captionScreen() {
+  const c = state.computer;
+  $("shot-time").textContent = liveScreen.playing ? "Live"
+    : c.shot ? `Latest screenshot: ${dayLabel(c.shot.at)} at ${time(c.shot.at)}` : "";
+}
+
+/* ---------- live screen ---------- */
+// GET /api/computer/live (src/live-screen.ts) streams the Mac's screen as H.264 access units, each a
+// 1-byte flag (1 = keyframe), a 4-byte big-endian length, then Annex-B bytes. WebCodecs decodes them onto
+// the pane's canvas. The pane streams only while this tab is visible, and reconnects with backoff after a
+// failure. Without WebCodecs, or while the stream is down, it shows the latest screenshot instead.
+const liveScreen = { playing: false, abort: null, retry: null, delay: 2000 };
+
+// "avc1.PPCCLL" from the SPS (NAL type 7) that leads each keyframe.
+function avcCodec(data) {
+  for (let i = 0; i + 7 < data.length; i++) {
+    if (data[i] === 0 && data[i + 1] === 0 && data[i + 2] === 1 && (data[i + 3] & 0x1f) === 7) {
+      return "avc1." + [data[i + 4], data[i + 5], data[i + 6]].map((b) => b.toString(16).padStart(2, "0")).join("");
+    }
+  }
+  return null;
+}
+
+function showLive(playing) {
+  liveScreen.playing = playing;
+  $("screen").classList.toggle("live", playing);
+  captionScreen();
+}
+
+async function playLive() {
+  if (typeof VideoDecoder === "undefined" || document.hidden || liveScreen.abort) return;
+  clearTimeout(liveScreen.retry);
+  const abort = new AbortController();
+  liveScreen.abort = abort;
+  const canvas = $("live-screen"), ctx = canvas.getContext("2d");
+  let configured = null, sequence = 0;
+  const decoder = new VideoDecoder({
+    output: (frame) => {
+      if (canvas.width !== frame.displayWidth || canvas.height !== frame.displayHeight) {
+        canvas.width = frame.displayWidth; canvas.height = frame.displayHeight;
+      }
+      ctx.drawImage(frame, 0, 0);
+      frame.close();
+      if (!liveScreen.playing) { showLive(true); liveScreen.delay = 2000; }
+    },
+    error: () => abort.abort(),
+  });
+  try {
+    const response = await fetch("/api/computer/live", { signal: abort.signal, cache: "no-store" });
+    if (!response.ok || !response.body) throw new Error("no live stream");
+    const reader = response.body.getReader();
+    let buffer = new Uint8Array(0);
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      const joined = new Uint8Array(buffer.length + value.length);
+      joined.set(buffer); joined.set(value, buffer.length);
+      buffer = joined;
+      while (buffer.length >= 5) {
+        const length = new DataView(buffer.buffer, buffer.byteOffset + 1, 4).getUint32(0);
+        if (buffer.length < 5 + length) break;
+        const keyframe = (buffer[0] & 1) === 1, data = buffer.subarray(5, 5 + length);
+        buffer = buffer.subarray(5 + length);
+        if (keyframe) {
+          const codec = avcCodec(data);
+          if (codec && codec !== configured) { decoder.configure({ codec, optimizeForLatency: true }); configured = codec; }
+        }
+        if (configured && decoder.state === "configured") {
+          decoder.decode(new EncodedVideoChunk({ type: keyframe ? "key" : "delta", timestamp: sequence++ * 1000, data }));
+        }
+      }
+    }
+  } catch {}
+  if (decoder.state !== "closed") decoder.close();
+  if (liveScreen.abort === abort) liveScreen.abort = null;
+  showLive(false);
+  if (!document.hidden) {
+    liveScreen.retry = setTimeout(playLive, liveScreen.delay);
+    liveScreen.delay = Math.min(liveScreen.delay * 2, 30000);
+  }
+}
+
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) { clearTimeout(liveScreen.retry); liveScreen.abort?.abort(); }
+  else { liveScreen.delay = 2000; playLive(); }
+});
 
 /* ---------- chat I/O ---------- */
 function showChatError(message) { $("chat-error").textContent = message; $("chat-error").hidden = !message; }
@@ -1195,6 +1283,7 @@ $("routine-form").addEventListener("submit", async (event) => {
 
 /* ---------- start ---------- */
 loadBots().then(() => selectBot(Number((location.hash.match(/^#bot=(\d+)$/) || [])[1]) || mainId()));
+playLive();
 loadApprovals();
 showNotifyState();
 if (pushSupported && Notification.permission === "granted") turnOnPush();

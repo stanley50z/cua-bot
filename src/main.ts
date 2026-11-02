@@ -8,7 +8,8 @@ import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { AssistantEntry, configure, type ConversationId, createRegistry, defineExtension, Harness, section } from "@earendil-works/pi-durable";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { createBots, createBotsExtension } from "./bots.ts";
-import { createComputerExtension, spaceId, spaceLabel, viewerLink } from "./computer.ts";
+import { createComputerExtension, openLiveStream, spaceId, spaceLabel, viewerLink } from "./computer.ts";
+import { createLiveScreen } from "./live-screen.ts";
 import { createBotToolSearchExtension } from "./tool-search.ts";
 import { connectCua, createCuaExtension, defaultCuaCommand } from "./cua-mcp.ts";
 import { createComputerView } from "./computer-view.ts";
@@ -139,7 +140,8 @@ const bots = await createBots({
 		createComputerView({ harness, storage, conversation, shotsDir: join(DATA_DIR, "shots"), context, ...(space === undefined ? {} : { space }) }),
 });
 log(`bots: ${bots.list().map((bot) => bot.name).join(", ")}`);
-createBotServer({ say, bots, memory, model: MODEL.modelId, context, log, viewer: viewerLink, push, ...(approvals === undefined ? {} : { approvals }) }).listen(PORT, "127.0.0.1", () =>
+const live = createLiveScreen(openLiveStream);
+createBotServer({ say, bots, memory, model: MODEL.modelId, context, log, viewer: viewerLink, live, push, ...(approvals === undefined ? {} : { approvals }) }).listen(PORT, "127.0.0.1", () =>
 	log(`listening: web app http://127.0.0.1:${PORT}/ · chat POST http://127.0.0.1:${PORT}/say`),
 );
 
