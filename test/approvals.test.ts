@@ -9,7 +9,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { CallToolResult } from "@earendil-works/pi-mcp";
-import { ApprovalError, createApprovals, titleFor } from "../src/approvals.ts";
+import { type Approval, ApprovalError, createApprovals, titleFor } from "../src/approvals.ts";
 import { readRaw, writeRaw } from "../src/mime.ts";
 import { createBotServer } from "../src/web.ts";
 import { type Call, rawEmail, textResult } from "./fake-executor.ts";
@@ -29,6 +29,7 @@ async function withStore(run: (store: ReturnType<typeof makeStore>) => Promise<v
 function makeStore(dir: string, reply: (call: Call) => CallToolResult) {
 	const calls: Call[] = [];
 	const notes: string[] = [];
+	const filed: Approval[] = [];
 	const clock = { now: Date.parse("2026-10-31T10:00:00Z") };
 	const open = () =>
 		createApprovals({
@@ -38,9 +39,10 @@ function makeStore(dir: string, reply: (call: Call) => CallToolResult) {
 				return reply({ name, args });
 			},
 			notify: async (text) => notes.push(text),
+			filed: (approval) => filed.push(approval),
 			now: () => clock.now,
 		});
-	return { calls, notes, clock, open, approvals: open() };
+	return { calls, notes, filed, clock, open, approvals: open() };
 }
 
 // Executor's Gmail send: an upload of the base64 message.
@@ -83,8 +85,9 @@ test("a Gmail raw message decodes for the card, and edits re-encode keeping thre
 });
 
 test("approving runs the exact call once with the owner's edits and tells the bot what was sent", () =>
-	withStore(async ({ approvals, calls, notes }) => {
+	withStore(async ({ approvals, calls, notes, filed }) => {
 		const card = await approvals.request({ callId: "c1", path: SEND, input: email(REPLY) });
+		assert.deepEqual(filed, [card], "filed hears of the saved request, for its push notification");
 		const done = await approvals.approve(card.id, { to: "Sarah Kim <sarah@studio.org>", subject: "Re: Friday’s review", body: "Could we move it to 2 PM? Thanks!" });
 		assert.equal(done.status, "done");
 		assert.equal(done.edited, true);

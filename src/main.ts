@@ -8,12 +8,15 @@ import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { AssistantEntry, configure, createRegistry, defineExtension, Harness, section } from "@earendil-works/pi-durable";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { createChat } from "./chat.ts";
-import { createComputerExtension, spaceLabel } from "./computer.ts";
+import { createComputerExtension, spaceId, spaceLabel, viewerLink } from "./computer.ts";
+import { createBotToolSearchExtension } from "./tool-search.ts";
+import { connectCua, createCuaExtension, defaultCuaCommand } from "./cua-mcp.ts";
 import { createComputerView } from "./computer-view.ts";
-import { type Approvals, createApprovals } from "./approvals.ts";
+import { type Approvals, createApprovals, describeApproval } from "./approvals.ts";
 import { connectExecutor, createExecutor, createExecutorExtension } from "./executor.ts";
 import { DATA_DIR, log } from "./log.ts";
 import { createMemory, createMemoryExtension } from "./memory.ts";
+import { createPush } from "./push.ts";
 import { bindRoutines, createRoutinesExtension, startRoutineFileWatch, syncRoutines } from "./routines.ts";
 import { today } from "./today.ts";
 import { traceExtension } from "./trace.ts";
@@ -46,9 +49,10 @@ registry.install(
 				() =>
 					[
 						"You are cua-bot, a self-hosted personal agent that runs 24/7 for one owner.",
-						`The owner's email is ${process.env.OWNER_EMAIL || "(unset)"}. Email is how you reach the owner when they are not chatting with you; it goes through Gmail in Executor like any other mail.`,
-						"You never operate a computer yourself: delegate every on-screen task to computer_use, one at a time.",
-						"For recurring or future work, create a routine with schedule. A message starting with [routine] is a routine firing: do the work, and email the owner only if the outcome is worth it.",
+						`The owner's email is ${process.env.OWNER_EMAIL || "(unset)"}. Mail to the owner goes through Gmail in Executor like any other mail.`,
+						"To get the owner's attention now, call cua_notify_user (load it with tool_search): it pops up in their browser, even with no cua-bot tab open. Email the owner for what they should keep.",
+						"The owner's Mac is yours to use. Run CLI commands there with space_bash. Delegate every on-screen task to computer_use, one at a time.",
+						"For recurring or future work, create a routine with schedule. A message starting with [routine] is a routine firing: do the work, and notify or email the owner only if the outcome is worth it.",
 						"Be brief.",
 					].join("\n"),
 				{ tag: false },
@@ -59,6 +63,16 @@ registry.install(
 );
 registry.install(traceExtension);
 registry.install(createComputerExtension());
+registry.install(createBotToolSearchExtension());
+// Web Push to every browser that turned notifications on in the web app (data/push.json).
+const push = createPush({ file: join(DATA_DIR, "push.json"), log });
+// Every Cua Spaces tool, deferred until tool_search loads it. The rest of the bot works without the cua CLI.
+const cuaCommand = process.env.CUA_MCP_COMMAND?.trim() || defaultCuaCommand();
+try {
+	registry.install(await createCuaExtension(connectCua(cuaCommand), { pairedSpace: spaceId(), notified: (note) => void push.send(note) }));
+} catch (error) {
+	log(`cua: \`${cuaCommand} mcp\` failed (${error instanceof Error ? error.message : String(error)}); Cua Spaces tools are off`);
+}
 registry.install(createRoutinesExtension());
 const memory = createMemory({ dir: join(DATA_DIR, "memory") });
 registry.install(createMemoryExtension(memory));
@@ -72,6 +86,7 @@ if (executorUrl && executorKey) {
 		call: (name, args) => executor(name, args),
 		// The owner's decision reaches the bot as a message, after any turn in progress.
 		notify: (text) => root.submit({ type: "input", content: text, whenBusy: "followUp" }, context),
+		filed: (approval) => void push.send({ title: "Approval needed", body: describeApproval(approval), tag: approval.id }),
 	});
 	registry.install(createExecutorExtension({ executor, approvals, ...(process.env.OWNER_EMAIL ? { ownerEmail: process.env.OWNER_EMAIL } : {}) }));
 } else {
@@ -115,7 +130,7 @@ const computer = createComputerView({
 	...(space === undefined ? {} : { space }),
 });
 const chat = createChat({ harness, root, context, computer });
-createBotServer({ say, chat, memory, model: MODEL.modelId, context, log, ...(approvals === undefined ? {} : { approvals }) }).listen(PORT, "127.0.0.1", () =>
+createBotServer({ say, chat, memory, model: MODEL.modelId, context, log, viewer: viewerLink, push, ...(approvals === undefined ? {} : { approvals }) }).listen(PORT, "127.0.0.1", () =>
 	log(`listening: web app http://127.0.0.1:${PORT}/ · chat POST http://127.0.0.1:${PORT}/say`),
 );
 

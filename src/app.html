@@ -7,7 +7,8 @@
 <!--
  The cua-bot web app (Workbench layout), served by src/web.ts at GET /. One self-contained document:
  inline CSS and JS, no dependencies, works offline. Talks to /api/chat (history, send, stop),
- /api/chat/events (server-sent live state), /api/chat/computer, /api/routines, and /shots/.
+ /api/chat/events (server-sent live state), /api/chat/computer, /api/computer/control, /api/push, /api/routines,
+ and /shots/. Registers /sw.js for Web Push once the owner turns notifications on.
  Every server string is rendered with textContent or built DOM nodes, never parsed as HTML.
 -->
 <style>
@@ -208,7 +209,7 @@ dialog .row { display: flex; gap: 8px; justify-content: flex-end; margin-top: 18
 
  <main class="main">
   <section class="view" id="view-chat" aria-labelledby="chat-h">
-   <div class="bar"><h1 id="chat-h">Chat</h1><span class="state" id="chat-state" aria-live="polite"></span><span class="aside" id="model"></span></div>
+   <div class="bar"><h1 id="chat-h">Chat</h1><span class="state" id="chat-state" aria-live="polite"></span><span class="aside" id="model"></span><button class="btn" id="notify" type="button" hidden>Turn on notifications</button></div>
    <div class="banner" id="chat-error" role="alert" hidden></div>
    <div class="msgs" id="msgs" aria-live="polite"></div>
    <form class="composer" id="composer">
@@ -244,7 +245,7 @@ dialog .row { display: flex; gap: 8px; justify-content: flex-end; margin-top: 18
  </main>
 
  <aside class="side" aria-labelledby="space-h">
-  <div class="bar"><h1 id="space-h">Computer</h1><span class="state" id="space-state"></span></div>
+  <div class="bar"><h1 id="space-h">Computer</h1><span class="state" id="space-state"></span><button class="btn" id="take-control" type="button" title="Open the live desktop in a new tab, with your mouse and keyboard">Take control</button></div>
   <div class="screen" id="screen"><p class="none">No screenshots yet. Ask the bot to do something on the computer and its screen shows up here.</p></div>
   <div class="shot-time" id="shot-time"></div>
   <div class="steps"><h2 id="steps-h">Steps</h2><ol id="steps"></ol></div>
@@ -780,6 +781,51 @@ $("stop").addEventListener("click", async () => {
   catch (error) { showChatError("Could not stop: " + error.message); }
   finally { $("stop").disabled = false; }
 });
+// The viewer refuses to be framed, so it opens in a tab. The tab opens on the click itself, before the
+// link is minted, so popup blockers let it through.
+$("take-control").addEventListener("click", async () => {
+  const tab = window.open("", "_blank");
+  $("take-control").disabled = true;
+  try {
+    const link = await request("POST", "/api/computer/control");
+    if (tab) { tab.opener = null; tab.location.href = link.url; } else window.open(link.url, "_blank", "noopener");
+  } catch (error) {
+    tab?.close();
+    showChatError("Could not open the computer: " + error.message);
+  } finally { $("take-control").disabled = false; }
+});
+
+/* ---------- notifications ---------- */
+// Web Push (src/push.ts): once the owner allows it, the bot's notify_user calls and new approval cards
+// arrive as browser notifications through /sw.js, even with every cua-bot tab closed.
+const pushSupported = "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
+function showNotifyState() {
+  const button = $("notify"), permission = pushSupported ? Notification.permission : "denied";
+  button.hidden = !pushSupported;
+  button.disabled = permission !== "default";
+  button.textContent = permission === "granted" ? "Notifications on" : permission === "denied" ? "Notifications blocked" : "Turn on notifications";
+  button.title = permission === "denied" ? "Allow notifications for this site in the browser's site settings, then reload"
+    : "Get a browser notification when the bot pings you or needs an approval, even with this tab closed";
+}
+const fromBase64url = (text) => Uint8Array.from(atob(text.replace(/-/g, "+").replace(/_/g, "/")), (c) => c.charCodeAt(0));
+// Subscribes this browser with the bot's current key (re-subscribing if the key changed) and saves it on the bot.
+async function subscribePush() {
+  const { publicKey } = await request("GET", "/api/push");
+  const registration = await navigator.serviceWorker.register("/sw.js");
+  await navigator.serviceWorker.ready;
+  const key = fromBase64url(publicKey);
+  let subscription = await registration.pushManager.getSubscription();
+  const current = subscription?.options.applicationServerKey;
+  const same = current && current.byteLength === key.length && new Uint8Array(current).every((b, i) => b === key[i]);
+  if (subscription && !same) { await subscription.unsubscribe(); subscription = null; }
+  subscription ??= await registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: key });
+  await request("POST", "/api/push", subscription.toJSON());
+}
+const turnOnPush = () => subscribePush().catch((error) => showChatError("Could not turn on notifications: " + error.message));
+$("notify").addEventListener("click", async () => {
+  if (await Notification.requestPermission() === "granted") await turnOnPush();
+  showNotifyState();
+});
 
 /* ---------- views ---------- */
 document.querySelectorAll(".rail button[data-view]").forEach((button) => button.addEventListener("click", () => {
@@ -941,6 +987,8 @@ loadHistory().catch((error) => showChatError("Could not load the conversation: "
 loadApprovals();
 request("GET", "/api/chat/computer").then((c) => { state.computer = c; renderComputer(); }).catch(() => {});
 connect();
+showNotifyState();
+if (pushSupported && Notification.permission === "granted") turnOnPush();
 setInterval(() => { if (!$("view-routines").hidden) loadRoutines(); }, 30000);
 $("input").focus();
 </script>

@@ -1,6 +1,6 @@
-// Computer use for the main agent: one tool that runs a foreground child on the paired Mac.
-// The child is the only caller of the Cua driver tools. They stay deferred on this extension so the
-// main agent is not offered them (an unset modelTools list skips deferred tools).
+// The paired Mac for the main agent: space_bash runs CLI commands there directly, and computer_use runs a
+// foreground child for on-screen work. The child gets every live driver tool of the Mac. They are deferred on this
+// extension, so the main agent is offered them only after loading them with tool_search (src/main.ts installs it).
 import { traceExtension } from "./trace.ts";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -38,29 +38,7 @@ type DriverInfo = {
 	readOnly: boolean;
 };
 
-// The only driver tools the child gets. The live registry has ~60, including kill_app, run_script and
-// set_config, which a demo bot should not hold.
-const PREFERRED = [
-	"screenshot",
-	"get_accessibility_tree",
-	"double_click",
-	"right_click",
-	"bring_to_front",
-	"get_desktop_state",
-	"get_window_state",
-	"get_screen_size",
-	"click",
-	"type_text",
-	"launch_app",
-	"scroll",
-	"press_key",
-	"hotkey",
-	"list_apps",
-	"list_windows",
-	"move_cursor",
-	"drag",
-];
-
+// Used when the Mac's driver registry can't be listed. Normally the child gets every live driver tool.
 const FALLBACK: DriverInfo[] = [
 	{
 		name: "screenshot",
@@ -116,12 +94,12 @@ const computerExtension: Extension = defineExtension({
 	tools: extensionTools,
 });
 
-/** Installed by src/main.ts. The main agent is offered computer_use; a foreground child runs the Mac. */
+/** Installed by src/main.ts. The main agent is offered computer_use and space_bash; a foreground child runs the screen. */
 export function createComputerExtension(): Extension {
 	return computerExtension;
 }
 
-/** Used by test/computer.smoke.ts. Builds the child's driver tools, including space_bash, from the live registry. */
+/** Used by test/computer.smoke.ts. Builds the child's driver tools from the live registry; the child also gets space_bash. */
 export async function prepareComputerTools(): Promise<string[]> {
 	await ensureDriverTools();
 	return extensionTools.filter((tool) => tool.name !== "computer_use").map((tool) => tool.name);
@@ -200,7 +178,27 @@ const computerUse = defineTool({
 	},
 });
 
-extensionTools.push(computerUse);
+const spaceBash = defineTool({
+	name: "space_bash",
+	description:
+		"Run a shell command on the owner's Mac (/bin/sh -c) and return its output. Use it for CLI tools, files, and inspection; use computer_use for anything on screen.",
+	parameters: Type.Object({
+		command: Type.String({ description: "Shell command" }),
+	}),
+	executionMode: "sequential",
+	outputLimits: { maxBytes: 64 * 1024, maxLines: 2000, retain: "tail" },
+	execute: async ({ command }) => {
+		const space = await connectSpace();
+		const result = await space.bash(command, undefined);
+		const text = result.rendered.length > 0 ? result.rendered : fallbackBashText(result);
+		return {
+			output: [{ type: "text", text: text.length > 0 ? text : "(no output)" }],
+			isError: result.timedOut || result.error !== undefined,
+		};
+	},
+});
+
+extensionTools.push(computerUse, spaceBash);
 
 async function connectSpace(): Promise<ConnectedSpace> {
 	spacePromise ??= openSpace().catch((error: unknown) => {
@@ -218,6 +216,11 @@ async function openSpace(): Promise<ConnectedSpace> {
 	return embedded().spaces().space(id);
 }
 
+/** Used by main.ts for the cua_* tools' prompt section. The paired Space's id. */
+export function spaceId(): string | undefined {
+	return process.env.CUA_SPACE_ID?.trim() || spaceIdFromRegistry();
+}
+
 function spaceIdFromRegistry(): string | undefined {
 	return registrySpaces()[0]?.id;
 }
@@ -227,6 +230,27 @@ export function spaceLabel(): string | undefined {
 	const id = process.env.CUA_SPACE_ID?.trim() || spaceIdFromRegistry();
 	const entry = registrySpaces().find((space) => space.id === id);
 	return entry?.name ?? id;
+}
+
+/**
+ * Used by the web app's Take control button (POST /api/computer/control). A link to the paired Mac in
+ * cua-spacesd's HTML5 viewer (live video, mouse and keyboard, clipboard, file drop), good for an hour.
+ * The viewer refuses to be framed, so the app opens it in a new tab.
+ */
+export async function viewerLink(): Promise<{ url: string; expiresAt: string }> {
+	const client = await (await connectSpace()).spacesd();
+	const minted: unknown = JSON.parse(
+		await client.callJson(
+			"/cua.env.v1.SystemService/CreateViewerTicket",
+			JSON.stringify({ policy: "SESSION_POLICY_ALLOW_ACTIVATION", clipboard: true }),
+			undefined,
+		),
+	);
+	if (minted === null || typeof minted !== "object" || !("viewerPath" in minted) || typeof minted.viewerPath !== "string") {
+		throw new Error("cua-spacesd returned no viewer link");
+	}
+	const expiresAt = "expiresAt" in minted && typeof minted.expiresAt === "string" ? minted.expiresAt : "";
+	return { url: new URL(minted.viewerPath, client.endpoint()).href, expiresAt };
 }
 
 function registrySpaces(): { id: string; name?: string }[] {
@@ -269,7 +293,7 @@ async function fetchInfos(): Promise<DriverInfo[]> {
 		foundNames = listed.map((tool) => tool.name);
 		registryKind = "live";
 		listFailure = undefined;
-		return capTools(listed);
+		return listed;
 	} catch (error) {
 		foundNames = FALLBACK.map((tool) => tool.name);
 		registryKind = "fallback";
@@ -284,11 +308,6 @@ function looksLikeDriver(tools: readonly { name: string }[]): boolean {
 	return names.has("click") || names.has("type_text") || names.has("get_desktop_state") || names.has("screenshot");
 }
 
-function capTools(tools: readonly DriverInfo[]): DriverInfo[] {
-	const allowed = new Set(PREFERRED);
-	return tools.filter((tool) => allowed.has(tool.name));
-}
-
 function ensureDriverTools(): Promise<void> {
 	toolsPromise ??= populateDriverTools().catch((error: unknown) => {
 		toolsPromise = undefined;
@@ -298,12 +317,9 @@ function ensureDriverTools(): Promise<void> {
 }
 
 async function populateDriverTools(): Promise<void> {
-	if (extensionTools.some((tool) => tool.name === "space_bash")) return;
 	const infos = await driverInfos();
 	const used = new Set<string>(["computer_use", "space_bash"]);
-	const built = infos.map((info) => driverTool(info, used));
-	built.push(bashTool());
-	extensionTools.push(...built);
+	extensionTools.push(...infos.map((info) => driverTool(info, used)));
 }
 
 function driverTool(info: DriverInfo, used: Set<string>): ToolRegistration {
@@ -330,28 +346,6 @@ function driverTool(info: DriverInfo, used: Set<string>): ToolRegistration {
 			const output = rememberShots(llmContent(result));
 			if (output.length === 0) output.push({ type: "text", text: result.text.length > 0 ? result.text : "(no output)" });
 			return { output, isError: result.isError };
-		},
-	});
-}
-
-function bashTool(): ToolRegistration {
-	return defineTool({
-		name: "space_bash",
-		description: "Run a shell command on the Mac (/bin/sh -c). For files and inspection, not for clicks or typing.",
-		parameters: Type.Object({
-			command: Type.String({ description: "Shell command" }),
-		}),
-		deferred: true,
-		executionMode: "sequential",
-		outputLimits: { maxBytes: 64 * 1024, maxLines: 2000, retain: "tail" },
-		execute: async ({ command }) => {
-			const space = await connectSpace();
-			const result = await space.bash(command, undefined);
-			const text = result.rendered.length > 0 ? result.rendered : fallbackBashText(result);
-			return {
-				output: [{ type: "text", text: text.length > 0 ? text : "(no output)" }],
-				isError: result.timedOut || result.error !== undefined,
-			};
 		},
 	});
 }

@@ -216,3 +216,27 @@ test("POST /say still answers plain text", { timeout: 20_000 }, async () => {
 		await close(session);
 	}
 });
+
+test("POST /api/computer/control returns a fresh viewer link, and 404 without a Space", { timeout: 20_000 }, async () => {
+	const link = { url: "http://100.64.0.1:43141/viewer/#ticket=t", expiresAt: "2026-11-01T06:00:00Z" };
+	let minted = 0;
+	const server = createBotServer({ say: async () => "", context, viewer: async () => (minted++, link) });
+	await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+	const address = server.address();
+	assert.ok(address !== null && typeof address === "object");
+	try {
+		const response = await fetch(`http://127.0.0.1:${address.port}/api/computer/control`, { method: "POST" });
+		assert.equal(response.status, 200);
+		assert.deepEqual(await response.json(), link);
+		assert.equal(minted, 1);
+	} finally {
+		await new Promise<void>((resolve) => server.close(() => resolve()));
+	}
+
+	const session = await open();
+	try {
+		assert.equal((await api(session, "POST", "/api/computer/control")).status, 404);
+	} finally {
+		await close(session);
+	}
+});

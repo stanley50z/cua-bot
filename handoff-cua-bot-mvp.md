@@ -4,7 +4,7 @@ Updated 2026-10-31. Repo: github.com/stanley50z/cua-bot (private, `main`, HTTPS 
 
 ## What the project is
 
-cua-bot is a self-hosted assistant for one owner, built on Pi Durable and Cua Spaces. The MVP scope is memory, cron routines, and Gmail/Calendar through Executor Cloud. Proactive notifications are out of scope.
+cua-bot is a self-hosted assistant for one owner, built on Pi Durable and Cua Spaces. The MVP scope is memory, cron routines, and Gmail/Calendar through Executor Cloud. Proactive notifications are browser Web Push only (since 2026-11-02): `cua_notify_user` calls and new approval cards. No Telegram.
 
 Read [README.md](README.md) first. It covers the architecture, setup, approval cards, and debugging paths. The recent work is in these commits:
 
@@ -87,7 +87,7 @@ The Calendar insert Executor holds, and a trash, were verified live later the sa
 ## Standing constraints from the user
 
 - **Naming:** the project is **cua-bot**. Never call it Grokbot or describe it as a clone of, or as built on, leaked code. This applies in code, docs, prompts, and env names.
-- **Out of bounds:** don't propose Google's hosted MCP servers or a Gmail path with your own OAuth client. Don't re-add notifications.
+- **Out of bounds:** don't propose Google's hosted MCP servers or a Gmail path with your own OAuth client. Don't add notification channels beyond Web Push and Cua's feed (no Telegram).
 - **No computer use by the agent** unless the user explicitly asks. The bot's own `computer_use` tool is separate.
 - **Edits:** make targeted edits with the Edit tool, not sed, Python, or `node -e`.
 - **UI:** mock first, and let the user pick before you touch real components.

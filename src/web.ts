@@ -1,6 +1,6 @@
-// The bot's HTTP surface on 127.0.0.1: the web app at GET /, its JSON API under /api/ (routines
-// CRUD, chat history/send/stop, and a server-sent event stream of live chat state), screenshots
-// under /shots/, and the original POST /say. Loopback only, no auth, same trust as /say always had.
+// The bot's HTTP surface on 127.0.0.1: the web app at GET / with its service worker at /sw.js, its JSON
+// API under /api/ (routines CRUD, chat history/send/stop, a server-sent event stream of live chat state,
+// and Web Push subscriptions), screenshots under /shots/, and the original POST /say. Loopback only, no auth, same trust as /say always had.
 // Mutations go through the routines manager and the chat module, so every surface agrees.
 import { readFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
@@ -11,6 +11,7 @@ import { ApprovalError, type Approvals, type EmailEdit } from "./approvals.ts";
 import type { Chat } from "./chat.ts";
 import { type Memory, MemoryError } from "./memory.ts";
 import { DATA_DIR } from "./log.ts";
+import { isSubscription, type Push } from "./push.ts";
 import {
 	addRoutine,
 	deleteRoutine,
@@ -23,7 +24,7 @@ import {
 	runRoutineNow,
 	updateRoutine,
 } from "./routines.ts";
-import { PAGE } from "./web-page.ts";
+import { PAGE, SERVICE_WORKER } from "./web-page.ts";
 
 const MAX_BODY_BYTES = 64 * 1024;
 
@@ -99,6 +100,10 @@ export type BotServerDeps = {
 	/** Shown in the chat header, e.g. "grok-4.7". */
 	model?: string;
 	shotsDir?: string;
+	/** Enables POST /api/computer/control: mints a link to the Mac's live viewer for the owner. */
+	viewer?: () => Promise<{ url: string; expiresAt: string }>;
+	/** Enables GET/POST /api/push: the VAPID public key, and a browser's push subscription. */
+	push?: Push;
 	log?: (...parts: unknown[]) => void;
 };
 
@@ -194,6 +199,10 @@ async function route(req: IncomingMessage, res: ServerResponse, deps: BotServerD
 		res.writeHead(200, { "content-type": "text/html; charset=utf-8" }).end(PAGE);
 		return;
 	}
+	if (method === "GET" && url.pathname === "/sw.js") {
+		res.writeHead(200, { "content-type": "text/javascript; charset=utf-8", "cache-control": "no-cache" }).end(SERVICE_WORKER);
+		return;
+	}
 	if (method === "POST" && url.pathname === "/say") {
 		const body = await readBody(req);
 		deps.log?.("owner:", body);
@@ -215,11 +224,32 @@ async function route(req: IncomingMessage, res: ServerResponse, deps: BotServerD
 		res.writeHead(200, { "content-type": "image/png", "cache-control": "max-age=31536000, immutable" }).end(file);
 		return;
 	}
+	if (method === "POST" && url.pathname === "/api/computer/control") {
+		if (deps.viewer === undefined) throw new HttpError(404, "not found");
+		const link = await deps.viewer();
+		deps.log?.("owner (web): took control of the computer");
+		sendJson(res, 200, link);
+		return;
+	}
+	if (url.pathname === "/api/push") return routePush(req, res, deps, method);
 	if (url.pathname.startsWith("/api/chat")) return routeChat(req, res, deps, url, method);
 	if (url.pathname.startsWith("/api/memory")) return routeMemory(req, res, deps, url, method);
 	if (url.pathname.startsWith("/api/approvals")) return routeApprovals(req, res, deps, url, method);
 	if (url.pathname.startsWith("/api/")) return routeApi(req, res, deps, url, method);
 	throw new HttpError(404, "not found");
+}
+
+// Web Push: the page reads the key to subscribe, then posts the browser's subscription.
+async function routePush(req: IncomingMessage, res: ServerResponse, deps: BotServerDeps, method: string) {
+	const push = deps.push;
+	if (push === undefined) throw new HttpError(404, "not found");
+	if (method === "GET") return sendJson(res, 200, { publicKey: push.publicKey });
+	if (method !== "POST") throw new HttpError(404, "not found");
+	const subscription = await readJson(req);
+	if (!isSubscription(subscription)) throw new HttpError(400, "body must be a PushSubscription with an https endpoint and keys");
+	push.subscribe(subscription);
+	deps.log?.(`owner (web): turned on notifications for ${new URL(subscription.endpoint).host}`);
+	res.writeHead(204).end();
 }
 
 function factInput(body: unknown): { fact: string; tier: "profile" | "log" } {

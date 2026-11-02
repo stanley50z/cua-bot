@@ -1,12 +1,12 @@
 // A fake Executor MCP server over pi-mcp's in-memory transport, shared by the executor and approval tests.
-// It answers initialize and tools/call with `reply`, records every call, and keeps each session's server
+// It answers initialize, tools/list with `tools`, and tools/call with `reply`, records every call, and keeps each session's server
 // side so a test can drop it.
-import { type CallToolResult, isJsonRpcRequest, McpClient } from "@earendil-works/pi-mcp";
+import { type CallToolResult, isJsonRpcRequest, McpClient, type Tool } from "@earendil-works/pi-mcp";
 import { createInMemoryTransportPair, type InMemoryTransport } from "@earendil-works/pi-mcp/testing";
 
 export type Call = { name: string; args: Record<string, unknown> };
 
-export function fakeExecutor(reply: (call: Call) => CallToolResult) {
+export function fakeExecutor(reply: (call: Call) => CallToolResult, tools: Tool[] = []) {
 	const calls: Call[] = [];
 	const servers: InMemoryTransport[] = [];
 	const connect = async () => {
@@ -18,6 +18,7 @@ export function fakeExecutor(reply: (call: Call) => CallToolResult) {
 			if (message.method === "initialize") {
 				return respond({ protocolVersion: "2025-11-25", capabilities: { tools: {} }, serverInfo: { name: "executor", version: "test" } });
 			}
+			if (message.method === "tools/list") return respond({ tools });
 			if (message.method === "tools/call") {
 				const params = message.params as { name: string; arguments: Record<string, unknown> };
 				const call = { name: params.name, args: params.arguments };

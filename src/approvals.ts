@@ -151,9 +151,23 @@ const textOf = (result: CallToolResult) => result.content.flatMap((part) => (par
 const failed = (result: CallToolResult, text: string) => result.isError === true || /"ok"\s*:\s*false/.test(text);
 const clip = (text: string, max: number) => (text.length > max ? `${text.slice(0, max)}…` : text);
 
+/** One line for a request, e.g. `Send email to a@b.c: "Lunch"`. Used in messages to the bot and in push notifications. */
+export function describeApproval(approval: Approval): string {
+	const email = approval.email;
+	if (email !== undefined) return `${approval.title} to ${email.to || "the original sender"}: "${email.subject || "Re: the original subject"}"`;
+	return approval.summary === undefined ? approval.title : `${approval.title}: ${approval.summary}`;
+}
+
 export type Approvals = ReturnType<typeof createApprovals>;
 
-export function createApprovals(options: { file: string; call: ExecutorCall; notify: (text: string) => Promise<unknown>; now?: () => number }) {
+/** `filed` hears of each new request after it is saved; main.ts pushes a notification for it. */
+export function createApprovals(options: {
+	file: string;
+	call: ExecutorCall;
+	notify: (text: string) => Promise<unknown>;
+	filed?: (approval: Approval) => void;
+	now?: () => number;
+}) {
 	const now = options.now ?? Date.now;
 	const listeners = new Set<(approvals: Approval[]) => void>();
 	let loaded: Promise<Approval[]> | undefined;
@@ -200,12 +214,6 @@ export function createApprovals(options: { file: string; call: ExecutorCall; not
 		return approval;
 	};
 
-	function describe(approval: Approval): string {
-		const email = approval.email;
-		if (email !== undefined) return `${approval.title} to ${email.to || "the original sender"}: "${email.subject || "Re: the original subject"}"`;
-		return approval.summary === undefined ? approval.title : `${approval.title}: ${approval.summary}`;
-	}
-
 	return {
 		/** Every request, newest last. Waiting ones older than 7 days read as expired. */
 		async list(): Promise<Approval[]> {
@@ -233,6 +241,9 @@ export function createApprovals(options: { file: string; call: ExecutorCall; not
 				};
 				all.push(approval);
 				return { ...approval };
+			}).then((approval) => {
+				options.filed?.(approval);
+				return approval;
 			}),
 
 		/** Run the request as approved, with the owner's edits for an editable email, then tell the bot. */
@@ -281,8 +292,8 @@ export function createApprovals(options: { file: string; call: ExecutorCall; not
 			const sent = settled.email !== undefined && settled.edited === true ? `\nThe owner edited it first. What was sent:\nTo: ${settled.email.to}\nSubject: ${settled.email.subject}\n\n${settled.email.body}` : "";
 			await options.notify(
 				status === "done"
-					? `[approval] The owner approved and it ran: ${describe(settled)}.${sent}\nResult: ${clip(outcome, 600)}`
-					: `[approval] The owner approved ${describe(settled)}, but it failed: ${clip(outcome, 600)}`,
+					? `[approval] The owner approved and it ran: ${describeApproval(settled)}.${sent}\nResult: ${clip(outcome, 600)}`
+					: `[approval] The owner approved ${describeApproval(settled)}, but it failed: ${clip(outcome, 600)}`,
 			);
 			return settled;
 		},
@@ -297,7 +308,7 @@ export function createApprovals(options: { file: string; call: ExecutorCall; not
 			if (settled.pausedRequestId !== undefined) {
 				await options.call("resume", { requestId: settled.pausedRequestId, response: { action: "decline" } }).catch(() => undefined);
 			}
-			await options.notify(`[approval] The owner discarded: ${describe(settled)}. Don't try it again unless they ask.`);
+			await options.notify(`[approval] The owner discarded: ${describeApproval(settled)}. Don't try it again unless they ask.`);
 			return settled;
 		},
 
