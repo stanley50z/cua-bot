@@ -1,6 +1,6 @@
 // The bot's HTTP surface on 127.0.0.1: the web app at GET / with its service worker at /sw.js, its JSON
-// API under /api/ (routines CRUD, chat history/send/stop, a server-sent event stream of live chat state,
-// and Web Push subscriptions), screenshots under /shots/, and the original POST /say. Loopback only, no auth, same trust as /say always had.
+// API under /api/ (the bot list and its edits, routines CRUD, each bot's chat history/send/stop, a server-sent
+// event stream of one bot's live chat state, and Web Push subscriptions), screenshots under /shots/, and the original POST /say. Loopback only, no auth, same trust as /say always had.
 // Mutations go through the routines manager and the chat module, so every surface agrees.
 import { readFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
@@ -8,6 +8,7 @@ import { basename, join } from "node:path";
 import type { Context } from "@earendil-works/chord";
 import type { Cursor } from "@earendil-works/pi-durable";
 import { ApprovalError, type Approvals, type EmailEdit } from "./approvals.ts";
+import { BotError, type BotInput, type Bots } from "./bots.ts";
 import type { Chat } from "./chat.ts";
 import { type Memory, MemoryError } from "./memory.ts";
 import { DATA_DIR } from "./log.ts";
@@ -17,7 +18,7 @@ import {
 	deleteRoutine,
 	listRoutineViews,
 	previewCron,
-	routineFilePath,
+	routineDir,
 	RoutineLimitError,
 	RoutineNotFoundError,
 	RoutineValidationError,
@@ -41,7 +42,7 @@ function messageOf(error: unknown): string {
 }
 
 function statusFor(error: unknown): number {
-	if (error instanceof HttpError) return error.status;
+	if (error instanceof HttpError || error instanceof BotError) return error.status;
 	if (error instanceof RoutineNotFoundError) return 404;
 	if (error instanceof RoutineValidationError) return 400;
 	if (error instanceof RoutineLimitError) return 409;
@@ -77,7 +78,8 @@ async function readJson(req: IncomingMessage): Promise<unknown> {
 	}
 }
 
-function routineInput(body: unknown): { title: string; prompt: string; cron: string } {
+// `bot` picks the bot a new routine runs in (the main bot when absent); editing never moves a routine.
+function routineInput(body: unknown): { title: string; prompt: string; cron: string; bot?: number } {
 	if (body === null || typeof body !== "object" || Array.isArray(body)) {
 		throw new HttpError(400, "expected a JSON object with title, prompt, and cron");
 	}
@@ -85,14 +87,15 @@ function routineInput(body: unknown): { title: string; prompt: string; cron: str
 	if (typeof record.title !== "string" || typeof record.prompt !== "string" || typeof record.cron !== "string") {
 		throw new HttpError(400, "title, prompt, and cron must be strings");
 	}
-	return { title: record.title, prompt: record.prompt, cron: record.cron };
+	if (record.bot !== undefined && record.bot !== null && !Number.isInteger(record.bot)) throw new HttpError(400, "bot must be a bot id");
+	return { title: record.title, prompt: record.prompt, cron: record.cron, ...(typeof record.bot === "number" ? { bot: record.bot } : {}) };
 }
 
 export type BotServerDeps = {
 	say: (text: string) => Promise<string>;
 	context: Context;
-	/** Enables /api/chat*. Absent in tests that only exercise routines. */
-	chat?: Chat;
+	/** Enables /api/bots* and /api/chat*. Absent in tests that only exercise routines. */
+	bots?: Bots;
 	/** Enables /api/memory*. */
 	memory?: Memory;
 	/** Enables /api/approvals* and approval events on the chat stream. Absent when Executor is not configured. */
@@ -127,20 +130,62 @@ function chatText(body: unknown): string {
 	return text;
 }
 
-// One SSE client: a `live` snapshot right away, then every chat event, and the full approvals list
-// whenever it changes, until the socket closes.
-function streamChat(req: IncomingMessage, res: ServerResponse, chat: Chat, approvals: Approvals | undefined): void {
+// One SSE client of one bot's chat: a `live` snapshot right away, then every chat event, the full
+// approvals list whenever it changes, and the bot list whenever it changes, until the socket closes.
+function streamChat(req: IncomingMessage, res: ServerResponse, chat: Chat, bots: Bots, approvals: Approvals | undefined): void {
 	res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-store", connection: "keep-alive" });
 	const send = (event: unknown) => res.write(`data: ${JSON.stringify(event)}\n\n`);
 	send({ type: "live", live: chat.live });
 	const unsubscribe = chat.subscribe(send);
 	const unwatch = approvals?.subscribe((list) => send({ type: "approvals", approvals: list }));
+	const unwatchBots = bots.subscribe((list) => send({ type: "bots", bots: list }));
 	const ping = setInterval(() => res.write(": ping\n\n"), 25_000);
 	req.on("close", () => {
 		clearInterval(ping);
 		unsubscribe();
 		unwatch?.();
+		unwatchBots();
 	});
+}
+
+function botInput(body: unknown): BotInput {
+	const record = body !== null && typeof body === "object" && !Array.isArray(body) ? (body as Record<string, unknown>) : {};
+	const instructions = record.instructions ?? "";
+	if (typeof record.name !== "string" || typeof instructions !== "string") throw new HttpError(400, "name and instructions must be strings");
+	return { name: record.name, instructions };
+}
+
+// The bot list: every bot with its newest message, and adding, editing, or deleting one.
+async function routeBots(req: IncomingMessage, res: ServerResponse, deps: BotServerDeps, url: URL, method: string) {
+	const bots = deps.bots;
+	if (bots === undefined) throw new HttpError(404, "not found");
+	if (method === "GET" && url.pathname === "/api/bots") return sendJson(res, 200, { bots: bots.list() });
+	if (method === "POST" && url.pathname === "/api/bots") {
+		const bot = await bots.create(botInput(await readJson(req)));
+		deps.log?.(`owner (web): created bot ${bot.name} (${bot.id})`);
+		return sendJson(res, 201, bot);
+	}
+	const id = Number(url.pathname.match(/^\/api\/bots\/(\d+)$/)?.[1]);
+	if (Number.isInteger(id) && method === "PUT") {
+		const bot = await bots.update(id, botInput(await readJson(req)));
+		deps.log?.(`owner (web): edited bot ${bot.name} (${bot.id})`);
+		return sendJson(res, 200, bot);
+	}
+	if (Number.isInteger(id) && method === "DELETE") {
+		await bots.remove(id);
+		deps.log?.(`owner (web): deleted bot ${id}`);
+		return void res.writeHead(204).end();
+	}
+	throw new HttpError(404, "not found");
+}
+
+// `bot` (a query parameter, or a field of a JSON body) picks the chat; without it, the main bot's.
+async function chatFor(bots: Bots, bot: unknown): Promise<Chat> {
+	const id = bot === undefined || bot === null || bot === "" ? undefined : Number(bot);
+	if (id !== undefined && !Number.isInteger(id)) throw new HttpError(400, "bot must be a bot id");
+	const chat = await bots.chat(id);
+	if (chat === undefined) throw new HttpError(404, "No such bot.");
+	return chat;
 }
 
 function emailEdit(body: unknown): EmailEdit | undefined {
@@ -232,6 +277,7 @@ async function route(req: IncomingMessage, res: ServerResponse, deps: BotServerD
 		return;
 	}
 	if (url.pathname === "/api/push") return routePush(req, res, deps, method);
+	if (url.pathname.startsWith("/api/bots")) return routeBots(req, res, deps, url, method);
 	if (url.pathname.startsWith("/api/chat")) return routeChat(req, res, deps, url, method);
 	if (url.pathname.startsWith("/api/memory")) return routeMemory(req, res, deps, url, method);
 	if (url.pathname.startsWith("/api/approvals")) return routeApprovals(req, res, deps, url, method);
@@ -293,28 +339,33 @@ async function routeMemory(req: IncomingMessage, res: ServerResponse, deps: BotS
 }
 
 async function routeChat(req: IncomingMessage, res: ServerResponse, deps: BotServerDeps, url: URL, method: string) {
-	const chat = deps.chat;
-	if (chat === undefined) throw new HttpError(404, "not found");
+	const bots = deps.bots;
+	if (bots === undefined) throw new HttpError(404, "not found");
+	const bot = url.searchParams.get("bot");
 	if (method === "GET" && url.pathname === "/api/chat") {
+		const chat = await chatFor(bots, bot);
 		const limit = Math.min(Math.max(Number(url.searchParams.get("limit")) || HISTORY_LIMIT, 1), 200);
 		const page = await chat.history(limit, decodeCursor(url.searchParams.get("before")));
 		sendJson(res, 200, { items: page.items, before: encodeCursor(page.before), live: chat.live, model: deps.model ?? null });
 		return;
 	}
 	if (method === "POST" && url.pathname === "/api/chat") {
-		const text = chatText(await readJson(req));
-		deps.log?.("owner (web):", text);
+		const body = await readJson(req);
+		const text = chatText(body);
+		const which = (body as { bot?: unknown }).bot ?? bot;
+		const chat = await chatFor(bots, which);
+		deps.log?.(`owner (web${which === null || which === undefined ? "" : `, bot ${String(which)}`}):`, text);
 		sendJson(res, 202, await chat.send(text));
 		return;
 	}
 	if (method === "POST" && url.pathname === "/api/chat/stop") {
-		await chat.stop();
+		await (await chatFor(bots, bot)).stop();
 		res.writeHead(204).end();
 		return;
 	}
-	if (method === "GET" && url.pathname === "/api/chat/events") return streamChat(req, res, chat, deps.approvals);
+	if (method === "GET" && url.pathname === "/api/chat/events") return streamChat(req, res, await chatFor(bots, bot), bots, deps.approvals);
 	if (method === "GET" && url.pathname === "/api/chat/computer") {
-		sendJson(res, 200, (await chat.computer()) ?? { steps: [] });
+		sendJson(res, 200, (await (await chatFor(bots, bot)).computer()) ?? { steps: [] });
 		return;
 	}
 	throw new HttpError(404, "not found");
@@ -329,7 +380,7 @@ async function routeApi(
 ): Promise<void> {
 	const ctx = deps.context;
 	if (method === "GET" && url.pathname === "/api/routines") {
-		sendJson(res, 200, { routines: await listRoutineViews(ctx), file: basename(routineFilePath()) });
+		sendJson(res, 200, { routines: await listRoutineViews(ctx), dir: basename(routineDir()) });
 		return;
 	}
 	if (method === "POST" && url.pathname === "/api/routines") {

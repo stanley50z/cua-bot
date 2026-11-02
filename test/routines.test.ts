@@ -2,9 +2,10 @@
 // and state written by the pre-cron (v1) code. Run from the repo root:
 //   node --test test/routines.test.ts
 import assert from "node:assert/strict";
+import { existsSync } from "node:fs";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { after, test } from "node:test";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { type AssistantMessage, type FauxResponseStep, type Message } from "@earendil-works/pi-ai";
@@ -38,7 +39,7 @@ after(async () => {
 async function freshRoutineFile(): Promise<string> {
 	const dir = await mkdtemp(join(tmpdir(), "cua-bot-routines-file-"));
 	tempDirs.push(dir);
-	return join(dir, "routines.json");
+	return join(dir, "cua-bot.json");
 }
 
 function messageText(message: Message): string {
@@ -137,7 +138,7 @@ async function openSession(
 	const harness = await Harness.open(storage, options, context);
 	const root = await harness.root(context, { agent: { model: MODEL } });
 	const file = routineFile ?? (await freshRoutineFile());
-	bindRoutines({ harness, root, filePath: file, now: () => clock.now });
+	bindRoutines({ harness, root, dir: dirname(file), now: () => clock.now });
 	harness.resume();
 	await syncRoutines(context);
 	return { clock, reports, harness, root, routineFile: file };
@@ -248,7 +249,7 @@ test("a routine sleeping in sqlite still fires after reopen", { timeout: 20_000 
 	const database = join(directory, "session.sqlite");
 	const clock = { now: BASE };
 	const models = scriptedModel();
-	const routineFile = join(directory, "routines.json");
+	const routineFile = join(directory, "cua-bot.json");
 	let session = await openSession(await openNodeSqliteStorage(database), clock, models, routineFile);
 	try {
 		await say(session.root, "please schedule a routine");
@@ -283,7 +284,7 @@ test("cancel_routine aborts the sleeper before it can fire", { timeout: 20_000 }
 		assert.equal(record?.state.status, "terminal");
 		if (record?.state.status === "terminal") assert.equal(record.state.outcome.status, "aborted");
 		assert.match(await transcript(session.root), /Cancelled /);
-		assert.deepEqual(JSON.parse(await readFile(session.routineFile, "utf8")), []);
+		assert.equal(existsSync(session.routineFile), false, "a bot without routines has no file");
 
 		clock.now = until + 60_000;
 		session.harness.resume();
@@ -302,7 +303,7 @@ test("weekday cron survives a restart and a missed weekend fires once", { timeou
 	const models = scriptedModel();
 	// From Tue 2023-11-14T22:13:20Z, weekdays 07:30 UTC next fires Wed 2023-11-15T07:30:00Z.
 	const firstDue = Date.UTC(2023, 10, 15, 7, 30);
-	const routineFile = join(directory, "routines.json");
+	const routineFile = join(directory, "cua-bot.json");
 	let session = await openSession(await openNodeSqliteStorage(database), clock, models, routineFile);
 	try {
 		await say(session.root, "schedule weekdays please");

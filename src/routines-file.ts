@@ -1,5 +1,5 @@
-// routines.json: the human-editable config file that holds routine definitions (id, title, prompt,
-// cron). The bot syncs it into Durable state on start, on its own writes, and when it changes on
+// routines/<bot-name>.json: the human-editable file that holds one bot's routine definitions (id, title,
+// prompt, cron). The bot syncs it into Durable state on start, on its own writes, and when it changes on
 // disk. Run history (lastFiredAt) is not stored here; it stays in the Durable doc.
 // Reading validates the whole file and throws on the first problem, so a bad edit changes nothing.
 import { readFile, rename, writeFile } from "node:fs/promises";
@@ -7,7 +7,10 @@ import { basename, join } from "node:path";
 import { nextFire, toCronSpec } from "./cron.ts";
 
 export const MAX_ROUTINES = 50;
-export const DEFAULT_ROUTINE_FILE = join(import.meta.dirname, "..", "routines.json");
+/** One file per bot that has routines. */
+export const DEFAULT_ROUTINE_DIR = join(import.meta.dirname, "..", "routines");
+/** Where every routine lived before each bot had its own file; main.ts moves it to the main bot's file once. */
+export const LEGACY_ROUTINE_FILE = join(import.meta.dirname, "..", "routines.json");
 
 export type RoutineDefinition = {
 	id: string;

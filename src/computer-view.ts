@@ -1,8 +1,8 @@
 // What the web app's computer pane shows: the paired Space's name, the newest screenshot, and the
-// driver steps of the most recent computer_use run. main.ts builds one with createComputerView()
-// and hands it to createChat(), which pushes fresh snapshots while a computer_use call is running.
-// computer_use runs its driver calls in a child conversation of the root (src/computer.ts), so the
-// newest conversation the root owns is the latest run.
+// driver steps of the bot's most recent computer_use run. src/bots.ts builds one per bot with
+// createComputerView() and hands it to createChat(), which pushes fresh snapshots while a computer_use
+// call is running. computer_use runs its driver calls in a child conversation of the bot's (src/computer.ts),
+// so the newest conversation the bot owns is its latest run.
 import { readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
 import type { Context } from "@earendil-works/chord";
@@ -87,21 +87,22 @@ async function stepsOf(conversation: Conversation, context: Context): Promise<Co
 
 export type ComputerView = ReturnType<typeof createComputerView>;
 
+/** One per bot; `conversation` is the bot whose computer_use runs the steps come from. */
 export function createComputerView(deps: {
 	harness: Harness;
 	storage: Storage;
-	root: Conversation;
+	conversation: Conversation;
 	shotsDir: string;
 	space?: string;
 	context: Context;
 }) {
-	const { harness, storage, root, shotsDir, context } = deps;
+	const { harness, storage, conversation, shotsDir, context } = deps;
 	return {
 		/** Read the pane's state now. `running` names the child of a computer_use call in progress, when known. */
 		async snapshot(running?: ConversationId): Promise<ComputerSnapshot> {
 			let childId = running;
 			if (childId === undefined) {
-				const page = await storage.scanConversations({ ownerConversationId: root.id, order: "descending" }, 1, undefined, context);
+				const page = await storage.scanConversations({ ownerConversationId: conversation.id, order: "descending" }, 1, undefined, context);
 				childId = page.items[0]?.id;
 			}
 			const child = childId === undefined ? undefined : await harness.conversation(childId, context);

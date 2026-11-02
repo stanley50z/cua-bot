@@ -6,7 +6,8 @@
 <title>cua-bot</title>
 <!--
  The cua-bot web app (Workbench layout), served by src/web.ts at GET /. One self-contained document:
- inline CSS and JS, no dependencies, works offline. Talks to /api/chat (history, send, stop),
+ inline CSS and JS, no dependencies, works offline. Talks to /api/bots (the bot list and its edits),
+ /api/chat?bot=<id> (one bot's history, send, stop),
  /api/chat/events (server-sent live state), /api/chat/computer, /api/computer/control, /api/push, /api/routines,
  and /shots/. Registers /sw.js for Web Push once the owner turns notifications on.
  Every server string is rendered with textContent or built DOM nodes, never parsed as HTML.
@@ -44,6 +45,39 @@ code, pre, .mono { font-family: "Cascadia Code", Consolas, monospace; }
 .state.bad { color: var(--bad); }
 @keyframes pulse { 50% { opacity: .25; } }
 .view { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+#view-chat { flex-direction: row; }
+.chatcol { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+.bar .edit { width: 30px; height: 30px; border: 0; background: transparent; border-radius: 7px; cursor: pointer; color: var(--muted); display: grid; place-items: center; margin-left: -6px; }
+.bar .edit:hover { background: var(--bg); color: var(--ink); }
+.bar .edit svg { width: 15px; height: 15px; }
+
+/* bot list */
+.botlist { width: 236px; flex: none; border-right: 1px solid var(--line); background: var(--bg); display: flex; flex-direction: column; min-height: 0; }
+.botlist .bar { background: var(--bg); padding: 0 10px 0 16px; }
+.botlist .bar h2 { font: 600 14px "Bahnschrift", sans-serif; letter-spacing: .02em; color: var(--muted); margin: 0; }
+.botlist .bar .icon { margin-left: auto; width: 32px; height: 32px; }
+.botlist ul { list-style: none; margin: 0; padding: 8px; overflow: auto; flex: 1; display: flex; flex-direction: column; gap: 2px; }
+.botrow { width: 100%; border: 0; background: transparent; border-radius: 9px; padding: 8px; display: grid; grid-template-columns: 36px minmax(0, 1fr); gap: 10px; align-items: center; text-align: left; cursor: pointer; }
+.botrow:hover { background: #E9EDF2; }
+.botrow[aria-current="true"] { background: var(--panel); box-shadow: 0 0 0 1px var(--line); }
+.botrow .who { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.botrow .name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.botrow .busy { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); animation: pulse 1.2s ease-in-out infinite; }
+.botrow .peek { display: block; font-size: 12.5px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.av { width: 36px; height: 36px; border-radius: 50%; display: grid; place-items: center; color: #fff; font: 600 15px "Bahnschrift", sans-serif; flex: none; }
+.av.small { width: 18px; height: 18px; font-size: 10px; }
+
+/* messages between bots */
+.m.peer { align-self: flex-start; }
+.m.peer .bubble { background: var(--bg); border: 1px solid var(--line); border-radius: 12px 12px 12px 3px; padding: 8px 13px; overflow-wrap: anywhere; }
+.m.peer p, .m.peer ul, .m.peer ol, .relay p, .relay ul, .relay ol { margin: 0 0 8px; }
+.m.peer ul, .m.peer ol, .relay ul, .relay ol { padding-left: 20px; }
+.m.peer .text > :last-child, .relay .text > :last-child { margin-bottom: 0; }
+.m.peer .from { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); margin-top: 4px; }
+.relay { margin: 0 0 8px; border-left: 3px solid var(--line); padding: 2px 0 2px 12px; }
+.relay .to { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); margin-bottom: 2px; }
+#b-error { color: var(--bad); }
+dialog .row .btn.danger { margin-right: auto; }
 
 /* chat */
 .msgs { flex: 1; overflow: auto; padding: 18px 26px 8px; display: flex; flex-direction: column; gap: 14px; }
@@ -176,6 +210,9 @@ dialog { border: 1px solid var(--line); border-radius: 12px; padding: 22px 24px;
 dialog::backdrop { background: rgba(27,33,41,.35); }
 dialog h2 { font: 600 17px "Bahnschrift", sans-serif; margin: 0 0 14px; }
 dialog label { display: block; font-size: 13px; font-weight: 600; margin: 12px 0 4px; }
+dialog select { padding: 7px 8px; border: 1px solid var(--line); border-radius: 7px; font: inherit; color: var(--ink); background: #fff; min-width: 50%; }
+dialog select:disabled { color: var(--muted); background: var(--bg); }
+.table .botcell { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
 dialog input, dialog textarea { width: 100%; padding: 8px 10px; border: 1px solid var(--line); border-radius: 7px; font: inherit; color: var(--ink); }
 dialog textarea { resize: vertical; }
 dialog .hint { color: var(--muted); font-size: 12.5px; margin: 6px 0 0; }
@@ -184,7 +221,7 @@ dialog .hint code { background: var(--bg); padding: 0 4px; border-radius: 3px; }
 #preview.bad, #form-error { color: var(--bad); }
 dialog .row { display: flex; gap: 8px; justify-content: flex-end; margin-top: 18px; }
 
-@media (max-width: 1180px) { .app { grid-template-columns: 64px minmax(0, 1fr) 360px; } }
+@media (max-width: 1180px) { .app { grid-template-columns: 64px minmax(0, 1fr) 360px; } .botlist { width: 204px; } }
 @media (max-width: 900px) { .app { grid-template-columns: 56px minmax(0, 1fr); } .side { display: none; } }
 @media (prefers-reduced-motion: reduce) { * { animation: none !important; } }
 </style>
@@ -197,6 +234,8 @@ dialog .row { display: flex; gap: 8px; justify-content: flex-end; margin-top: 18
  <symbol id="i-x" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M7 7l10 10M17 7L7 17"/></symbol>
  <symbol id="i-send" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M6 11l6-6 6 6"/></symbol>
  <symbol id="i-stop" viewBox="0 0 24 24" fill="currentColor"><rect x="7" y="7" width="10" height="10" rx="1.5"/></symbol>
+ <symbol id="i-plus" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></symbol>
+ <symbol id="i-edit" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13 7l4 4"/></symbol>
 </svg>
 
 <div class="app">
@@ -209,24 +248,30 @@ dialog .row { display: flex; gap: 8px; justify-content: flex-end; margin-top: 18
 
  <main class="main">
   <section class="view" id="view-chat" aria-labelledby="chat-h">
-   <div class="bar"><h1 id="chat-h">Chat</h1><span class="state" id="chat-state" aria-live="polite"></span><span class="aside" id="model"></span><button class="btn" id="notify" type="button" hidden>Turn on notifications</button></div>
-   <div class="banner" id="chat-error" role="alert" hidden></div>
-   <div class="msgs" id="msgs" aria-live="polite"></div>
-   <form class="composer" id="composer">
-    <textarea id="input" rows="1" aria-label="Message cua-bot" placeholder="Message cua-bot"></textarea>
-    <button type="button" class="icon" id="stop" aria-label="Stop the current reply" title="Stop the current reply" hidden><svg><use href="#i-stop"/></svg></button>
-    <button type="submit" class="icon primary" id="send" aria-label="Send" title="Send (Enter)"><svg><use href="#i-send"/></svg></button>
-   </form>
+   <nav class="botlist" aria-labelledby="bots-h">
+    <div class="bar"><h2 id="bots-h">Bots</h2><button type="button" class="icon" id="new-bot" aria-label="New bot" title="New bot"><svg><use href="#i-plus"/></svg></button></div>
+    <ul id="bot-rows"></ul>
+   </nav>
+   <div class="chatcol">
+    <div class="bar"><h1 id="chat-h">cua-bot</h1><button type="button" class="edit" id="edit-bot" aria-label="Edit this bot" title="Edit name and instructions"><svg><use href="#i-edit"/></svg></button><span class="state" id="chat-state" aria-live="polite"></span><span class="aside" id="model"></span><button class="btn" id="notify" type="button" hidden>Turn on notifications</button></div>
+    <div class="banner" id="chat-error" role="alert" hidden></div>
+    <div class="msgs" id="msgs" aria-live="polite"></div>
+    <form class="composer" id="composer">
+     <textarea id="input" rows="1" aria-label="Message cua-bot" placeholder="Message cua-bot"></textarea>
+     <button type="button" class="icon" id="stop" aria-label="Stop the current reply" title="Stop the current reply" hidden><svg><use href="#i-stop"/></svg></button>
+     <button type="submit" class="icon primary" id="send" aria-label="Send" title="Send (Enter)"><svg><use href="#i-send"/></svg></button>
+    </form>
+   </div>
   </section>
 
   <section class="view" id="view-routines" aria-labelledby="routines-h" hidden>
    <div class="bar"><h1 id="routines-h">Routines</h1><span class="aside" id="routine-count"></span><button type="button" class="btn primary" id="new-routine">New routine</button></div>
    <div class="banner" id="routine-error" role="alert" hidden></div>
    <div class="table"><table>
-    <thead><tr><th>Routine</th><th>When</th><th>Next</th><th>Last ran</th><th><span hidden>Actions</span></th></tr></thead>
+    <thead><tr><th>Routine</th><th>Bot</th><th>When</th><th>Next</th><th>Last ran</th><th><span hidden>Actions</span></th></tr></thead>
     <tbody id="routine-rows"></tbody>
    </table></div>
-   <p class="file">Saved to <code id="routine-file">routines.json</code> next to the bot. Hand edits to that file apply within a few seconds, and routines the bot creates in chat appear here.</p>
+   <p class="file">Each bot's routines are saved in its own file, <code><span id="routine-dir">routines</span>/&lt;bot name&gt;.json</code>, next to the bot; a bot without routines has none. Hand edits to those files apply within a few seconds, and routines a bot creates in chat appear here.</p>
   </section>
   <section class="view" id="view-memory" aria-labelledby="memory-h" hidden>
    <div class="bar"><h1 id="memory-h">Memory</h1><span class="aside">What the bot knows about you. It reads this before every reply.</span></div>
@@ -255,6 +300,8 @@ dialog .row { display: flex; gap: 8px; justify-content: flex-end; margin-top: 18
 <dialog id="routine-dialog" aria-labelledby="form-h">
  <form id="routine-form" method="dialog">
   <h2 id="form-h">New routine</h2>
+  <label for="f-bot">Bot</label>
+  <select id="f-bot"></select>
   <label for="f-title">Title</label>
   <input id="f-title" required maxlength="120" placeholder="Morning agenda">
   <label for="f-prompt">What the bot should do</label>
@@ -265,6 +312,19 @@ dialog .row { display: flex; gap: 8px; justify-content: flex-end; margin-top: 18
   <p class="hint">Cron: minute, hour, day of month, month, day of week (0 is Sunday). <code>30 7 * * 1-5</code> is weekdays at 7:30, <code>0 9 * * 2,5</code> is Tuesdays and Fridays at 9:00. <code>@daily</code> and <code>@every 30m</code> work too. Times are this computer's local time unless you prefix <code>CRON_TZ=Area/City</code>.</p>
   <p id="form-error" role="alert"></p>
   <div class="row"><button type="button" class="btn" id="form-cancel">Cancel</button><button type="submit" class="btn primary" id="form-save">Add routine</button></div>
+ </form>
+</dialog>
+
+<dialog id="bot-dialog" aria-labelledby="b-h">
+ <form id="bot-form" method="dialog">
+  <h2 id="b-h">New bot</h2>
+  <label for="b-name">Name</label>
+  <input id="b-name" required maxlength="40" placeholder="Job Search" autocomplete="off">
+  <label for="b-instructions">What it's for</label>
+  <textarea id="b-instructions" rows="6" maxlength="4000" placeholder="Track job openings that fit my profile and tell me about new ones each week."></textarea>
+  <p class="hint">Each bot has its own chat and shares your memory, accounts, and computer. Bots can message each other, and you see those messages in their chats.</p>
+  <p id="b-error" role="alert"></p>
+  <div class="row"><button type="button" class="btn danger" id="b-delete" hidden>Delete bot</button><button type="button" class="btn" id="b-cancel">Cancel</button><button type="submit" class="btn primary" id="b-save">Add bot</button></div>
  </form>
 </dialog>
 
@@ -366,7 +426,21 @@ function markdown(text) {
 }
 
 /* ---------- chat state ---------- */
-const state = { items: [], ids: new Set(), before: null, live: { busy: false, partial: "", tools: [] }, queued: [], open: new Set(), computer: { steps: [] }, approvals: [] };
+// `bot` is the id of the bot whose chat is open; `bots` is the list from /api/bots.
+const state = { bot: null, bots: [], items: [], ids: new Set(), before: null, live: { busy: false, partial: "", tools: [] }, queued: [], open: new Set(), computer: { steps: [] }, approvals: [] };
+const currentBot = () => state.bots.find((b) => b.id === state.bot) || { id: state.bot, name: "cua-bot", instructions: "", main: true };
+const mainId = () => (state.bots.find((b) => b.main) || {}).id;
+const botNamed = (to) => {
+  const key = String(to || "").trim().replace(/^@/, "").toLowerCase();
+  return state.bots.find((b) => String(b.id) === key) || state.bots.find((b) => b.name.toLowerCase() === key);
+};
+const AVATAR_COLORS = ["#27507F", "#A96500", "#1E7A55", "#6B4FA0", "#1F6F78", "#A23B72", "#4A5563", "#B42318"];
+function avatar(bot, small) {
+  const node = el("span", "av" + (small ? " small" : ""), (bot && bot.name ? bot.name.trim().charAt(0) : "?").toUpperCase());
+  node.style.background = !bot ? "#4A5563" : bot.main ? "var(--ink)" : AVATAR_COLORS[bot.id % AVATAR_COLORS.length];
+  node.setAttribute("aria-hidden", "true");
+  return node;
+}
 
 function toolLabel(call) {
   const a = call.args || {};
@@ -381,6 +455,8 @@ function toolLabel(call) {
     case "remember": return "Remembered: " + clip(pick("fact") || "");
     case "forget": return "Forgot: " + clip(pick("fact") || "");
     case "recall": return "Searched memory: " + clip(pick("query") || "");
+    case "message_bot": return "Messaged " + ((botNamed(pick("to")) || {}).name || pick("to") || "a bot");
+    case "create_bot": return "Created bot: " + clip(pick("name") || "");
     case "executor_search": return "Looked up: " + clip(pick("query", "namespace") || "connected accounts");
     case "executor_describe": return "Read tool details";
     case "executor_call": {
@@ -427,7 +503,9 @@ function routineTitle(text) {
 // One node per card and status, reused across re-renders so a draft being edited survives live updates.
 const cards = new Map();
 const DESTRUCTIVE = /delete|trash|clear|remove/i;
-const approvalFor = (callId) => state.approvals.find((a) => a.callId === callId);
+// A card belongs to the bot that filed it; cards from before there were several bots are the main bot's.
+const inThisChat = (a) => (a.conversationId ?? mainId()) === state.bot;
+const approvalFor = (callId) => state.approvals.find((a) => a.callId === callId && inThisChat(a));
 
 async function loadApprovals() {
   try { state.approvals = (await request("GET", "/api/approvals")).approvals; renderChat(); }
@@ -569,9 +647,12 @@ function renderChat() {
   let day = "";
   const visible = state.items.filter((item) => item.kind !== "tool" && item.kind !== "approval");
   if (visible.length === 0 && !state.live.busy && state.queued.length === 0) {
+    const bot = currentBot();
     const empty = el("div", "empty");
-    empty.append(el("b", "", "Ask cua-bot anything"));
-    empty.append("It can use the computer on the right, check your mail and calendar, email you, and run routines on a schedule.");
+    empty.append(el("b", "", "Ask " + bot.name + " anything"));
+    const about = bot.instructions.split("\n").find((line) => line.trim() !== "");
+    empty.append(bot.main ? "It can use the computer on the right, check your mail and calendar, email you, run routines on a schedule, and hand work to your other bots."
+      : about || "It has the same tools as your other bots. Tell it what it's for, or give it standing instructions with the pencil next to its name.");
     box.append(empty);
   }
   for (const item of visible) {
@@ -580,7 +661,15 @@ function renderChat() {
       if (label !== day) { day = label; box.append(el("div", "day", label)); }
     }
     if (item.kind === "user") box.append(el("div", "m me", item.text));
-    else if (item.kind === "routine") {
+    else if (item.kind === "bot") {
+      const node = el("div", "m peer");
+      const bubble = el("div", "bubble");
+      bubble.append(markdown(item.text));
+      const from = el("div", "from");
+      from.append("Message from ", avatar(state.bots.find((b) => b.id === item.from) || { id: item.from, name: item.name }, true), item.name);
+      node.append(bubble, from);
+      box.append(node);
+    } else if (item.kind === "routine") {
       const line = el("div", "routine");
       line.append(el("b", "", routineTitle(item.text)), ` ran at ${time(item.at)}.`);
       line.title = item.text;
@@ -591,7 +680,7 @@ function renderChat() {
   // Waiting cards whose reply isn't loaded (older history, or a turn still streaming) go last.
   const shown = new Set(visible.flatMap((item) => (item.kind === "assistant" ? item.tools.map((t) => t.id) : [])));
   for (const a of state.approvals) {
-    if ((a.status === "waiting" || a.status === "running") && !shown.has(a.callId)) {
+    if ((a.status === "waiting" || a.status === "running") && inThisChat(a) && !shown.has(a.callId)) {
       const holder = el("div", "m bot");
       holder.append(approvalCard(a));
       box.append(holder);
@@ -634,6 +723,8 @@ function renderReply(item, results, running) {
       const approval = approvalFor(call.id);
       const waiting = approval && (approval.status === "waiting" || approval.status === "running");
       const status = result ? (result.isError ? "error" : waiting ? "wait" : "done") : live && live.status !== "done" ? "run" : "done";
+      // A delivered bot message shows as its own block below; only a failed one needs a chip.
+      if (call.name === "message_bot" && status === "done") continue;
       const label = approval ? `${approval.title}: ${approvalWord(approval)}` : toolLabel(call);
       const chip = el("button", "chip " + status, label);
       chip.type = "button";
@@ -654,7 +745,18 @@ function renderReply(item, results, running) {
         below.append(thumbs);
       }
     }
-    node.append(chips, below);
+    if (chips.childElementCount > 0) node.append(chips);
+    node.append(below);
+    // What this bot told another bot, as the other bot received it.
+    for (const call of item.tools) {
+      if (call.name !== "message_bot" || typeof call.args.text !== "string" || !results.has(call.id) || results.get(call.id).isError) continue;
+      const to = botNamed(call.args.to) || { id: 0, name: String(call.args.to || "a bot") };
+      const relay = el("div", "relay");
+      const head = el("div", "to");
+      head.append("Message to ", avatar(to, true), to.name);
+      relay.append(head, markdown(call.args.text));
+      node.append(relay);
+    }
   }
   if (item.text) node.append(markdown(item.text));
   for (const call of item.tools) {
@@ -714,7 +816,9 @@ function renderComputer() {
 function showChatError(message) { $("chat-error").textContent = message; $("chat-error").hidden = !message; }
 
 async function loadHistory() {
-  const data = await request("GET", "/api/chat?limit=60");
+  const bot = state.bot;
+  const data = await request("GET", "/api/chat?limit=60&bot=" + bot);
+  if (bot !== state.bot) return; // the owner switched bots while this loaded
   state.items = []; state.ids = new Set();
   addItems(data.items);
   state.before = data.before;
@@ -728,17 +832,22 @@ async function loadHistory() {
 async function loadEarlier() {
   const box = $("msgs");
   const fromBottom = box.scrollHeight - box.scrollTop;
-  const data = await request("GET", "/api/chat?limit=60&before=" + encodeURIComponent(state.before));
+  const bot = state.bot;
+  const data = await request("GET", "/api/chat?limit=60&bot=" + bot + "&before=" + encodeURIComponent(state.before));
+  if (bot !== state.bot) return;
   addItems(data.items);
   state.before = data.before;
   renderChat();
   box.scrollTop = box.scrollHeight - fromBottom;
 }
 
+// One event stream, for the open bot's chat. It also carries approvals and the bot list.
+let source = null;
 function connect() {
-  const source = new EventSource("/api/chat/events");
+  source?.close();
+  source = new EventSource("/api/chat/events?bot=" + state.bot);
   let failed = false;
-  source.onopen = () => { if (failed) { failed = false; showChatError(""); loadHistory().catch(() => {}); loadApprovals(); } };
+  source.onopen = () => { if (failed) { failed = false; showChatError(""); loadHistory().catch(() => {}); loadApprovals(); loadBots(); } };
   source.onerror = () => { failed = true; showChatError("Lost the connection to cua-bot. Reconnecting…"); };
   source.onmessage = (event) => {
     const data = JSON.parse(event.data);
@@ -746,8 +855,100 @@ function connect() {
     else if (data.type === "live") { state.live = data.live; renderLive(); renderChat(); }
     else if (data.type === "computer") { state.computer = data.computer; renderComputer(); }
     else if (data.type === "approvals") { state.approvals = data.approvals; renderChat(); }
+    else if (data.type === "bots") { state.bots = data.bots; renderBots(); }
   };
 }
+
+/* ---------- bots ---------- */
+async function loadBots() {
+  try { state.bots = (await request("GET", "/api/bots")).bots; renderBots(); }
+  catch (error) { showChatError("Could not load your bots: " + error.message); }
+}
+
+function renderBots() {
+  const rows = $("bot-rows");
+  rows.textContent = "";
+  for (const bot of state.bots) {
+    const item = el("li");
+    const row = el("button", "botrow");
+    row.type = "button";
+    row.setAttribute("aria-current", String(bot.id === state.bot));
+    const who = el("span", "who");
+    who.append(el("span", "name", bot.name));
+    if (bot.busy) { const dot = el("span", "busy"); dot.title = "Working"; who.append(dot); }
+    const text = el("span");
+    const peek = bot.preview ? bot.preview.text.replace(/\*\*|`/g, "").replace(/\s+/g, " ") : bot.main ? "Your main bot" : "No messages yet";
+    text.append(who, el("span", "peek", peek));
+    row.append(avatar(bot), text);
+    row.addEventListener("click", () => selectBot(bot.id));
+    item.append(row);
+    rows.append(item);
+  }
+  const bot = currentBot();
+  $("chat-h").textContent = bot.name;
+  $("edit-bot").setAttribute("aria-label", "Edit " + bot.name);
+  $("input").placeholder = "Message " + bot.name;
+  $("input").setAttribute("aria-label", "Message " + bot.name);
+  document.title = bot.main ? "cua-bot" : bot.name + " · cua-bot";
+}
+
+// Opens a bot's chat: its history, its computer pane, and a fresh event stream. The choice is kept in the URL.
+async function selectBot(id) {
+  if (!state.bots.some((b) => b.id === id)) id = mainId();
+  const switched = id !== state.bot;
+  state.bot = id;
+  history.replaceState(null, "", id === mainId() ? location.pathname : "#bot=" + id);
+  renderBots();
+  if (!switched && source) return;
+  Object.assign(state, { items: [], ids: new Set(), before: null, live: { busy: false, partial: "", tools: [] }, queued: [], open: new Set(), computer: { steps: [] } });
+  showChatError("");
+  renderChat();
+  renderComputer();
+  connect();
+  request("GET", "/api/chat/computer?bot=" + id).then((c) => { if (id === state.bot) { state.computer = c; renderComputer(); } }).catch(() => {});
+  await loadHistory().catch((error) => showChatError("Could not load the conversation: " + error.message));
+  $("input").focus();
+}
+
+let editingBot = null;
+function openBot(bot) {
+  editingBot = bot;
+  $("b-h").textContent = bot ? "Edit " + bot.name : "New bot";
+  $("b-save").textContent = bot ? "Save changes" : "Add bot";
+  $("b-name").value = bot ? bot.name : "";
+  $("b-instructions").value = bot ? bot.instructions : "";
+  $("b-delete").hidden = !bot || bot.main;
+  $("b-error").textContent = "";
+  $("bot-dialog").showModal();
+  $("b-name").focus();
+}
+$("new-bot").addEventListener("click", () => openBot(null));
+$("edit-bot").addEventListener("click", () => openBot(currentBot()));
+$("b-cancel").addEventListener("click", () => $("bot-dialog").close());
+$("bot-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const payload = { name: $("b-name").value, instructions: $("b-instructions").value };
+  $("b-save").disabled = true;
+  try {
+    const bot = editingBot ? await request("PUT", "/api/bots/" + editingBot.id, payload) : await request("POST", "/api/bots", payload);
+    $("bot-dialog").close();
+    await loadBots();
+    if (!editingBot) await selectBot(bot.id);
+  } catch (error) { $("b-error").textContent = error.message; }
+  finally { $("b-save").disabled = false; }
+});
+$("b-delete").addEventListener("click", async () => {
+  const bot = editingBot;
+  if (!bot || !window.confirm(`Delete ${bot.name}? Its chat and routines go away, and other bots can no longer message it.`)) return;
+  $("b-delete").disabled = true;
+  try {
+    await request("DELETE", "/api/bots/" + bot.id);
+    $("bot-dialog").close();
+    await loadBots();
+    await selectBot(mainId());
+  } catch (error) { $("b-error").textContent = error.message; }
+  finally { $("b-delete").disabled = false; }
+});
 
 $("composer").addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -760,7 +961,7 @@ $("composer").addEventListener("submit", async (event) => {
   renderChat();
   $("msgs").scrollTop = $("msgs").scrollHeight;
   try {
-    await request("POST", "/api/chat", { text });
+    await request("POST", "/api/chat", { text, bot: state.bot });
     showChatError("");
   } catch (error) {
     state.queued.splice(state.queued.indexOf(text), 1);
@@ -777,7 +978,7 @@ function grow() { const input = $("input"); input.style.height = "auto"; input.s
 $("input").addEventListener("input", grow);
 $("stop").addEventListener("click", async () => {
   $("stop").disabled = true;
-  try { await request("POST", "/api/chat/stop"); state.queued = []; renderChat(); }
+  try { await request("POST", "/api/chat/stop?bot=" + state.bot); state.queued = []; renderChat(); }
   catch (error) { showChatError("Could not stop: " + error.message); }
   finally { $("stop").disabled = false; }
 });
@@ -894,7 +1095,7 @@ async function loadRoutines() {
   try {
     const data = await request("GET", "/api/routines");
     routines = data.routines;
-    $("routine-file").textContent = data.file;
+    $("routine-dir").textContent = data.dir;
     showRoutineError("");
     renderRoutines();
   } catch (error) { showRoutineError(error.message); }
@@ -906,12 +1107,15 @@ function renderRoutines() {
   rows.textContent = "";
   if (routines.length === 0) {
     const row = el("tr"), cell = el("td", "none", "No routines yet. Add one, or ask the bot in chat, for example \"every weekday at 7:30, email me my agenda\".");
-    cell.colSpan = 5; row.append(cell); rows.append(row);
+    cell.colSpan = 6; row.append(cell); rows.append(row);
     return;
   }
   for (const r of routines) {
     const row = el("tr");
     const what = el("td"); what.append(el("b", "", r.title), el("small", "", r.prompt));
+    const who = el("td"), botcell = el("span", "botcell");
+    botcell.append(avatar(state.bots.find((b) => b.id === r.bot) || { id: r.bot, name: r.botName }, true), r.botName);
+    who.append(botcell);
     const when = el("td"); when.append(r.label, el("br"), el("code", "cron", r.cron));
     const next = el("td", "", relative(r.nextFire)); next.title = shortDate(r.nextFire);
     const last = el("td", "", r.lastFiredAt ? shortDate(r.lastFiredAt) : "Never");
@@ -922,7 +1126,7 @@ function renderRoutines() {
       b.setAttribute("aria-label", label + " " + r.title);
       acts.append(b, " ");
     }
-    row.append(what, when, next, last, acts);
+    row.append(what, who, when, next, last, acts);
     rows.append(row);
   }
 }
@@ -949,6 +1153,13 @@ function openRoutine(routine) {
   $("f-title").value = routine ? routine.title : "";
   $("f-prompt").value = routine ? routine.prompt : "";
   $("f-cron").value = routine ? routine.cron : "";
+  // A new routine defaults to the open chat's bot; an existing one stays with its bot.
+  const pick = $("f-bot");
+  pick.textContent = "";
+  for (const bot of state.bots) { const option = el("option", "", bot.name); option.value = String(bot.id); pick.append(option); }
+  pick.value = String(routine ? routine.bot : state.bot);
+  pick.disabled = !!routine;
+  pick.title = routine ? "A routine stays with the bot it was made for" : "";
   $("form-error").textContent = "";
   updatePreview();
   $("routine-dialog").showModal();
@@ -971,7 +1182,7 @@ $("f-cron").addEventListener("input", () => { clearTimeout(previewTimer); previe
 
 $("routine-form").addEventListener("submit", async (event) => {
   event.preventDefault();
-  const payload = { title: $("f-title").value, prompt: $("f-prompt").value, cron: $("f-cron").value };
+  const payload = { title: $("f-title").value, prompt: $("f-prompt").value, cron: $("f-cron").value, bot: Number($("f-bot").value) };
   $("form-save").disabled = true;
   try {
     if (editing) await request("PUT", "/api/routines/" + encodeURIComponent(editing.id), payload);
@@ -983,10 +1194,8 @@ $("routine-form").addEventListener("submit", async (event) => {
 });
 
 /* ---------- start ---------- */
-loadHistory().catch((error) => showChatError("Could not load the conversation: " + error.message));
+loadBots().then(() => selectBot(Number((location.hash.match(/^#bot=(\d+)$/) || [])[1]) || mainId()));
 loadApprovals();
-request("GET", "/api/chat/computer").then((c) => { state.computer = c; renderComputer(); }).catch(() => {});
-connect();
 showNotifyState();
 if (pushSupported && Notification.permission === "granted") turnOnPush();
 setInterval(() => { if (!$("view-routines").hidden) loadRoutines(); }, 30000);

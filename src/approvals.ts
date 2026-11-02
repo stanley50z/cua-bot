@@ -33,6 +33,8 @@ export type Approval = {
 	id: string;
 	/** The bot's tool call that asked; the card renders under the reply that made it. */
 	callId: string;
+	/** The bot whose chat shows the card and hears the decision. Absent on cards filed before there were several bots: the main bot. */
+	conversationId?: number;
 	/** Executor tool path, or for a held call the path Executor paused. */
 	path: string;
 	input: unknown;
@@ -164,7 +166,8 @@ export type Approvals = ReturnType<typeof createApprovals>;
 export function createApprovals(options: {
 	file: string;
 	call: ExecutorCall;
-	notify: (text: string) => Promise<unknown>;
+	/** Tells the bot that filed the request; `conversationId` is undefined for the main bot's older cards. */
+	notify: (text: string, conversationId: number | undefined) => Promise<unknown>;
 	filed?: (approval: Approval) => void;
 	now?: () => number;
 }) {
@@ -223,13 +226,14 @@ export function createApprovals(options: {
 		},
 
 		/** File a request for the owner. Called by the executor extension instead of running the call. */
-		request: (input: { callId: string; path: string; input: unknown; summary?: string; pausedRequestId?: string }) =>
+		request: (input: { callId: string; conversationId?: number; path: string; input: unknown; summary?: string; pausedRequestId?: string }) =>
 			change((all) => {
 				const form = emailForm(input.path, input.input);
 				const email = form?.view;
 				const approval: Approval = {
 					id: `ap_${now().toString(36)}${Math.random().toString(36).slice(2, 8)}`,
 					callId: input.callId,
+					...(input.conversationId === undefined ? {} : { conversationId: input.conversationId }),
 					path: input.path,
 					input: form?.input ?? input.input,
 					title: email === undefined ? titleFor(input.path) : email.reply ? "Send reply" : "Send email",
@@ -294,6 +298,7 @@ export function createApprovals(options: {
 				status === "done"
 					? `[approval] The owner approved and it ran: ${describeApproval(settled)}.${sent}\nResult: ${clip(outcome, 600)}`
 					: `[approval] The owner approved ${describeApproval(settled)}, but it failed: ${clip(outcome, 600)}`,
+				settled.conversationId,
 			);
 			return settled;
 		},
@@ -308,7 +313,7 @@ export function createApprovals(options: {
 			if (settled.pausedRequestId !== undefined) {
 				await options.call("resume", { requestId: settled.pausedRequestId, response: { action: "decline" } }).catch(() => undefined);
 			}
-			await options.notify(`[approval] The owner discarded: ${describeApproval(settled)}. Don't try it again unless they ask.`);
+			await options.notify(`[approval] The owner discarded: ${describeApproval(settled)}. Don't try it again unless they ask.`, settled.conversationId);
 			return settled;
 		},
 

@@ -1,5 +1,5 @@
-// Owner chat over the root conversation, for the web app in src/web.ts.
-// main.ts calls createChat({ harness, root, context, computer }) once. The server uses history() for
+// Owner chat over one bot's conversation, for the web app in src/web.ts.
+// src/bots.ts calls createChat({ harness, conversation, context, computer }) once per bot. The server uses history() for
 // pages of past messages, send()/stop() for input, computer() for the computer pane, and subscribe()
 // for live updates: the streaming partial reply, running tool calls, every new transcript entry, and
 // computer pane snapshots while computer_use runs. Entries are normalized to ChatItem so the browser
@@ -27,6 +27,10 @@ const TOOL_TEXT_LIMIT = 4000;
 const COMPUTER_POLL_MS = 1500;
 const SHOT_PATTERN = /shots[\\/]([\w.-]+\.png)/g;
 
+/** Entry kind of a message from another bot (src/bots.ts); its data is a BotMessage. */
+export const BOT_MESSAGE = "cua-bot.bot-message";
+export type BotMessage = { from: number; name: string; text: string };
+
 export type ChatTool = { id: string; name: string; args: Record<string, unknown> };
 
 export type ChatItem =
@@ -34,6 +38,8 @@ export type ChatItem =
 	| { id: number; kind: "routine"; text: string; at: number }
 	/** The owner's decision on an approval card, as told to the bot. The card itself shows it. */
 	| { id: number; kind: "approval"; text: string; at: number }
+	/** A message another bot sent this one, shown as "Message from <name>". */
+	| { id: number; kind: "bot"; from: number; name: string; text: string; at: number }
 	| { id: number; kind: "assistant"; text: string; at: number; tools: ChatTool[]; error?: string; aborted: boolean }
 	| { id: number; kind: "tool"; callId: string; name: string; text: string; isError: boolean; shots: string[]; images: number }
 	| { id: number; kind: "marker"; text: string };
@@ -65,6 +71,10 @@ function imageCount(content: string | readonly { type: string }[]): number {
 export function toChatItem(entry: EntryRecord): ChatItem | undefined {
 	const id = entry.id as number;
 	const message = entry.model?.[0];
+	if (entry.kind === BOT_MESSAGE && message?.role === "user") {
+		const data = (entry.data ?? {}) as Partial<BotMessage>;
+		return { id, kind: "bot", from: Number(data.from), name: String(data.name ?? "A bot"), text: String(data.text ?? ""), at: message.timestamp };
+	}
 	if (UserEntry.is(entry) && message?.role === "user") {
 		const user = message as UserMessage;
 		const text = textOf(user.content);
@@ -132,10 +142,12 @@ export function toChatLive(live: Readonly<LiveState> | null): ChatLive {
 
 export type Chat = ReturnType<typeof createChat>;
 
-/** Bind the chat to the bot's root conversation. Call close() on shutdown. */
-export function createChat(deps: { harness: Harness; root: Conversation; context: Context; computer?: ComputerView }) {
-	const { harness, root, context, computer } = deps;
+/** Bind the chat to one bot's conversation. Call close() on shutdown. */
+export function createChat(deps: { harness: Harness; conversation: Conversation; context: Context; computer?: ComputerView }) {
+	const { harness, conversation, context, computer } = deps;
 	const listeners = new Set<(event: ChatEvent) => void>();
+	// Listeners that show the computer pane; only they make the chat read computer snapshots.
+	let computerListeners = 0;
 	let lastSeen: EntryId | undefined;
 	let live = toChatLive(null);
 	let watching: Promise<void> | undefined;
@@ -152,7 +164,7 @@ export function createChat(deps: { harness: Harness; root: Conversation; context
 
 	// Push a computer snapshot when it changed. Errors are dropped: the pane keeps its last state.
 	async function pushComputer(): Promise<void> {
-		if (computer === undefined || listeners.size === 0) return;
+		if (computer === undefined || computerListeners === 0) return;
 		const snapshot = await computer.snapshot(runningComputer()?.child as ConversationId | undefined).catch(() => undefined);
 		if (snapshot === undefined) return;
 		const text = JSON.stringify(snapshot);
@@ -177,7 +189,7 @@ export function createChat(deps: { harness: Harness; root: Conversation; context
 		const items: ChatItem[] = [];
 		let cursor: Cursor | undefined;
 		do {
-			const page = await root.entries(
+			const page = await conversation.entries(
 				{ order: "ascending", ...(lastSeen === undefined ? {} : { minEntryId: lastSeen }) },
 				200,
 				cursor,
@@ -195,9 +207,9 @@ export function createChat(deps: { harness: Harness; root: Conversation; context
 	}
 
 	async function startWatch(): Promise<void> {
-		const newest = await root.entries({ order: "descending" }, 1, undefined, context);
+		const newest = await conversation.entries({ order: "descending" }, 1, undefined, context);
 		lastSeen = newest.items[0]?.id;
-		const watch = await harness.watchDoc(LiveDoc, root.id, context);
+		const watch = await harness.watchDoc(LiveDoc, conversation.id, context);
 		if (watch === undefined) return;
 		live = toChatLive(watch.value);
 		stopWatch = () => watch.stop();
@@ -217,29 +229,33 @@ export function createChat(deps: { harness: Harness; root: Conversation; context
 	return {
 		/** A page of past messages, oldest first. Pass the returned `before` to get the page before it. */
 		async history(limit: number, before?: Cursor) {
-			const page = await root.entries({ order: "descending" }, limit, before, context);
+			const page = await conversation.entries({ order: "descending" }, limit, before, context);
 			const items = page.items.flatMap((entry) => toChatItem(entry) ?? []).reverse();
 			return { items, before: page.next ?? null };
 		},
 		/** Queue an owner message. It runs after the current turn when the bot is busy. Does not wait for the answer. */
 		async send(text: string) {
-			const submission = await root.submit({ type: "input", content: text, whenBusy: "followUp" }, context);
+			const submission = await conversation.submit({ type: "input", content: text, whenBusy: "followUp" }, context);
 			return { submissionId: submission.id as number };
 		},
 		/** Stop the current turn and drop queued messages. Routines keep their schedules. */
 		async stop() {
-			await root.abort(context);
+			await conversation.abort(context);
 		},
 		get live() {
 			return live;
 		},
 		/** The computer pane's current state, or undefined when the bot has no computer view. */
 		computer: () => computer?.snapshot(runningComputer()?.child as ConversationId | undefined),
-		/** Receive live events until the returned function is called. */
-		subscribe(listener: (event: ChatEvent) => void) {
+		/** Receive live events until the returned function is called. `computer: false` skips computer pane snapshots. */
+		subscribe(listener: (event: ChatEvent) => void, options: { computer?: boolean } = {}) {
+			const wantsComputer = options.computer !== false;
 			listeners.add(listener);
+			if (wantsComputer) computerListeners++;
 			watching ??= startWatch();
-			return () => listeners.delete(listener);
+			return () => {
+				if (listeners.delete(listener) && wantsComputer) computerListeners--;
+			};
 		},
 		/** Resolves once live updates are flowing; used by tests. */
 		ready: () => (watching ??= startWatch()),

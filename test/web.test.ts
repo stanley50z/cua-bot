@@ -2,10 +2,11 @@
 // original POST /say. Exercised over real HTTP against createBotServer with a faux model.
 // Run from the repo root:  node --test test/web.test.ts
 import assert from "node:assert/strict";
+import { existsSync } from "node:fs";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import type { Server } from "node:http";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { test } from "node:test";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { type FauxResponseStep, type Message } from "@earendil-works/pi-ai";
@@ -43,7 +44,7 @@ type Session = { dir: string; file: string; base: string; harness: Harness; root
 
 async function open(): Promise<Session> {
 	const dir = await mkdtemp(join(tmpdir(), "cua-bot-web-"));
-	const file = join(dir, "routines.json");
+	const file = join(dir, "cua-bot.json");
 	const clock = { now: BASE };
 	const registry = createRegistry();
 	registry.install(createRoutinesExtension());
@@ -53,7 +54,7 @@ async function open(): Promise<Session> {
 		context,
 	);
 	const root = await harness.root(context, { agent: { model: { provider: "faux", modelId: "faux-1" } } });
-	bindRoutines({ harness, root, filePath: file, now: () => clock.now });
+	bindRoutines({ harness, root, dir: dirname(file), now: () => clock.now });
 	harness.resume();
 	await syncRoutines(context);
 	const server = createBotServer({ say: async (text) => `echo: ${text}`, context });
@@ -102,7 +103,8 @@ test("GET / serves the web app with chat, computer pane, and routines", { timeou
 		assert.match(html, /id="routine-form"/);
 		assert.match(html, /id="routine-rows"/);
 		assert.match(html, /\/api\/routines/);
-		assert.match(html, /routines\.json/);
+		assert.match(html, /id="routine-dir"/);
+		assert.match(html, /id="f-bot"/, "a new routine picks its bot");
 		assert.doesNotMatch(html, /innerHTML/, "server text is rendered with DOM nodes only");
 	} finally {
 		await close(session);
@@ -131,8 +133,9 @@ test("routines CRUD over HTTP writes the config file and runs on demand", { time
 
 		const listed = await api(session, "GET", "/api/routines");
 		assert.equal(listed.status, 200);
-		const listBody = listed.json as { routines: RoutineView[]; file: string };
-		assert.equal(listBody.file, "routines.json");
+		const listBody = listed.json as { routines: RoutineView[]; dir: string };
+		assert.equal(listBody.dir, basename(session.dir));
+		assert.deepEqual(listBody.routines.map((routine) => routine.botName), ["cua-bot"]);
 		assert.deepEqual(
 			listBody.routines.map((routine) => routine.id),
 			[view.id],
@@ -158,7 +161,7 @@ test("routines CRUD over HTTP writes the config file and runs on demand", { time
 		assert.equal(removed.status, 204);
 		const empty = await api(session, "GET", "/api/routines");
 		assert.deepEqual((empty.json as { routines: RoutineView[] }).routines, []);
-		assert.deepEqual(JSON.parse(await readFile(session.file, "utf8")), []);
+		assert.equal(existsSync(session.file), false, "a bot without routines has no file");
 	} finally {
 		await close(session);
 	}

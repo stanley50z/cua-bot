@@ -1,5 +1,5 @@
-// The paired Mac for the main agent: space_bash runs CLI commands there directly, and computer_use runs a
-// foreground child for on-screen work. The child gets every live driver tool of the Mac. They are deferred on this
+// The paired Mac for every bot: space_bash runs CLI commands there directly, and computer_use runs a
+// foreground child for on-screen work, one task at a time across all bots. The child gets every live driver tool of the Mac. They are deferred on this
 // extension, so the main agent is offered them only after loading them with tool_search (src/main.ts installs it).
 import { traceExtension } from "./trace.ts";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -136,6 +136,14 @@ export async function captureScreenshot(): Promise<string> {
 	return savePng(new Uint8Array(shot.image));
 }
 
+// Every bot shares the one Mac, so computer_use runs one task at a time across all of them.
+let screen: Promise<unknown> = Promise.resolve();
+function onScreen<T>(work: () => Promise<T>): Promise<T> {
+	const run = screen.then(work);
+	screen = run.catch(() => undefined);
+	return run;
+}
+
 const computerUse = defineTool({
 	name: "computer_use",
 	description:
@@ -164,7 +172,7 @@ const computerUse = defineTool({
 		const handle = await api.conversation(child, callContext);
 		if (handle === undefined) throw new Error("computer_use lost its child conversation");
 		const request = { type: "input", content: `${CHILD_BRIEF}\n\nTask:\n${task}`, requestId: `computer:${api.taskId}` } as const;
-		const settled = await (await handle.submit(request, callContext)).wait(callContext);
+		const settled = await onScreen(async () => (await handle.submit(request, callContext)).wait(callContext));
 		if (settled.status !== "done" || settled.type !== "input") {
 			throw new Error(`computer_use failed: ${settled.status}`);
 		}

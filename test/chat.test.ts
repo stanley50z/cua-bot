@@ -12,7 +12,8 @@ import { Type } from "@earendil-works/pi-ai";
 import { createModels } from "@earendil-works/pi-ai/models";
 import { fauxAssistantMessage, fauxProvider, fauxText, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
 import { createRegistry, defineExtension, defineTool, Harness, MemoryStorage } from "@earendil-works/pi-durable";
-import { type ChatEvent, type ChatItem, createChat, toChatItem } from "../src/chat.ts";
+import { createBots } from "../src/bots.ts";
+import { BOT_MESSAGE, type ChatEvent, type ChatItem, toChatItem } from "../src/chat.ts";
 import { createBotServer } from "../src/web.ts";
 
 const context = BACKGROUND_CONTEXT;
@@ -39,8 +40,8 @@ async function open() {
 	const harness = await Harness.open(new MemoryStorage(), { models, registry }, context);
 	const root = await harness.root(context, { agent: { model: { provider: "faux", modelId: "faux-1" } } });
 	harness.resume();
-	const chat = createChat({ harness, root, context });
-	const server = createBotServer({ say: async (text) => text, chat, context, shotsDir: dir });
+	const bots = await createBots({ harness, root, context, agent: { model: { provider: "faux", modelId: "faux-1" } } });
+	const server = createBotServer({ say: async (text) => text, bots, context, shotsDir: dir });
 	await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
 	const address = server.address();
 	assert.ok(address !== null && typeof address === "object");
@@ -50,9 +51,9 @@ async function open() {
 		base,
 		harness,
 		root,
-		chat,
+		bots,
 		async close() {
-			await chat.close();
+			await bots.close();
 			await new Promise<void>((resolve) => (server as Server).close(() => resolve()));
 			await harness.close(context);
 			await rm(dir, { recursive: true, force: true });
@@ -187,4 +188,12 @@ test("routine firings and context markers are labeled for the chat", () => {
 	const compaction = toChatItem({ ...base, id: 2 as never, kind: "pi.compaction", data: { reason: "threshold" } });
 	assert.equal(compaction?.kind, "marker");
 	assert.equal(toChatItem({ ...base, id: 3 as never, kind: "pi.system" }), undefined);
+	const message = toChatItem({
+		...base,
+		id: 4 as never,
+		kind: BOT_MESSAGE,
+		data: { from: 7, name: "Job Search", text: "Found 3 roles." },
+		model: [{ role: "user", content: "[bot] Message from Job Search (id 7)…", timestamp: 9 }],
+	});
+	assert.deepEqual(message, { id: 4, kind: "bot", from: 7, name: "Job Search", text: "Found 3 roles.", at: 9 });
 });

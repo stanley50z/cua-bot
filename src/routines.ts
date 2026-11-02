@@ -1,12 +1,14 @@
-// Recurring work for the main conversation. Each routine is a durable task that sleeps until its
-// cron slot, posts a `[routine]` turn, and sleeps again. A deadline that passed while the bot was
-// down fires once on resume and rearms from the wake time; missed slots are never replayed.
-// Definitions live in routines.json (see routines-file.ts). The manager below syncs that file
-// into the Durable doc and sleeper tasks; the chat tools and the web UI both go through it, so
-// hand edits, GUI edits, and model edits converge. The host calls bindRoutines({harness, root})
-// after Harness.open, then syncRoutines() once at startup.
-import { watch } from "node:fs";
-import { basename, dirname } from "node:path";
+// Recurring work, per bot. Each routine is a durable task of its bot's conversation that sleeps until
+// its cron slot, posts a `[routine]` turn there, and sleeps again. A deadline that passed while the bot
+// was down fires once on resume and rearms from the wake time; missed slots are never replayed.
+// Each bot's definitions live in routines/<bot-name>.json (see routines-file.ts and routineFileName in
+// bots.ts); a bot without routines has no file. The manager below syncs those files into each bot's
+// Durable doc and sleeper tasks; the chat tools and the web UI both go through it, so hand edits, GUI
+// edits, and model edits converge. The host calls bindRoutines({harness, root}) after Harness.open,
+// then syncRoutines() once at startup.
+import { existsSync, mkdirSync, watch } from "node:fs";
+import { mkdir, rename, rm } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import type { Context } from "@earendil-works/chord";
 import { Type } from "@earendil-works/pi-ai";
 import {
@@ -15,14 +17,16 @@ import {
 	defineTask,
 	defineTool,
 	type Conversation,
+	type ConversationId,
 	type Extension,
 	type Harness,
 	section,
 	type TaskId,
 } from "@earendil-works/pi-durable";
 import { cronLabel, nextFire, toCronSpec, type LegacySchedule } from "./cron.ts";
+import { MAIN_NAME, readBots, routineFileName } from "./bots.ts";
 import {
-	DEFAULT_ROUTINE_FILE,
+	DEFAULT_ROUTINE_DIR,
 	MAX_ROUTINES,
 	readRoutineFile,
 	writeRoutineFile,
@@ -173,11 +177,9 @@ function errorText(value: string) {
 	return { output: [{ type: "text" as const, text: value }], isError: true as const };
 }
 
-// Mutating tools go through the file-backed manager, which owns the root conversation's routines.
-function mainConversationError(conversationId: unknown): string | undefined {
-	if (bound === undefined) return "bindRoutines(...) was not called after Harness.open.";
-	if (Number(conversationId) !== Number(bound.root.id)) return "Routines are managed on the main conversation; ask there.";
-	return undefined;
+// Mutating tools go through the file-backed manager, on the calling bot's own routines.
+function unboundError(): string | undefined {
+	return bound === undefined ? "bindRoutines(...) was not called after Harness.open." : undefined;
 }
 
 const schedule = defineTool({
@@ -198,7 +200,7 @@ const schedule = defineTool({
 		if ((args.cron === undefined) === (args.schedule === undefined)) {
 			return errorText("Give exactly one of cron or schedule.");
 		}
-		const guard = mainConversationError(api.conversationId);
+		const guard = unboundError();
 		if (guard !== undefined) return errorText(guard);
 		let spec: string;
 		try {
@@ -208,7 +210,7 @@ const schedule = defineTool({
 			return errorText(messageOf(error));
 		}
 		try {
-			const view = await addRoutine({ title: args.title, prompt: args.prompt, cron: spec }, ctx);
+			const view = await addRoutine({ title: args.title, prompt: args.prompt, cron: spec, bot: Number(api.conversationId) }, ctx);
 			const item = (await api.snapshot(RoutinesDoc, api.conversationId, ctx))?.items[view.id];
 			return text(`Scheduled ${view.id} task ${item?.taskId} "${view.title}" (${spec}). Next fire: ${view.nextFire}.`);
 		} catch (error) {
@@ -238,10 +240,10 @@ const runRoutine = defineTool({
 	description: "Run a saved routine now, whatever its clock says. id is the id returned by schedule.",
 	parameters: Type.Object({ id: Type.String() }),
 	execute: async (args, api, ctx) => {
-		const guard = mainConversationError(api.conversationId);
+		const guard = unboundError();
 		if (guard !== undefined) return errorText(guard);
 		try {
-			const view = await runRoutineNow(args.id, ctx);
+			const view = await runRoutineNow(args.id, ctx, Number(api.conversationId));
 			return text(`Running "${view.title}" now.`);
 		} catch (error) {
 			if (error instanceof RoutineNotFoundError) return text(`No routine ${args.id}.`);
@@ -251,9 +253,10 @@ const runRoutine = defineTool({
 });
 
 // --- Host-side manager ----------------------------------------------------
-// routines.json is the source of truth for definitions; the Durable doc mirrors it and adds task
-// ids + lastFiredAt. Every mutation funnels through one queue: edit the file, then sync. Sync
-// aborts and recreates sleeper tasks until Durable state matches the file.
+// Each bot's file under routines/ is the source of truth for its definitions; the bot's Durable doc
+// mirrors it and adds task ids + lastFiredAt. A bot without routines has no file. Every mutation
+// funnels through one queue: edit the file, then sync. Sync aborts and recreates sleeper tasks until
+// each bot's Durable state matches its file.
 
 export class RoutineNotFoundError extends Error {}
 export class RoutineLimitError extends Error {}
@@ -261,6 +264,9 @@ export class RoutineValidationError extends Error {}
 
 export type RoutineView = {
 	id: string;
+	/** The bot it runs in. */
+	bot: number;
+	botName: string;
 	title: string;
 	prompt: string;
 	cron: string;
@@ -280,27 +286,74 @@ export type SyncSummary = {
 type BoundRoutines = {
 	harness: Harness;
 	root: Conversation;
-	filePath: string;
+	dir: string;
+	/** The single routines.json from before each bot had its own file, moved to the main bot's file once. */
+	legacyFile?: string;
 	now: () => number;
 	queue: Promise<unknown>;
+	/** Each bot's file as of its last sync, so a renamed bot's file moves with it. */
+	paths: Map<number, string>;
 };
+
+type RoutineBot = { id: number; name: string; main: boolean };
 
 let bound: BoundRoutines | undefined;
 
-// Call once with the open Harness and its root conversation, before the bot accepts work.
+// Call once with the open Harness and its root conversation (the main bot), before the bot accepts work.
 export function bindRoutines(options: {
 	harness: Harness;
 	root: Conversation;
-	filePath?: string;
+	dir?: string;
+	legacyFile?: string;
 	now?: () => number;
 }): void {
 	bound = {
 		harness: options.harness,
 		root: options.root,
-		filePath: options.filePath ?? DEFAULT_ROUTINE_FILE,
+		dir: options.dir ?? DEFAULT_ROUTINE_DIR,
+		...(options.legacyFile === undefined ? {} : { legacyFile: options.legacyFile }),
 		now: options.now ?? Date.now,
 		queue: Promise.resolve(),
+		paths: new Map(),
 	};
+}
+
+// Every bot. Without a bot list (tests that only run routines) the root is the one bot.
+async function routineBots(b: BoundRoutines, ctx: Context): Promise<RoutineBot[]> {
+	const bots = await readBots(b.harness, ctx);
+	return bots.some((bot) => bot.main) ? bots : [{ id: Number(b.root.id), name: MAIN_NAME, main: true }, ...bots];
+}
+
+async function botById(b: BoundRoutines, id: number | undefined, ctx: Context): Promise<RoutineBot> {
+	const bots = await routineBots(b, ctx);
+	const bot = id === undefined ? bots.find((candidate) => candidate.main) : bots.find((candidate) => candidate.id === id);
+	if (bot === undefined) throw new RoutineValidationError("No such bot.");
+	return bot;
+}
+
+const fileOf = (b: BoundRoutines, bot: RoutineBot) => join(b.dir, routineFileName(bot));
+
+async function conversationOf(b: BoundRoutines, bot: RoutineBot, ctx: Context): Promise<Conversation> {
+	const conversation = bot.main ? b.root : await b.harness.conversation(bot.id as ConversationId, ctx);
+	if (conversation === undefined) throw new Error(`${bot.name}'s conversation is missing`);
+	return conversation;
+}
+
+// A bot with no routines has no file.
+async function saveDefs(path: string, defs: readonly RoutineDefinition[]): Promise<void> {
+	if (defs.length === 0) return rm(path, { force: true });
+	await mkdir(dirname(path), { recursive: true });
+	await writeRoutineFile(path, defs);
+}
+
+// The bot holding routine `id`; `only` limits the search to one bot, as the chat tools do.
+async function locate(b: BoundRoutines, id: string, ctx: Context, only?: number): Promise<{ bot: RoutineBot; item: RoutineItem }> {
+	for (const bot of await routineBots(b, ctx)) {
+		if (only !== undefined && bot.id !== only) continue;
+		const item = (await snapshotItems(b, bot, ctx))[id];
+		if (item !== undefined) return { bot, item };
+	}
+	throw new RoutineNotFoundError(`No routine ${id}.`);
 }
 
 function requireBound(): BoundRoutines {
@@ -317,13 +370,15 @@ function enqueue<T>(b: BoundRoutines, fn: () => Promise<T>): Promise<T> {
 	return run;
 }
 
-async function snapshotItems(b: BoundRoutines, ctx: Context): Promise<{ [id: string]: RoutineItem }> {
-	return (await b.harness.snapshot(RoutinesDoc, b.root.id, ctx))?.items ?? {};
+async function snapshotItems(b: BoundRoutines, bot: RoutineBot, ctx: Context): Promise<{ [id: string]: RoutineItem }> {
+	return (await b.harness.snapshot(RoutinesDoc, bot.id as ConversationId, ctx))?.items ?? {};
 }
 
-function toView(id: string, item: RoutineItem, nowMs: number): RoutineView {
+function toView(bot: RoutineBot, id: string, item: RoutineItem, nowMs: number): RoutineView {
 	return {
 		id,
+		bot: bot.id,
+		botName: bot.name,
 		title: item.title,
 		prompt: item.prompt,
 		cron: item.cron,
@@ -333,39 +388,46 @@ function toView(id: string, item: RoutineItem, nowMs: number): RoutineView {
 	};
 }
 
-async function viewFor(b: BoundRoutines, id: string, ctx: Context): Promise<RoutineView> {
-	const item = (await snapshotItems(b, ctx))[id];
+async function viewFor(b: BoundRoutines, bot: RoutineBot, id: string, ctx: Context): Promise<RoutineView> {
+	const item = (await snapshotItems(b, bot, ctx))[id];
 	if (item === undefined) throw new RoutineNotFoundError(`No routine ${id}.`);
-	return toView(id, item, b.now());
+	return toView(bot, id, item, b.now());
 }
 
-/** All routines as the web UI shows them, soonest firing first. */
+/** Every bot's routines as the web UI shows them, soonest firing first. */
 export async function listRoutineViews(ctx: Context): Promise<RoutineView[]> {
 	const b = requireBound();
 	const now = b.now();
-	return Object.entries(await snapshotItems(b, ctx))
-		.map(([id, item]) => toView(id, item, now))
-		.sort((x, y) => x.nextFire.localeCompare(y.nextFire));
+	const views: RoutineView[] = [];
+	for (const bot of await routineBots(b, ctx)) {
+		for (const [id, item] of Object.entries(await snapshotItems(b, bot, ctx))) views.push(toView(bot, id, item, now));
+	}
+	return views.sort((x, y) => x.nextFire.localeCompare(y.nextFire));
 }
 
-// Sync assuming the queue is held. A failure part-way (tasks aborted, commit not landed) heals on
-// the next sync, which re-diffs the doc against the file.
-async function syncInternal(b: BoundRoutines, ctx: Context): Promise<SyncSummary> {
-	const loaded = await readRoutineFile(b.filePath);
-	const items = await snapshotItems(b, ctx);
+// Sync one bot, assuming the queue is held. `saved` is what an edit just wrote; without it the file is
+// read, and a missing file is adopted from what runs. A failure part-way (tasks aborted, commit not
+// landed) heals on the next sync, which re-diffs the doc against the file.
+async function syncInternal(b: BoundRoutines, bot: RoutineBot, ctx: Context, saved?: RoutineDefinition[]): Promise<SyncSummary> {
+	const path = fileOf(b, bot);
+	const previous = b.paths.get(bot.id);
+	b.paths.set(bot.id, path);
+	if (previous !== undefined && previous !== path && existsSync(previous) && !existsSync(path)) await rename(previous, path);
+	const loaded = saved === undefined ? await readRoutineFile(path) : { defs: saved, assignedIds: false };
+	const items = await snapshotItems(b, bot, ctx);
 	if (loaded === undefined) {
-		// First run, or the file was deleted: adopt whatever already runs instead of deleting it.
+		// No file: the bot has no routines, or its file was deleted. Adopt whatever already runs instead of deleting it.
 		const defs = Object.entries(items).map(([id, item]) => ({
 			id,
 			title: item.title,
 			prompt: item.prompt,
 			cron: item.cron,
 		}));
-		await writeRoutineFile(b.filePath, defs);
-		return { created: 0, updated: 0, deleted: 0, total: defs.length, adopted: true };
+		await saveDefs(path, defs);
+		return { created: 0, updated: 0, deleted: 0, total: defs.length, adopted: defs.length > 0 };
 	}
 	const { defs, assignedIds } = loaded;
-	if (assignedIds) await writeRoutineFile(b.filePath, defs);
+	if (assignedIds) await writeRoutineFile(path, defs);
 
 	const creates: RoutineDefinition[] = [];
 	const updates: RoutineDefinition[] = [];
@@ -386,8 +448,9 @@ async function syncInternal(b: BoundRoutines, ctx: Context): Promise<SyncSummary
 		await b.harness.waitForTask(item.taskId, ctx);
 	}
 	if (creates.length > 0 || updates.length > 0 || deletes.length > 0) {
-		await b.root.commit(async (tx) => {
-			const doc = await tx.doc(RoutinesDoc, b.root.id);
+		const conversation = await conversationOf(b, bot, ctx);
+		await conversation.commit(async (tx) => {
+			const doc = await tx.doc(RoutinesDoc, conversation.id);
 			for (const id of deletes) delete doc.items[id];
 			for (const def of [...creates, ...updates]) {
 				const previous = doc.items[def.id];
@@ -409,20 +472,45 @@ async function syncInternal(b: BoundRoutines, ctx: Context): Promise<SyncSummary
 	return { created: creates.length, updated: updates.length, deleted: deletes.length, total: defs.length, adopted: false };
 }
 
-/** Make Durable state match routines.json. Throws (changing nothing) when the file is invalid. */
+/**
+ * Make every bot's Durable state match its file. An invalid file changes nothing for its bot; the other
+ * bots still sync, then this throws naming each bad file.
+ */
 export async function syncRoutines(ctx: Context): Promise<SyncSummary> {
 	const b = requireBound();
-	return enqueue(b, () => syncInternal(b, ctx));
+	return enqueue(b, async () => {
+		const total: SyncSummary = { created: 0, updated: 0, deleted: 0, total: 0, adopted: false };
+		const bots = await routineBots(b, ctx);
+		const main = bots.find((bot) => bot.main);
+		if (b.legacyFile !== undefined && main !== undefined && existsSync(b.legacyFile) && !existsSync(fileOf(b, main))) {
+			await mkdir(b.dir, { recursive: true });
+			await rename(b.legacyFile, fileOf(b, main));
+		}
+		delete b.legacyFile;
+		const failures: string[] = [];
+		for (const bot of bots) {
+			try {
+				const summary = await syncInternal(b, bot, ctx);
+				total.created += summary.created;
+				total.updated += summary.updated;
+				total.deleted += summary.deleted;
+				total.total += summary.total;
+				total.adopted ||= summary.adopted;
+			} catch (error) {
+				failures.push(messageOf(error));
+			}
+		}
+		if (failures.length > 0) throw new Error(failures.join("; "));
+		return total;
+	});
 }
 
 // Definitions for an edit: adopts current state into the file first when the file is missing.
-async function readDefsForEdit(b: BoundRoutines, ctx: Context): Promise<RoutineDefinition[]> {
-	const loaded = await readRoutineFile(b.filePath);
+async function readDefsForEdit(b: BoundRoutines, bot: RoutineBot, ctx: Context): Promise<RoutineDefinition[]> {
+	const loaded = await readRoutineFile(fileOf(b, bot));
 	if (loaded !== undefined) return loaded.defs;
-	await syncInternal(b, ctx);
-	const adopted = await readRoutineFile(b.filePath);
-	if (adopted === undefined) throw new Error(`routines file ${b.filePath} vanished during sync`);
-	return adopted.defs;
+	await syncInternal(b, bot, ctx);
+	return (await readRoutineFile(fileOf(b, bot)))?.defs ?? [];
 }
 
 function validateInput(
@@ -442,26 +530,28 @@ function validateInput(
 	}
 }
 
-/** Add a routine: append its definition to the file and sync. */
+/** Add a routine to a bot (the main bot when `bot` is absent): append its definition to the bot's file and sync. */
 export async function addRoutine(
-	input: { title: string; prompt: string; cron: string },
+	input: { title: string; prompt: string; cron: string; bot?: number },
 	ctx: Context,
 ): Promise<RoutineView> {
 	const b = requireBound();
 	const def = validateInput(input, b.now());
 	return enqueue(b, async () => {
-		const defs = await readDefsForEdit(b, ctx);
+		const bot = await botById(b, input.bot, ctx);
+		const defs = await readDefsForEdit(b, bot, ctx);
 		if (defs.length >= MAX_ROUTINES) {
 			throw new RoutineLimitError(`Routine limit of ${MAX_ROUTINES} reached; cancel one first.`);
 		}
 		const full: RoutineDefinition = { id: crypto.randomUUID(), ...def };
-		await writeRoutineFile(b.filePath, [...defs, full]);
-		await syncInternal(b, ctx);
-		return viewFor(b, full.id, ctx);
+		const next = [...defs, full];
+		await saveDefs(fileOf(b, bot), next);
+		await syncInternal(b, bot, ctx, next);
+		return viewFor(b, bot, full.id, ctx);
 	});
 }
 
-/** Replace a routine's title, prompt, and cron (same id) and sync. */
+/** Replace a routine's title, prompt, and cron (same id, same bot) and sync. */
 export async function updateRoutine(
 	id: string,
 	input: { title: string; prompt: string; cron: string },
@@ -470,38 +560,38 @@ export async function updateRoutine(
 	const b = requireBound();
 	const def = validateInput(input, b.now());
 	return enqueue(b, async () => {
-		const defs = await readDefsForEdit(b, ctx);
+		const { bot } = await locate(b, id, ctx);
+		const defs = await readDefsForEdit(b, bot, ctx);
 		const index = defs.findIndex((candidate) => candidate.id === id);
 		if (index < 0) throw new RoutineNotFoundError(`No routine ${id}.`);
 		defs[index] = { id, ...def };
-		await writeRoutineFile(b.filePath, defs);
-		await syncInternal(b, ctx);
-		return viewFor(b, id, ctx);
+		await saveDefs(fileOf(b, bot), defs);
+		await syncInternal(b, bot, ctx, defs);
+		return viewFor(b, bot, id, ctx);
 	});
 }
 
-/** Remove a routine's definition and sync (its sleeper is aborted). */
-export async function deleteRoutine(id: string, ctx: Context): Promise<void> {
+/** Remove a routine's definition and sync (its sleeper is aborted). `only` limits it to that bot's routines. */
+export async function deleteRoutine(id: string, ctx: Context, only?: number): Promise<void> {
 	const b = requireBound();
 	return enqueue(b, async () => {
-		const defs = await readDefsForEdit(b, ctx);
+		const { bot } = await locate(b, id, ctx, only);
+		const defs = await readDefsForEdit(b, bot, ctx);
 		if (!defs.some((candidate) => candidate.id === id)) throw new RoutineNotFoundError(`No routine ${id}.`);
-		await writeRoutineFile(
-			b.filePath,
-			defs.filter((candidate) => candidate.id !== id),
-		);
-		await syncInternal(b, ctx);
+		const next = defs.filter((candidate) => candidate.id !== id);
+		await saveDefs(fileOf(b, bot), next);
+		await syncInternal(b, bot, ctx, next);
 	});
 }
 
-/** Fire a routine now: post its wake turn to the root conversation and stamp lastFiredAt. */
-export async function runRoutineNow(id: string, ctx: Context): Promise<RoutineView> {
+/** Fire a routine now: post its wake turn to its bot and stamp lastFiredAt. `only` limits it to that bot's routines. */
+export async function runRoutineNow(id: string, ctx: Context, only?: number): Promise<RoutineView> {
 	const b = requireBound();
 	return enqueue(b, async () => {
-		const item = (await snapshotItems(b, ctx))[id];
-		if (item === undefined) throw new RoutineNotFoundError(`No routine ${id}.`);
+		const { bot, item } = await locate(b, id, ctx, only);
+		const conversation = await conversationOf(b, bot, ctx);
 		const now = b.now();
-		await b.root.submit(
+		await conversation.submit(
 			{
 				type: "input",
 				content: routineTurnText(item, now),
@@ -510,12 +600,32 @@ export async function runRoutineNow(id: string, ctx: Context): Promise<RoutineVi
 			},
 			ctx,
 		);
-		await b.root.commit(async (tx) => {
-			const doc = await tx.doc(RoutinesDoc, b.root.id);
+		await conversation.commit(async (tx) => {
+			const doc = await tx.doc(RoutinesDoc, conversation.id);
 			const entry = doc.items[id];
 			if (entry !== undefined) entry.lastFiredAt = now;
 		}, ctx);
-		return viewFor(b, id, ctx);
+		return viewFor(b, bot, id, ctx);
+	});
+}
+
+/** Before a bot is deleted: stop its routines and delete its file. Called by src/bots.ts through main.ts. */
+export async function removeBotRoutines(botId: number, ctx: Context): Promise<void> {
+	const b = requireBound();
+	return enqueue(b, async () => {
+		const bot = (await routineBots(b, ctx)).find((candidate) => candidate.id === botId);
+		if (bot === undefined) return;
+		const items = await snapshotItems(b, bot, ctx);
+		for (const item of Object.values(items)) {
+			await b.harness.abortTask(item.taskId, ctx);
+			await b.harness.waitForTask(item.taskId, ctx);
+		}
+		const conversation = await conversationOf(b, bot, ctx);
+		await conversation.commit(async (tx) => {
+			(await tx.doc(RoutinesDoc, conversation.id)).items = {};
+		}, ctx);
+		await rm(fileOf(b, bot), { force: true });
+		b.paths.delete(bot.id);
 	});
 }
 
@@ -532,17 +642,18 @@ export function previewCron(spec: string): { label: string; next: string[] } {
 	return { label: cronLabel(normalized), next };
 }
 
-/** The config file the manager syncs (for logs and the UI header). */
-export function routineFilePath(): string {
-	return requireBound().filePath;
+/** The folder of per-bot routine files (for logs and the UI). */
+export function routineDir(): string {
+	return requireBound().dir;
 }
 
-/** Watch the config file's directory and sync after hand edits (debounced). Returns a stop function. */
+/** Watch the routine folder and sync after hand edits (debounced). Returns a stop function. */
 export function startRoutineFileWatch(ctx: Context, onError: (error: unknown) => void): () => void {
 	const b = requireBound();
+	mkdirSync(b.dir, { recursive: true });
 	let timer: ReturnType<typeof setTimeout> | undefined;
-	const watcher = watch(dirname(b.filePath), (_event, filename) => {
-		if (filename !== null && filename.toString() !== basename(b.filePath)) return;
+	const watcher = watch(b.dir, (_event, filename) => {
+		if (filename !== null && !filename.toString().endsWith(".json")) return;
 		if (timer !== undefined) clearTimeout(timer);
 		timer = setTimeout(() => {
 			syncRoutines(ctx).catch(onError);
@@ -560,10 +671,10 @@ const cancelRoutine = defineTool({
 	description: "Stop a routine so it does not fire again. id is the id returned by schedule.",
 	parameters: Type.Object({ id: Type.String() }),
 	execute: async (args, api, ctx) => {
-		const guard = mainConversationError(api.conversationId);
+		const guard = unboundError();
 		if (guard !== undefined) return errorText(guard);
 		try {
-			await deleteRoutine(args.id, ctx);
+			await deleteRoutine(args.id, ctx, Number(api.conversationId));
 			return text(`Cancelled ${args.id}.`);
 		} catch (error) {
 			if (error instanceof RoutineNotFoundError) return text(`No routine ${args.id}.`);
@@ -580,7 +691,7 @@ export function createRoutinesExtension(): Extension {
 			section(
 				"routines",
 				() =>
-					"Call schedule for later or repeating work: cron is a 5-field cron string, a nickname like @daily, or @every 30m, optionally prefixed CRON_TZ=Area/City. Prefer weekday daytime schedules like '30 7 * * 1-5'; never use bare @hourly. Use run_routine to fire one now. The owner can also add, edit, and remove routines in the web UI or routines.json without you; list_routines always shows the current set. A user message starting with [routine] is a routine firing: nobody is waiting, so carry out the standing instruction and email the owner only if the outcome is worth it.",
+					"Call schedule for later or repeating work: cron is a 5-field cron string, a nickname like @daily, or @every 30m, optionally prefixed CRON_TZ=Area/City. Prefer weekday daytime schedules like '30 7 * * 1-5'; never use bare @hourly. Use run_routine to fire one now. Your routines are your own: schedule, run_routine, and cancel_routine act only on them, and each fires as a turn in your chat. The owner can also add, edit, and remove them in the web UI or your file under routines/ without you; list_routines always shows the current set. A user message starting with [routine] is a routine firing: nobody is waiting, so carry out the standing instruction and email the owner only if the outcome is worth it.",
 			),
 		],
 		tasks: [RoutineTask],

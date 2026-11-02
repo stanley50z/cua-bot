@@ -62,7 +62,7 @@ test("a snapshot pairs the child's driver calls with their results and shows the
 		await writeFile(join(dir, "notes.txt"), "not a shot");
 		await writeFile(join(dir, "zz-browser-test.png"), "a png the bot did not take");
 
-		const view = createComputerView({ harness, storage, root, shotsDir: dir, space: "Mac mini", context });
+		const view = createComputerView({ harness, storage, conversation: root, shotsDir: dir, space: "Mac mini", context });
 		const snapshot = await view.snapshot(child.id);
 		assert.equal(snapshot.space, "Mac mini");
 		assert.equal(snapshot.shot?.name, "2026-10-31T09-42-00-000Z.png");
@@ -75,7 +75,7 @@ test("a snapshot pairs the child's driver calls with their results and shows the
 			],
 		);
 
-		const empty = await createComputerView({ harness, storage, root, shotsDir: join(dir, "missing"), context }).snapshot();
+		const empty = await createComputerView({ harness, storage, conversation: root, shotsDir: join(dir, "missing"), context }).snapshot();
 		assert.deepEqual(empty, { steps: [] }, "no owned child and no shots folder");
 	} finally {
 		await harness.close(context);

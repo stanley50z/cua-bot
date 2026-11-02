@@ -135,7 +135,7 @@ export function createExecutorExtension(options: { executor: Executor; approvals
 			),
 		}),
 		execute: async (args, api, context) => {
-			const request = { callId: api.callId, path: args.path, input: args.input, ...(args.summary === undefined ? {} : { summary: args.summary }) };
+			const request = { callId: api.callId, conversationId: Number(api.conversationId), path: args.path, input: args.input, ...(args.summary === undefined ? {} : { summary: args.summary }) };
 			const toOwner = onlyToOwner(args.path, args.input, ownerEmail);
 			if (sendsOrDeletes(args.path, args.input) && !toOwner) {
 				await approvals.request(request);

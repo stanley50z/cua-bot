@@ -1,11 +1,12 @@
-// routines.json <-> Durable sync and the host-side manager the web UI uses: create from file,
+// routines/<bot>.json <-> Durable sync and the host-side manager the web UI uses: create from file,
 // edit/remove/add by rewriting the file, invalid files rejected without touching running state,
 // adoption when the file is missing, and add/update/delete/run operations.
 // Run from the repo root:  node --test test/routines-file.test.ts
 import assert from "node:assert/strict";
+import { existsSync } from "node:fs";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { type FauxResponseStep, type Message } from "@earendil-works/pi-ai";
@@ -63,7 +64,7 @@ type Session = {
 
 async function open(): Promise<Session> {
 	const dir = await mkdtemp(join(tmpdir(), "cua-bot-routine-file-"));
-	const file = join(dir, "routines.json");
+	const file = join(dir, "cua-bot.json");
 	const clock = { now: BASE };
 	const registry = createRegistry();
 	registry.install(createRoutinesExtension());
@@ -73,7 +74,7 @@ async function open(): Promise<Session> {
 		context,
 	);
 	const root = await harness.root(context, { agent: { model: { provider: "faux", modelId: "faux-1" } } });
-	bindRoutines({ harness, root, filePath: file, now: () => clock.now });
+	bindRoutines({ harness, root, dir: dirname(file), now: () => clock.now });
 	harness.resume();
 	return { dir, file, clock, harness, root };
 }
@@ -279,7 +280,7 @@ test("add, update, run, and delete through the manager", { timeout: 20_000 }, as
 
 		await deleteRoutine(created.id, context);
 		assert.deepEqual(await listRoutineViews(context), []);
-		assert.deepEqual(await readDefs(session), []);
+		assert.equal(existsSync(session.file), false, "a bot without routines has no file");
 
 		await assert.rejects(updateRoutine("nope", { title: "x", prompt: "y", cron: "@daily" }, context), /No routine/);
 		await assert.rejects(deleteRoutine("nope", context), /No routine/);
