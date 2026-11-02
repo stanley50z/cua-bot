@@ -76,7 +76,7 @@ test("hand edits are read as-is, including a byte-order mark from a Windows edit
 		assert.match(await readFile(join(dir, "profile.md"), "utf8"), /Some notes I wrote\./, "non-fact lines survive");
 	}));
 
-test("the prompt section shows profile and recent facts within budget and points at recall for the rest", () =>
+test("the prompt section shows every profile fact and the recent log facts, and points at recall for the rest", () =>
 	withDir(async (dir) => {
 		const { clock, now } = clockAt("2026-01-01T09:00:00");
 		const memory = createMemory({ dir, now });
@@ -94,8 +94,10 @@ test("the prompt section shows profile and recent facts within budget and points
 		assert.match(text, /\(10 older facts are not shown; use recall to search them\.\)/);
 		assert.equal(await memory.render(), text, "stable while nothing changes, so the prompt cache holds");
 
-		for (let i = 0; i < 20; i++) await memory.remember(`${"x".repeat(400)} ${i}`, "profile");
-		assert.ok((await memory.render()).length < 4000 + 600, "budget caps the listed facts");
+		for (let i = 0; i < 200; i++) await memory.remember(`${"x".repeat(400)} ${i}`, "profile");
+		const full = await memory.render();
+		assert.match(full, /x 199\n/, "no length budget hides profile facts");
+		assert.match(full, /Event number 40\n/);
 	}));
 
 test("recall ranks by shared words and remember rejects empty and oversized facts", () =>
@@ -110,9 +112,11 @@ test("recall ranks by shared words and remember rejects empty and oversized fact
 		await assert.rejects(memory.remember("y".repeat(501), "profile"), /at most 500 characters/);
 	}));
 
-test("a fact the bot remembers is in its prompt on the next request", () =>
+test("a fact the bot remembers, shared or its own, is in its prompt on the next request", () =>
 	withDir(async (dir) => {
-		const memory = createMemory({ dir, now: () => new Date("2026-10-31T09:00:00") });
+		const now = () => new Date("2026-10-31T09:00:00");
+		const memory = createMemory({ dir: join(dir, "shared"), now });
+		const own = createMemory({ dir: join(dir, "own"), now });
 		const prompts: string[] = [];
 		// System messages declare named sections; later ones replace a section by name. Keep the latest memory text.
 		const memorySection = (messages: readonly Message[]) =>
@@ -125,19 +129,29 @@ test("a fact the bot remembers is in its prompt on the next request", () =>
 		const models = createModels();
 		models.setProvider(faux.provider);
 		faux.setResponses([
-			record(() => fauxAssistantMessage([fauxToolCall("remember", { fact: "Partner is Dana", tier: "profile" }, { id: "m1" })], { stopReason: "toolUse" })),
+			record(() =>
+				fauxAssistantMessage(
+					[
+						fauxToolCall("remember", { fact: "Partner is Dana", scope: "shared", tier: "profile" }, { id: "m1" }),
+						fauxToolCall("remember", { fact: "Dana likes orchids", scope: "own", tier: "profile" }, { id: "m2" }),
+					],
+					{ stopReason: "toolUse" },
+				),
+			),
 			record(() => fauxAssistantMessage([fauxText("Noted.")])),
 		]);
 		const registry = createRegistry();
-		registry.install(createMemoryExtension(memory));
+		registry.install(createMemoryExtension({ shared: memory, own: async () => own }));
 		const harness = await Harness.open(new MemoryStorage(), { models, registry }, context);
 		try {
 			const root = await harness.root(context, { agent: { model: { provider: "faux", modelId: "faux-1" } } });
 			const settled = await (await root.submit({ type: "input", content: "My partner is Dana." }, context)).wait(context);
 			assert.equal(settled.status, "done");
 			assert.equal(prompts.length, 2);
-			assert.match(prompts[0] ?? "", /Nothing saved yet/);
-			assert.match(prompts[1] ?? "", /Partner is Dana/);
+			assert.match(prompts[0] ?? "", /Shared memory, which every bot sees:\nNothing saved yet\.\nYour own memory, which only you see:\nNothing saved yet\./);
+			assert.match(prompts[1] ?? "", /every bot sees:\nAbout the owner:\n- \(2026-10-31\) Partner is Dana\nYour own memory, which only you see:\nAbout the owner:\n- \(2026-10-31\) Dana likes orchids/);
+			assert.match(await readFile(join(dir, "shared", "profile.md"), "utf8"), /Partner is Dana/);
+			assert.doesNotMatch(await readFile(join(dir, "shared", "profile.md"), "utf8"), /orchids/, "an own fact stays out of the shared memory");
 		} finally {
 			await harness.close(context);
 		}
@@ -146,7 +160,8 @@ test("a fact the bot remembers is in its prompt on the next request", () =>
 test("the web app lists, adds, and forgets facts", () =>
 	withDir(async (dir) => {
 		const memory = createMemory({ dir, now: () => new Date("2026-10-31T09:00:00") });
-		const server: Server = createBotServer({ say: async (text) => text, memory, context });
+		const own = createMemory({ dir: join(dir, "bot-7"), now: () => new Date("2026-10-31T09:00:00") });
+		const server: Server = createBotServer({ say: async (text) => text, memory, botMemory: (id) => (id === 7 ? own : undefined), context });
 		await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
 		const address = server.address();
 		assert.ok(address !== null && typeof address === "object");
@@ -165,6 +180,14 @@ test("the web app lists, adds, and forgets facts", () =>
 			assert.equal((await post("/api/memory/forget", { fact: "Dinner Friday" })).status, 200);
 			assert.equal((await post("/api/memory/forget", { fact: "Dinner Friday" })).status, 404);
 			assert.deepEqual((await (await fetch(`${base}/api/memory`)).json()).log, []);
+
+			assert.equal((await post("/api/memory", { fact: "Reading list has Hackaday", tier: "profile", bot: 7 })).status, 201);
+			const both = await (await fetch(`${base}/api/memory?bot=7`)).json();
+			assert.deepEqual(both.own.profile.map((fact: { text: string }) => fact.text), ["Reading list has Hackaday"]);
+			assert.deepEqual(both.profile.map((fact: { text: string }) => fact.text), ["Timezone is Pacific"], "a bot's fact stays out of the shared memory");
+			assert.equal((await fetch(`${base}/api/memory?bot=8`)).status, 404);
+			assert.equal((await post("/api/memory/forget", { fact: "Reading list has Hackaday" })).status, 404, "forgetting without a bot looks only in the shared memory");
+			assert.equal((await post("/api/memory/forget", { fact: "Reading list has Hackaday", bot: 7 })).status, 200);
 		} finally {
 			await new Promise<void>((resolve) => server.close(() => resolve()));
 		}

@@ -1,7 +1,8 @@
-// Long-term memory about the owner, as plain markdown the owner can read and edit.
-// main.ts builds one store with createMemory({ dir: data/memory }), installs createMemoryExtension(store)
-// so the bot gets remember / forget / recall and sees its memory in every request, and hands the
-// store to the web app (GET/POST /api/memory). Layout:
+// Long-term memory about the owner, as plain markdown the owner can read and edit. There are two kinds
+// of store, both built with createMemory: the shared one in data/memory/ that every bot sees, and each
+// bot's own in bots/<name>/memory/ (botMemories in bots.ts). main.ts installs createMemoryExtension so
+// every bot gets remember / forget / recall and sees both stores in every request, and hands them to the
+// web app (GET/POST /api/memory). Layout of a store:
 //   profile.md          enduring facts about the owner ("About the owner")
 //   log/YYYY-MM.md      dated facts, one file per month
 // Each fact is one line: `- (YYYY-MM-DD) fact`. Other lines are left alone. The files are the source of
@@ -9,15 +10,14 @@
 import { mkdir, readdir, readFile, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { Type } from "@earendil-works/pi-ai";
-import { defineExtension, defineTool, section, type Extension } from "@earendil-works/pi-durable";
+import type { Context } from "@earendil-works/chord";
+import { type ConversationId, defineExtension, defineTool, type Extension, type Harness, section } from "@earendil-works/pi-durable";
 
 export type Tier = "profile" | "log";
 export type Fact = { text: string; date: string; tier: Tier; file: string };
 
 const MAX_FACT = 500;
-const PROFILE_LIMIT = 100;
 const RECENT_LIMIT = 30;
-const SECTION_BUDGET = 4000;
 const RECALL_LIMIT = 20;
 const FACT_LINE = /^-\s+\((\d{4}-\d{2}-\d{2})\)\s+(.+?)\s*$/;
 const PROFILE_HEADER = "# About the owner\n";
@@ -137,30 +137,16 @@ export function createMemory(options: { dir: string; now?: () => Date }) {
 				.map((hit) => hit.fact);
 		},
 
-		/** The memory section of the system prompt. Changes only when the files change, so the prompt cache holds. */
+		/** This store's facts for the system prompt. Changes only when the files change, so the prompt cache holds. */
 		async render(): Promise<string> {
 			const { profile, log } = await all();
-			const lines = [
-				"Memory: durable facts about the owner, kept across every conversation. Rely on them instead of asking again.",
-				"When you learn something lasting about the owner (preferences, people, places, routines, accounts), save it with remember: tier profile for enduring facts, tier log for dated events and plans. Just do it and mention it in passing; don't ask permission. Use forget with the exact text when a fact is wrong or outdated, and recall to search older facts.",
-			];
-			if (profile.length + log.length === 0) return [...lines, "Nothing saved yet."].join("\n");
-			let budget = SECTION_BUDGET;
-			const take = (facts: Fact[]) => {
-				const shown: string[] = [];
-				for (const fact of facts) {
-					const line = `- (${fact.date}) ${fact.text}`;
-					if (line.length + 1 > budget) break;
-					budget -= line.length + 1;
-					shown.push(line);
-				}
-				return shown;
-			};
-			const aboutOwner = take(profile.slice(0, PROFILE_LIMIT));
-			const recent = take(log.slice(-RECENT_LIMIT).reverse()).reverse();
-			if (aboutOwner.length > 0) lines.push("About the owner:", ...aboutOwner);
-			if (recent.length > 0) lines.push("Recently:", ...recent);
-			const hidden = profile.length - aboutOwner.length + (log.length - recent.length);
+			if (profile.length + log.length === 0) return "Nothing saved yet.";
+			const lines: string[] = [];
+			const line = (fact: Fact) => `- (${fact.date}) ${fact.text}`;
+			const recent = log.slice(-RECENT_LIMIT);
+			if (profile.length > 0) lines.push("About the owner:", ...profile.map(line));
+			if (recent.length > 0) lines.push("Recently:", ...recent.map(line));
+			const hidden = log.length - recent.length;
 			if (hidden > 0) lines.push(`(${hidden} older ${hidden === 1 ? "fact is" : "facts are"} not shown; use recall to search them.)`);
 			return lines.join("\n");
 		},
@@ -169,22 +155,40 @@ export function createMemory(options: { dir: string; now?: () => Date }) {
 
 const text = (value: string) => ({ output: [{ type: "text" as const, text: value }] });
 const failure = (value: string) => ({ output: [{ type: "text" as const, text: value }], isError: true as const });
-const listed = (facts: Fact[]) => facts.map((fact) => `- (${fact.date}) ${fact.text} [${fact.tier}]`).join("\n");
+type Scope = "own" | "shared";
+const listed = (facts: (Fact & { scope: Scope })[]) => facts.map((fact) => `- (${fact.date}) ${fact.text} [${fact.scope} ${fact.tier}]`).join("\n");
 
-/** The bot's memory tools and prompt section over one store. Installed by src/main.ts. */
-export function createMemoryExtension(memory: Memory): Extension {
+/**
+ * Every bot's memory tools and prompt section over the shared store and its own. `own` finds the store of
+ * the bot whose conversation is asking; undefined (a conversation that isn't a bot) leaves only the shared one.
+ * Installed by src/main.ts.
+ */
+export function createMemoryExtension(stores: {
+	shared: Memory;
+	own: (conversationId: number, read: Pick<Harness, "snapshot">, context: Context) => Promise<Memory | undefined>;
+}): Extension {
+	const { shared } = stores;
+	// Both stores of the asking bot, shared first.
+	const both = async (conversationId: ConversationId, read: Pick<Harness, "snapshot">, context: Context) => {
+		const own = await stores.own(Number(conversationId), read, context);
+		return [{ scope: "shared" as const, memory: shared }, ...(own === undefined ? [] : [{ scope: "own" as const, memory: own }])];
+	};
+
 	const remember = defineTool({
 		name: "remember",
 		description:
-			"Save a lasting fact about the owner to long-term memory. One short sentence per fact. tier profile: enduring facts (preferences, people, accounts, where things live). tier log: dated events and plans.",
+			"Save a lasting fact to long-term memory. One short sentence per fact. scope shared: about the owner, for every bot (identity, people, accounts, preferences, rules for all bots). scope own: what only your job needs. tier profile: enduring facts. tier log: dated events and plans.",
 		parameters: Type.Object({
 			fact: Type.String({ description: "The fact, as one short sentence" }),
+			scope: Type.Union([Type.Literal("own"), Type.Literal("shared")], { description: "own or shared" }),
 			tier: Type.Union([Type.Literal("profile"), Type.Literal("log")], { description: "profile or log" }),
 		}),
-		execute: async (args) => {
+		execute: async (args, api, context) => {
+			const store = (await both(api.conversationId, api, context)).find((entry) => entry.scope === args.scope)?.memory;
+			if (store === undefined) return failure("Only a bot has its own memory; save it as shared.");
 			try {
-				const { fact, added } = await memory.remember(args.fact, args.tier);
-				return text(added ? `remembered (${fact.tier}): ${fact.text}` : `already remembered: ${fact.text}`);
+				const { fact, added } = await store.remember(args.fact, args.tier);
+				return text(added ? `remembered (${args.scope} ${fact.tier}): ${fact.text}` : `already remembered: ${fact.text}`);
 			} catch (error) {
 				return failure(error instanceof Error ? error.message : String(error));
 			}
@@ -192,25 +196,42 @@ export function createMemoryExtension(memory: Memory): Extension {
 	});
 	const forget = defineTool({
 		name: "forget",
-		description: "Remove a fact from long-term memory. Pass the fact's exact text as shown in memory.",
+		description: "Remove a fact from long-term memory, shared or your own. Pass the fact's exact text as shown in memory.",
 		parameters: Type.Object({ fact: Type.String({ description: "Exact text of the fact to remove" }) }),
-		execute: async (args) => {
-			const removed = await memory.forget(args.fact);
+		execute: async (args, api, context) => {
+			const removed = [];
+			for (const { scope, memory } of await both(api.conversationId, api, context)) {
+				removed.push(...(await memory.forget(args.fact)).map((fact) => ({ ...fact, scope })));
+			}
 			return removed.length > 0 ? text(`forgot:\n${listed(removed)}`) : failure(`No saved fact matches "${normalize(args.fact)}".`);
 		},
 	});
 	const recall = defineTool({
 		name: "recall",
-		description: "Search long-term memory, including older facts that are not shown in the prompt.",
+		description: "Search long-term memory, shared and your own, including older facts that are not shown in the prompt.",
 		parameters: Type.Object({ query: Type.String({ description: "Words to look for" }) }),
-		execute: async (args) => {
-			const hits = await memory.recall(args.query);
+		execute: async (args, api, context) => {
+			const hits = [];
+			for (const { scope, memory } of await both(api.conversationId, api, context)) {
+				hits.push(...(await memory.recall(args.query)).map((fact) => ({ ...fact, scope })));
+			}
 			return text(hits.length > 0 ? listed(hits) : "No saved facts match.");
 		},
 	});
 	return defineExtension({
 		name: "memory",
 		tools: [remember, forget, recall],
-		sections: [section("memory", () => memory.render())],
+		sections: [
+			section("memory", async (input, context) => {
+				const lines = [
+					"Memory: durable facts kept across every conversation. Rely on them instead of asking again.",
+					"When you learn something lasting, save it with remember: scope shared for facts about the owner every bot should know, scope own for what only your job needs; tier profile for enduring facts, tier log for dated events and plans. Just do it and mention it in passing; don't ask permission. Use forget with the exact text when a fact is wrong or outdated, and recall to search older facts.",
+				];
+				for (const { scope, memory } of await both(input.conversationId, input.read, context)) {
+					lines.push(scope === "shared" ? "Shared memory, which every bot sees:" : "Your own memory, which only you see:", await memory.render());
+				}
+				return lines.join("\n");
+			}),
+		],
 	});
 }

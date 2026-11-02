@@ -40,7 +40,7 @@ async function open() {
 	const harness = await Harness.open(new MemoryStorage(), { models, registry }, context);
 	const root = await harness.root(context, { agent: { model: { provider: "faux", modelId: "faux-1" } } });
 	harness.resume();
-	const bots = await createBots({ harness, root, context, agent: { model: { provider: "faux", modelId: "faux-1" } } });
+	const bots = await createBots({ harness, root, context, agent: { model: { provider: "faux", modelId: "faux-1" } }, dir: join(dir, "bots") });
 	const server = createBotServer({ say: async (text) => text, bots, context, shotsDir: dir });
 	await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
 	const address = server.address();

@@ -97,8 +97,10 @@ export type BotServerDeps = {
 	context: Context;
 	/** Enables /api/bots* and /api/chat*. Absent in tests that only exercise routines. */
 	bots?: Bots;
-	/** Enables /api/memory*. */
+	/** Enables /api/memory*: the shared memory. */
 	memory?: Memory;
+	/** A bot's own memory, for /api/memory with a bot; undefined for an unknown bot. */
+	botMemory?: (id: number) => Memory | undefined;
 	/** Enables /api/approvals* and approval events on the chat stream. Absent when Executor is not configured. */
 	approvals?: Approvals;
 	/** Shown in the chat header, e.g. "grok-4.7". */
@@ -329,36 +331,48 @@ async function routePush(req: IncomingMessage, res: ServerResponse, deps: BotSer
 	res.writeHead(204).end();
 }
 
-function factInput(body: unknown): { fact: string; tier: "profile" | "log" } {
+function factInput(body: unknown): { fact: string; tier: "profile" | "log"; bot?: number } {
 	const record = body !== null && typeof body === "object" && !Array.isArray(body) ? (body as Record<string, unknown>) : {};
 	if (typeof record.fact !== "string") throw new HttpError(400, "fact must be a string");
 	const tier = record.tier ?? "profile";
 	if (tier !== "profile" && tier !== "log") throw new HttpError(400, "tier must be profile or log");
-	return { fact: record.fact, tier };
+	if (record.bot !== undefined && record.bot !== null && !Number.isInteger(record.bot)) throw new HttpError(400, "bot must be a bot id");
+	return { fact: record.fact, tier, ...(typeof record.bot === "number" ? { bot: record.bot } : {}) };
 }
 
-// The Memory view: list every fact (log newest first), add one, or forget one by its text.
+// The Memory view: list every fact (log newest first) of the shared memory and, with a bot, that bot's
+// own; add one, or forget one by its text. A POST with `bot` goes to that bot's memory, else the shared one.
 async function routeMemory(req: IncomingMessage, res: ServerResponse, deps: BotServerDeps, url: URL, method: string) {
-	const memory = deps.memory;
-	if (memory === undefined) throw new HttpError(404, "not found");
+	const shared = deps.memory;
+	if (shared === undefined) throw new HttpError(404, "not found");
+	const ownOf = (bot: number) => {
+		const own = deps.botMemory?.(bot);
+		if (own === undefined) throw new HttpError(404, "No such bot.");
+		return own;
+	};
+	const listing = async (memory: Memory) => {
+		const { profile, log } = await memory.all();
+		return { profile, log: log.toReversed(), dir: memory.dir };
+	};
 	try {
 		if (method === "GET" && url.pathname === "/api/memory") {
-			const { profile, log } = await memory.all();
-			sendJson(res, 200, { profile, log: log.toReversed(), dir: memory.dir });
+			const bot = url.searchParams.get("bot");
+			const own = bot === null || bot === "" ? undefined : ownOf(Number(bot));
+			sendJson(res, 200, { ...(await listing(shared)), ...(own === undefined ? {} : { own: await listing(own) }) });
 			return;
 		}
 		if (method === "POST" && url.pathname === "/api/memory") {
-			const { fact, tier } = factInput(await readJson(req));
-			const saved = await memory.remember(fact, tier);
-			deps.log?.(`memory (web): ${saved.added ? "added" : "already had"} ${tier}: ${saved.fact.text}`);
+			const { fact, tier, bot } = factInput(await readJson(req));
+			const saved = await (bot === undefined ? shared : ownOf(bot)).remember(fact, tier);
+			deps.log?.(`memory (web): ${saved.added ? "added" : "already had"} ${bot === undefined ? "shared" : `bot ${bot}`} ${tier}: ${saved.fact.text}`);
 			sendJson(res, saved.added ? 201 : 200, saved);
 			return;
 		}
 		if (method === "POST" && url.pathname === "/api/memory/forget") {
-			const { fact } = factInput(await readJson(req));
-			const removed = await memory.forget(fact);
+			const { fact, bot } = factInput(await readJson(req));
+			const removed = await (bot === undefined ? shared : ownOf(bot)).forget(fact);
 			if (removed.length === 0) throw new HttpError(404, "no saved fact matches that text");
-			deps.log?.(`memory (web): forgot ${removed.length}: ${fact}`);
+			deps.log?.(`memory (web): forgot ${removed.length}${bot === undefined ? "" : ` from bot ${bot}`}: ${fact}`);
 			sendJson(res, 200, { removed });
 			return;
 		}

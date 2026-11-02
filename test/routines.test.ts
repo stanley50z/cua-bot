@@ -3,7 +3,7 @@
 //   node --test test/routines.test.ts
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { after, test } from "node:test";
@@ -39,7 +39,9 @@ after(async () => {
 async function freshRoutineFile(): Promise<string> {
 	const dir = await mkdtemp(join(tmpdir(), "cua-bot-routines-file-"));
 	tempDirs.push(dir);
-	return join(dir, "cua-bot.json");
+	const file = join(dir, "cua-bot", "routines.json");
+	await mkdir(dirname(file), { recursive: true });
+	return file;
 }
 
 function messageText(message: Message): string {
@@ -138,7 +140,7 @@ async function openSession(
 	const harness = await Harness.open(storage, options, context);
 	const root = await harness.root(context, { agent: { model: MODEL } });
 	const file = routineFile ?? (await freshRoutineFile());
-	bindRoutines({ harness, root, dir: dirname(file), now: () => clock.now });
+	bindRoutines({ harness, root, dir: dirname(dirname(file)), now: () => clock.now });
 	harness.resume();
 	await syncRoutines(context);
 	return { clock, reports, harness, root, routineFile: file };
@@ -249,7 +251,8 @@ test("a routine sleeping in sqlite still fires after reopen", { timeout: 20_000 
 	const database = join(directory, "session.sqlite");
 	const clock = { now: BASE };
 	const models = scriptedModel();
-	const routineFile = join(directory, "cua-bot.json");
+	const routineFile = join(directory, "cua-bot", "routines.json");
+	await mkdir(dirname(routineFile), { recursive: true });
 	let session = await openSession(await openNodeSqliteStorage(database), clock, models, routineFile);
 	try {
 		await say(session.root, "please schedule a routine");
@@ -303,7 +306,8 @@ test("weekday cron survives a restart and a missed weekend fires once", { timeou
 	const models = scriptedModel();
 	// From Tue 2023-11-14T22:13:20Z, weekdays 07:30 UTC next fires Wed 2023-11-15T07:30:00Z.
 	const firstDue = Date.UTC(2023, 10, 15, 7, 30);
-	const routineFile = join(directory, "cua-bot.json");
+	const routineFile = join(directory, "cua-bot", "routines.json");
+	await mkdir(dirname(routineFile), { recursive: true });
 	let session = await openSession(await openNodeSqliteStorage(database), clock, models, routineFile);
 	try {
 		await say(session.root, "schedule weekdays please");

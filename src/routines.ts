@@ -1,8 +1,8 @@
 // Recurring work, per bot. Each routine is a durable task of its bot's conversation that sleeps until
 // its cron slot, posts a `[routine]` turn there, and sleeps again. A deadline that passed while the bot
 // was down fires once on resume and rearms from the wake time; missed slots are never replayed.
-// Each bot's definitions live in routines/<bot-name>.json (see routines-file.ts and routineFileName in
-// bots.ts); a bot without routines has no file. The manager below syncs those files into each bot's
+// Each bot's definitions live in its folder as bots/<bot-name>/routines.json (see routines-file.ts and
+// botFolder in bots.ts); a bot without routines has no file. The manager below syncs those files into each bot's
 // Durable doc and sleeper tasks; the chat tools and the web UI both go through it, so hand edits, GUI
 // edits, and model edits converge. The host calls bindRoutines({harness, root}) after Harness.open,
 // then syncRoutines() once at startup.
@@ -24,9 +24,8 @@ import {
 	type TaskId,
 } from "@earendil-works/pi-durable";
 import { cronLabel, nextFire, toCronSpec, type LegacySchedule } from "./cron.ts";
-import { MAIN_NAME, readBots, routineFileName } from "./bots.ts";
+import { botFolder, DEFAULT_BOTS_DIR, MAIN_NAME, readBots } from "./bots.ts";
 import {
-	DEFAULT_ROUTINE_DIR,
 	MAX_ROUTINES,
 	readRoutineFile,
 	writeRoutineFile,
@@ -253,7 +252,7 @@ const runRoutine = defineTool({
 });
 
 // --- Host-side manager ----------------------------------------------------
-// Each bot's file under routines/ is the source of truth for its definitions; the bot's Durable doc
+// Each bot's routines.json in its folder is the source of truth for its definitions; the bot's Durable doc
 // mirrors it and adds task ids + lastFiredAt. A bot without routines has no file. Every mutation
 // funnels through one queue: edit the file, then sync. Sync aborts and recreates sleeper tasks until
 // each bot's Durable state matches its file.
@@ -310,7 +309,7 @@ export function bindRoutines(options: {
 	bound = {
 		harness: options.harness,
 		root: options.root,
-		dir: options.dir ?? DEFAULT_ROUTINE_DIR,
+		dir: options.dir ?? DEFAULT_BOTS_DIR,
 		...(options.legacyFile === undefined ? {} : { legacyFile: options.legacyFile }),
 		now: options.now ?? Date.now,
 		queue: Promise.resolve(),
@@ -331,7 +330,8 @@ async function botById(b: BoundRoutines, id: number | undefined, ctx: Context): 
 	return bot;
 }
 
-const fileOf = (b: BoundRoutines, bot: RoutineBot) => join(b.dir, routineFileName(bot));
+const ROUTINE_FILE = "routines.json";
+const fileOf = (b: BoundRoutines, bot: RoutineBot) => join(b.dir, botFolder(bot), ROUTINE_FILE);
 
 async function conversationOf(b: BoundRoutines, bot: RoutineBot, ctx: Context): Promise<Conversation> {
 	const conversation = bot.main ? b.root : await b.harness.conversation(bot.id as ConversationId, ctx);
@@ -483,7 +483,7 @@ export async function syncRoutines(ctx: Context): Promise<SyncSummary> {
 		const bots = await routineBots(b, ctx);
 		const main = bots.find((bot) => bot.main);
 		if (b.legacyFile !== undefined && main !== undefined && existsSync(b.legacyFile) && !existsSync(fileOf(b, main))) {
-			await mkdir(b.dir, { recursive: true });
+			await mkdir(dirname(fileOf(b, main)), { recursive: true });
 			await rename(b.legacyFile, fileOf(b, main));
 		}
 		delete b.legacyFile;
@@ -642,18 +642,18 @@ export function previewCron(spec: string): { label: string; next: string[] } {
 	return { label: cronLabel(normalized), next };
 }
 
-/** The folder of per-bot routine files (for logs and the UI). */
+/** The folder of bot folders, each holding its routines.json (for logs and the UI). */
 export function routineDir(): string {
 	return requireBound().dir;
 }
 
-/** Watch the routine folder and sync after hand edits (debounced). Returns a stop function. */
+/** Watch the bot folders and sync after hand edits to a routines.json (debounced). Returns a stop function. */
 export function startRoutineFileWatch(ctx: Context, onError: (error: unknown) => void): () => void {
 	const b = requireBound();
 	mkdirSync(b.dir, { recursive: true });
 	let timer: ReturnType<typeof setTimeout> | undefined;
-	const watcher = watch(b.dir, (_event, filename) => {
-		if (filename !== null && !filename.toString().endsWith(".json")) return;
+	const watcher = watch(b.dir, { recursive: true }, (_event, filename) => {
+		if (filename !== null && !filename.toString().endsWith(ROUTINE_FILE)) return;
 		if (timer !== undefined) clearTimeout(timer);
 		timer = setTimeout(() => {
 			syncRoutines(ctx).catch(onError);
@@ -691,7 +691,7 @@ export function createRoutinesExtension(): Extension {
 			section(
 				"routines",
 				() =>
-					"Call schedule for later or repeating work: cron is a 5-field cron string, a nickname like @daily, or @every 30m, optionally prefixed CRON_TZ=Area/City. Prefer weekday daytime schedules like '30 7 * * 1-5'; never use bare @hourly. Use run_routine to fire one now. Your routines are your own: schedule, run_routine, and cancel_routine act only on them, and each fires as a turn in your chat. The owner can also add, edit, and remove them in the web UI or your file under routines/ without you; list_routines always shows the current set. A user message starting with [routine] is a routine firing: nobody is waiting, so carry out the standing instruction and email the owner only if the outcome is worth it.",
+					"Call schedule for later or repeating work: cron is a 5-field cron string, a nickname like @daily, or @every 30m, optionally prefixed CRON_TZ=Area/City. Prefer weekday daytime schedules like '30 7 * * 1-5'; never use bare @hourly. Use run_routine to fire one now. Your routines are your own: schedule, run_routine, and cancel_routine act only on them, and each fires as a turn in your chat. The owner can also add, edit, and remove them in the web UI or your routines.json without you; list_routines always shows the current set. A user message starting with [routine] is a routine firing: nobody is waiting, so carry out the standing instruction and email the owner only if the outcome is worth it.",
 			),
 		],
 		tasks: [RoutineTask],

@@ -3,7 +3,7 @@
 // Run from the repo root:  node --test test/web.test.ts
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import type { Server } from "node:http";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
@@ -44,7 +44,8 @@ type Session = { dir: string; file: string; base: string; harness: Harness; root
 
 async function open(): Promise<Session> {
 	const dir = await mkdtemp(join(tmpdir(), "cua-bot-web-"));
-	const file = join(dir, "cua-bot.json");
+	const file = join(dir, "cua-bot", "routines.json");
+	await mkdir(dirname(file), { recursive: true });
 	const clock = { now: BASE };
 	const registry = createRegistry();
 	registry.install(createRoutinesExtension());
@@ -54,7 +55,7 @@ async function open(): Promise<Session> {
 		context,
 	);
 	const root = await harness.root(context, { agent: { model: { provider: "faux", modelId: "faux-1" } } });
-	bindRoutines({ harness, root, dir: dirname(file), now: () => clock.now });
+	bindRoutines({ harness, root, dir: dirname(dirname(file)), now: () => clock.now });
 	harness.resume();
 	await syncRoutines(context);
 	const server = createBotServer({ say: async (text) => `echo: ${text}`, context });

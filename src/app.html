@@ -199,7 +199,9 @@ dialog .row .btn.danger { margin-right: auto; }
 .add-fact input { flex: 1; padding: 7px 10px; border: 1px solid var(--line); border-radius: 7px; font: inherit; color: var(--ink); }
 .add-fact select { padding: 6px 8px; border: 1px solid var(--line); border-radius: 7px; font: inherit; color: var(--ink); background: #fff; }
 .facts { padding: 12px 24px; overflow: auto; flex: 1; display: grid; grid-template-columns: 1fr 1fr; gap: 28px; align-content: start; }
-.facts h2 { font: 600 14px "Bahnschrift", sans-serif; margin: 0 0 6px; }
+.facts h2 select { font: inherit; border: 1px solid var(--line); border-radius: 6px; padding: 2px 4px; color: var(--ink); background: #fff; }
+.facts h2 { grid-column: 1 / -1; font: 600 15px "Bahnschrift", sans-serif; margin: 0 0 -18px; }
+.facts h3 { font: 600 13px "Bahnschrift", sans-serif; color: var(--muted); margin: 0 0 6px; }
 .facts ul { list-style: none; margin: 0; padding: 0; }
 .facts li { padding: 8px 0; border-bottom: 1px solid var(--line); font-size: 13.5px; display: grid; grid-template-columns: minmax(0, 1fr) auto 28px; gap: 10px; align-items: start; }
 .facts li .when { color: var(--muted); font-size: 12px; white-space: nowrap; padding-top: 1px; }
@@ -219,6 +221,8 @@ dialog input, dialog textarea { width: 100%; padding: 8px 10px; border: 1px soli
 dialog textarea { resize: vertical; }
 dialog .hint { color: var(--muted); font-size: 12.5px; margin: 6px 0 0; }
 dialog .hint code { background: var(--bg); padding: 0 4px; border-radius: 3px; }
+#bot-dialog { width: min(820px, 94vw); }
+#b-instructions { font: 13px/1.5 Consolas, "Cascadia Mono", monospace; min-height: 46vh; }
 #preview { font-size: 13px; margin: 6px 0 0; min-height: 20px; }
 #preview.bad, #form-error { color: var(--bad); }
 dialog .row { display: flex; gap: 8px; justify-content: flex-end; margin-top: 18px; }
@@ -255,7 +259,7 @@ dialog .row { display: flex; gap: 8px; justify-content: flex-end; margin-top: 18
     <ul id="bot-rows"></ul>
    </nav>
    <div class="chatcol">
-    <div class="bar"><h1 id="chat-h">cua-bot</h1><button type="button" class="edit" id="edit-bot" aria-label="Edit this bot" title="Edit name and instructions"><svg><use href="#i-edit"/></svg></button><span class="state" id="chat-state" aria-live="polite"></span><span class="aside" id="model"></span><button class="btn" id="notify" type="button" hidden>Turn on notifications</button></div>
+    <div class="bar"><h1 id="chat-h">cua-bot</h1><button type="button" class="edit" id="edit-bot" aria-label="Edit this bot" title="Edit name and agent file"><svg><use href="#i-edit"/></svg></button><span class="state" id="chat-state" aria-live="polite"></span><span class="aside" id="model"></span><button class="btn" id="notify" type="button" hidden>Turn on notifications</button></div>
     <div class="banner" id="chat-error" role="alert" hidden></div>
     <div class="msgs" id="msgs" aria-live="polite"></div>
     <form class="composer" id="composer">
@@ -273,21 +277,26 @@ dialog .row { display: flex; gap: 8px; justify-content: flex-end; margin-top: 18
     <thead><tr><th>Routine</th><th>Bot</th><th>When</th><th>Next</th><th>Last ran</th><th><span hidden>Actions</span></th></tr></thead>
     <tbody id="routine-rows"></tbody>
    </table></div>
-   <p class="file">Each bot's routines are saved in its own file, <code><span id="routine-dir">routines</span>/&lt;bot name&gt;.json</code>, next to the bot; a bot without routines has none. Hand edits to those files apply within a few seconds, and routines a bot creates in chat appear here.</p>
+   <p class="file">Each bot's routines are saved in its folder, <code><span id="routine-dir">bots</span>/&lt;bot name&gt;/routines.json</code>; a bot without routines has none. Hand edits to those files apply within a few seconds, and routines a bot creates in chat appear here.</p>
   </section>
   <section class="view" id="view-memory" aria-labelledby="memory-h" hidden>
-   <div class="bar"><h1 id="memory-h">Memory</h1><span class="aside">What the bot knows about you. It reads this before every reply.</span></div>
+   <div class="bar"><h1 id="memory-h">Memory</h1><span class="aside">Each bot reads its own memory and the shared memory before every reply.</span></div>
    <div class="banner" id="memory-error" role="alert" hidden></div>
    <form class="add-fact" id="fact-form">
     <input id="fact-text" maxlength="500" aria-label="A fact for the bot to remember" placeholder="Add a fact, for example: My partner is Dana" autocomplete="off">
+    <select id="fact-scope" aria-label="Who sees it"><option value="own" id="fact-scope-own">Only this bot</option><option value="shared">Every bot</option></select>
     <select id="fact-tier" aria-label="Where to save it"><option value="profile">About you</option><option value="log">Recent</option></select>
     <button type="submit" class="btn primary">Remember</button>
    </form>
    <div class="facts">
-    <div><h2>About you</h2><ul id="facts-profile"></ul></div>
-    <div><h2>Recent</h2><ul id="facts-log"></ul></div>
+    <h2><select id="memory-bot" aria-label="Whose memory to show"></select> only</h2>
+    <div><h3>Lasting</h3><ul id="own-profile"></ul></div>
+    <div><h3>Recent</h3><ul id="own-log"></ul></div>
+    <h2>Shared by every bot</h2>
+    <div><h3>About you</h3><ul id="facts-profile"></ul></div>
+    <div><h3>Recent</h3><ul id="facts-log"></ul></div>
    </div>
-   <p class="file">Saved as markdown in <code id="memory-dir">data/memory</code>: <code>profile.md</code> and one file per month under <code>log/</code>. Edit those files by hand anytime; the bot reads them fresh on every reply.</p>
+   <p class="file">Saved as markdown: this bot's in <code id="own-dir">bots/&lt;bot&gt;/memory</code>, the shared memory in <code id="memory-dir">data/memory</code>. Each has <code>profile.md</code> and one file per month under <code>log/</code>. Edit them by hand anytime; the bots read them fresh on every reply.</p>
   </section>
  </main>
 
@@ -322,8 +331,9 @@ dialog .row { display: flex; gap: 8px; justify-content: flex-end; margin-top: 18
   <h2 id="b-h">New bot</h2>
   <label for="b-name">Name</label>
   <input id="b-name" required maxlength="40" placeholder="Job Search" autocomplete="off">
-  <label for="b-instructions">What it's for</label>
-  <textarea id="b-instructions" rows="6" maxlength="4000" placeholder="Track job openings that fit my profile and tell me about new ones each week."></textarea>
+  <label for="b-instructions">Agent file</label>
+  <textarea id="b-instructions" rows="18" spellcheck="false" placeholder="Track job openings that fit my profile and tell me about new ones each week."></textarea>
+  <p class="hint" id="b-file"></p>
   <p class="hint">Each bot has its own chat and shares your memory, accounts, and computer. Bots can message each other, and you see those messages in their chats.</p>
   <p id="b-error" role="alert"></p>
   <div class="row"><button type="button" class="btn danger" id="b-delete" hidden>Delete bot</button><button type="button" class="btn" id="b-cancel">Cancel</button><button type="submit" class="btn primary" id="b-save">Add bot</button></div>
@@ -652,7 +662,7 @@ function renderChat() {
     const bot = currentBot();
     const empty = el("div", "empty");
     empty.append(el("b", "", "Ask " + bot.name + " anything"));
-    const about = bot.instructions.split("\n").find((line) => line.trim() !== "");
+    const about = bot.instructions.split("\n").find((line) => line.trim() !== "" && !line.trimStart().startsWith("#"));
     empty.append(bot.main ? "It can use the computer on the right, check your mail and calendar, email you, run routines on a schedule, and hand work to your other bots."
       : about || "It has the same tools as your other bots. Tell it what it's for, or give it standing instructions with the pencil next to its name.");
     box.append(empty);
@@ -1005,6 +1015,7 @@ function openBot(bot) {
   $("b-save").textContent = bot ? "Save changes" : "Add bot";
   $("b-name").value = bot ? bot.name : "";
   $("b-instructions").value = bot ? bot.instructions : "";
+  $("b-file").replaceChildren(...(bot && bot.file ? ["Saved as ", el("code", "", bot.file), " in the project folder, beside its routines and memory. The bot re-reads it every turn, so edits there apply at once."] : ["Saved as agent.md in the bot's own folder under bots/ in the project folder."]));
   $("b-delete").hidden = !bot || bot.main;
   $("b-error").textContent = "";
   $("bot-dialog").showModal();
@@ -1027,7 +1038,7 @@ $("bot-form").addEventListener("submit", async (event) => {
 });
 $("b-delete").addEventListener("click", async () => {
   const bot = editingBot;
-  if (!bot || !window.confirm(`Delete ${bot.name}? Its chat and routines go away, and other bots can no longer message it.`)) return;
+  if (!bot || !window.confirm(`Delete ${bot.name}? Its chat, routines, and own memory go away (its folder is deleted), and other bots can no longer message it.`)) return;
   $("b-delete").disabled = true;
   try {
     await request("DELETE", "/api/bots/" + bot.id);
@@ -1124,7 +1135,7 @@ document.querySelectorAll(".rail button[data-view]").forEach((button) => button.
   $("view-routines").hidden = view !== "routines";
   $("view-memory").hidden = view !== "memory";
   if (view === "routines") loadRoutines();
-  else if (view === "memory") loadMemory();
+  else if (view === "memory") { memoryBot = state.bot; loadMemory(); }
   else $("input").focus();
 }));
 
@@ -1132,17 +1143,29 @@ document.querySelectorAll(".rail button[data-view]").forEach((button) => button.
 function showMemoryError(message) { $("memory-error").textContent = message; $("memory-error").hidden = !message; }
 const factDate = (date) => new Date(date + "T12:00:00").toLocaleDateString(undefined, { month: "short", day: "numeric" });
 
+// The bot whose own memory the view shows; it starts as the bot whose chat is open.
+let memoryBot = null;
+$("memory-bot").addEventListener("change", () => { memoryBot = Number($("memory-bot").value); loadMemory(); });
+
 async function loadMemory() {
   try {
-    const data = await request("GET", "/api/memory");
+    const bot = state.bots.find((b) => b.id === memoryBot) || currentBot();
+    memoryBot = bot.id;
+    $("memory-bot").replaceChildren(...state.bots.map((b) => { const option = el("option", "", b.name); option.value = b.id; option.selected = b.id === bot.id; return option; }));
+    const data = await request("GET", "/api/memory?bot=" + bot.id);
+    $("fact-scope-own").textContent = "Only " + bot.name;
     $("memory-dir").textContent = data.dir;
-    renderFacts($("facts-profile"), data.profile, "Nothing yet. The bot saves lasting facts here as it learns them.");
+    $("own-dir").textContent = data.own.dir;
+    renderFacts($("own-profile"), data.own.profile, "Nothing yet. " + bot.name + " saves what only its job needs here.", bot.id);
+    renderFacts($("own-log"), data.own.log, "Nothing yet.", bot.id);
+    renderFacts($("facts-profile"), data.profile, "Nothing yet. The bots save lasting facts about you here as they learn them.");
     renderFacts($("facts-log"), data.log, "Nothing yet. Dated events and plans go here.");
     showMemoryError("");
   } catch (error) { showMemoryError(error.message); }
 }
 
-function renderFacts(list, facts, emptyText) {
+// `bot` is set for a bot's own facts, so forgetting one leaves the shared memory alone.
+function renderFacts(list, facts, emptyText, bot) {
   list.textContent = "";
   if (facts.length === 0) { list.append(el("li", "none", emptyText)); return; }
   for (const fact of facts) {
@@ -1154,7 +1177,7 @@ function renderFacts(list, facts, emptyText) {
     forget.append(icon("i-x"));
     forget.addEventListener("click", async () => {
       forget.disabled = true;
-      try { await request("POST", "/api/memory/forget", { fact: fact.text }); await loadMemory(); }
+      try { await request("POST", "/api/memory/forget", { fact: fact.text, ...(bot === undefined ? {} : { bot }) }); await loadMemory(); }
       catch (error) { showMemoryError(error.message); forget.disabled = false; }
     });
     row.append(el("span", "", fact.text), el("span", "when", factDate(fact.date)), forget);
@@ -1167,7 +1190,8 @@ $("fact-form").addEventListener("submit", async (event) => {
   const fact = $("fact-text").value;
   if (fact.trim() === "") return;
   try {
-    await request("POST", "/api/memory", { fact, tier: $("fact-tier").value });
+    const own = $("fact-scope").value === "own";
+    await request("POST", "/api/memory", { fact, tier: $("fact-tier").value, ...(own ? { bot: memoryBot } : {}) });
     $("fact-text").value = "";
     await loadMemory();
   } catch (error) { showMemoryError(error.message); }

@@ -162,6 +162,41 @@ def tail_text(path: Path, lines: int = 40) -> str:
     return "\n".join(picked) if picked else "(stdout log is empty)"
 
 
+# Moves the Pi packages (@earendil-works/*) to their newest release within package.json's ranges, so each
+# start picks up Pi's latest tools; every other dependency stays as the lockfile pins it. pnpm's one-day
+# minimum release age still applies. A failure (offline, no pnpm) is reported and the start goes on.
+def update_pi() -> None:
+    pnpm = shutil.which("pnpm")
+    if pnpm is None:
+        print("pi update skipped: pnpm was not found on PATH", file=sys.stderr)
+        return
+    try:
+        result = subprocess.run(
+            [pnpm, "update", "@earendil-works/*"],
+            cwd=ROOT,
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=180,
+            creationflags=0x08000000 if os.name == "nt" else 0,  # CREATE_NO_WINDOW
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        print(f"pi update skipped: {exc}", file=sys.stderr)
+        return
+    output = (result.stdout or "") + (result.stderr or "")
+    LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with LOG_PATH.open("a", encoding="utf-8") as log:
+        log.write(f"--- pnpm update @earendil-works/* (exit {result.returncode})\n{output}\n")
+    if result.returncode != 0:
+        print(f"pi update failed (exit {result.returncode}); starting with the installed versions. See {LOG_PATH}", file=sys.stderr)
+        return
+    changed = [line.strip() for line in output.splitlines() if line.strip().startswith(("+ @earendil-works", "- @earendil-works"))]
+    if changed:
+        print("pi updated: " + ", ".join(changed))
+
+
 def main() -> int:
     configure_stdio()
     node = shutil.which("node")
@@ -187,6 +222,7 @@ def main() -> int:
             )
             return 1
 
+    update_pi()
     env, port = child_environment(load_dotenv(ROOT / ".env"))
     LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
     log_handle = LOG_PATH.open("ab", buffering=0)

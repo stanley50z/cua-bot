@@ -3,7 +3,7 @@
 // deletes bots. Run from the repo root:  node --test test/bots.test.ts
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import type { Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -13,7 +13,7 @@ import type { Message } from "@earendil-works/pi-ai";
 import { createModels } from "@earendil-works/pi-ai/models";
 import { fauxAssistantMessage, fauxProvider, fauxText, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
 import { createRegistry, Harness, MemoryStorage } from "@earendil-works/pi-durable";
-import { type BotView, createBots, createBotsExtension } from "../src/bots.ts";
+import { botMemories, type BotView, createBots, createBotsExtension } from "../src/bots.ts";
 import type { ChatItem } from "../src/chat.ts";
 import { bindRoutines, createRoutinesExtension, deleteRoutine, removeBotRoutines, type RoutineView, syncRoutines } from "../src/routines.ts";
 import { createBotServer } from "../src/web.ts";
@@ -43,13 +43,13 @@ async function open() {
 		return fauxAssistantMessage([fauxText("Hello.")]);
 	};
 	faux.setResponses(Array.from({ length: 40 }, () => answer));
+	const temp = await mkdtemp(join(tmpdir(), "cua-bot-bots-"));
+	const dir = join(temp, "bots");
 	const registry = createRegistry();
-	registry.install(createBotsExtension({ agent: () => ({ model: MODEL }) }));
+	registry.install(createBotsExtension({ agent: () => ({ model: MODEL }), dir }));
 	registry.install(createRoutinesExtension());
 	const harness = await Harness.open(new MemoryStorage(), { models, registry }, context);
 	const root = await harness.root(context, { agent: { model: MODEL } });
-	const temp = await mkdtemp(join(tmpdir(), "cua-bot-bots-"));
-	const dir = join(temp, "routines");
 	const legacyFile = join(temp, "routines.json");
 	await writeFile(legacyFile, JSON.stringify([{ id: "old", title: "Old agenda", prompt: "Brief me", cron: "@daily" }]));
 	bindRoutines({ harness, root, dir, legacyFile });
@@ -59,6 +59,7 @@ async function open() {
 		root,
 		context,
 		agent: { model: MODEL },
+		dir,
 		renamed: () => syncRoutines(context),
 		removing: (id) => removeBotRoutines(id, context),
 	});
@@ -144,20 +145,20 @@ test("each bot has its own routines and routine file, which follow it through a 
 	const bot = await open();
 	try {
 		assert.equal(existsSync(bot.legacyFile), false, "the old routines.json moved");
-		const mainFile = join(bot.dir, "cua-bot.json");
+		const mainFile = join(bot.dir, "cua-bot", "routines.json");
 		assert.deepEqual(
 			JSON.parse(await readFile(mainFile, "utf8")).map((def: { id: string }) => def.id),
 			["old"],
 		);
 		const scout = (await (await send(bot.base, "POST", "/api/bots", { name: "Scout" })).json()) as BotView;
-		assert.equal(existsSync(join(bot.dir, "scout.json")), false, "a bot without routines has no file");
+		assert.equal(existsSync(join(bot.dir, "scout", "routines.json")), false, "a bot without routines has no file");
 
 		const added = await send(bot.base, "POST", "/api/routines", { title: "Fares", prompt: "Check fares to Tokyo", cron: "@daily", bot: scout.id });
 		assert.equal(added.status, 201);
 		const routine = (await added.json()) as RoutineView;
 		assert.deepEqual([routine.bot, routine.botName], [scout.id, "Scout"]);
 		assert.deepEqual(
-			JSON.parse(await readFile(join(bot.dir, "scout.json"), "utf8")).map((def: { title: string }) => def.title),
+			JSON.parse(await readFile(join(bot.dir, "scout", "routines.json"), "utf8")).map((def: { title: string }) => def.title),
 			["Fares"],
 		);
 		await assert.rejects(deleteRoutine(routine.id, context, bot.bots.main()), /No routine/, "another bot's tools can't touch it");
@@ -169,8 +170,8 @@ test("each bot has its own routines and routine file, which follow it through a 
 		assert.ok(!mainChat.some((item) => item.kind === "routine"), "it fires in Scout's chat only");
 
 		await send(bot.base, "PUT", `/api/bots/${scout.id}`, { name: "Travel", instructions: "" });
-		assert.equal(existsSync(join(bot.dir, "scout.json")), false);
-		assert.ok(existsSync(join(bot.dir, "travel.json")), "the file follows the rename");
+		assert.equal(existsSync(join(bot.dir, "scout", "routines.json")), false);
+		assert.ok(existsSync(join(bot.dir, "travel", "routines.json")), "the file follows the rename");
 		const listed = (await (await fetch(`${bot.base}/api/routines`)).json()).routines as RoutineView[];
 		assert.deepEqual(listed.map((view) => [view.title, view.botName]).sort(), [
 			["Fares", "Travel"],
@@ -178,7 +179,7 @@ test("each bot has its own routines and routine file, which follow it through a 
 		]);
 
 		assert.equal((await send(bot.base, "DELETE", `/api/bots/${scout.id}`)).status, 204);
-		assert.equal(existsSync(join(bot.dir, "travel.json")), false, "a deleted bot's routines go with it");
+		assert.equal(existsSync(join(bot.dir, "travel", "routines.json")), false, "a deleted bot's routines go with it");
 		const task = (await bot.harness.inspect(context)).tasks.filter((t) => t.record.kind === "cua-bot.routine");
 		assert.equal(task.length, 1, "only the main bot's sleeper is left");
 	} finally {
@@ -207,6 +208,51 @@ test("bots are added, renamed, and deleted over HTTP; the main bot stays", { tim
 		);
 		assert.equal((await fetch(`${bot.base}/api/chat?bot=${scout.id}`)).status, 404);
 		assert.equal((await send(bot.base, "PUT", `/api/bots/${scout.id}`, { name: "Gone" })).status, 404);
+	} finally {
+		await bot.close();
+	}
+});
+
+test("each bot's folder holds its agent file and memory, and follows it through hand edits, a rename, and a delete", { timeout: 20_000 }, async () => {
+	const bot = await open();
+	try {
+		assert.equal(await readFile(join(bot.dir, "cua-bot", "agent.md"), "utf8"), "", "the main bot gets an empty agent file");
+		const scout = (await (await send(bot.base, "POST", "/api/bots", { name: "Scout", instructions: "# Scout\nResearch travel." })).json()) as BotView;
+		assert.deepEqual([scout.folder, scout.file], ["bots/scout", "bots/scout/agent.md"]);
+		assert.equal(await readFile(join(bot.dir, "scout", "agent.md"), "utf8"), "# Scout\nResearch travel.\n");
+
+		await writeFile(join(bot.dir, "scout", "agent.md"), "# Scout\nBook trains, not flights.\n");
+		await until(
+			async () => bot.bots.list().find((b) => b.id === scout.id)?.instructions,
+			(text) => text === "# Scout\nBook trains, not flights.",
+		);
+		assert.equal((await send(bot.base, "POST", "/api/chat", { text: "ask scout" })).status, 202);
+		const scoutPrompt = await until(
+			async () => bot.prompts.find((prompt) => prompt.includes("[bot] Message from cua-bot")),
+			(prompt) => prompt !== undefined,
+		);
+		assert.ok(scoutPrompt?.includes("Book trains, not flights."), "the prompt carries the hand edit");
+		const mainPrompt = bot.prompts.find((prompt) => prompt.includes("ask scout")) ?? "";
+		assert.ok(mainPrompt.includes(`Scout (id ${scout.id}): Book trains`), "teammates are described by their first line that isn't a heading");
+
+		const memories = botMemories(bot.dir);
+		await memories.of(scout).remember("Prefers window seats", "profile");
+		assert.ok(existsSync(join(bot.dir, "scout", "memory", "profile.md")));
+
+		await mkdir(join(bot.dir, "taken"));
+		assert.equal((await send(bot.base, "PUT", `/api/bots/${scout.id}`, { name: "Taken", instructions: "" })).status, 400, "a rename never lands on a folder already there");
+		await send(bot.base, "PUT", `/api/bots/${scout.id}`, { name: "Travel", instructions: "Plan trips." });
+		assert.equal(existsSync(join(bot.dir, "scout")), false);
+		assert.equal(await readFile(join(bot.dir, "travel", "agent.md"), "utf8"), "Plan trips.\n", "the folder follows the rename");
+		const travel = { id: scout.id, name: "Travel" };
+		assert.deepEqual(
+			(await memories.of(travel).all()).profile.map((fact) => fact.text),
+			["Prefers window seats"],
+			"with the bot's memory",
+		);
+
+		assert.equal((await send(bot.base, "DELETE", `/api/bots/${scout.id}`)).status, 204);
+		assert.equal(existsSync(join(bot.dir, "travel")), false, "a deleted bot's folder goes with it");
 	} finally {
 		await bot.close();
 	}

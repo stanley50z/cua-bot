@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { AssistantEntry, configure, type ConversationId, createRegistry, defineExtension, Harness, section } from "@earendil-works/pi-durable";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
-import { createBots, createBotsExtension } from "./bots.ts";
+import { botMemories, createBots, createBotsExtension } from "./bots.ts";
 import { createComputerExtension, openLiveStream, spaceId, spaceLabel, viewerLink } from "./computer.ts";
 import { createLiveScreen } from "./live-screen.ts";
 import { createBotToolSearchExtension } from "./tool-search.ts";
@@ -17,6 +17,7 @@ import { type Approvals, createApprovals, describeApproval } from "./approvals.t
 import { connectExecutor, createExecutor, createExecutorExtension } from "./executor.ts";
 import { DATA_DIR, log } from "./log.ts";
 import { createMemory, createMemoryExtension } from "./memory.ts";
+import { createPcExtensions, pcEnv } from "./pc.ts";
 import { createPush } from "./push.ts";
 import { LEGACY_ROUTINE_FILE } from "./routines-file.ts";
 import { bindRoutines, createRoutinesExtension, removeBotRoutines, routineDir, startRoutineFileWatch, syncRoutines } from "./routines.ts";
@@ -78,8 +79,12 @@ try {
 	log(`cua: \`${cuaCommand} mcp\` failed (${error instanceof Error ? error.message : String(error)}); Cua Spaces tools are off`);
 }
 registry.install(createRoutinesExtension());
+// read, write, edit, bash, and powershell on this PC, and codemode over every tool.
+for (const extension of createPcExtensions()) registry.install(extension);
+// The shared memory every bot sees, and each bot's own in its folder.
 const memory = createMemory({ dir: join(DATA_DIR, "memory") });
-registry.install(createMemoryExtension(memory));
+const memories = botMemories();
+registry.install(createMemoryExtension({ shared: memory, own: memories.own }));
 const executorUrl = process.env.EXECUTOR_MCP_URL?.trim();
 const executorKey = process.env.EXECUTOR_API_KEY?.trim();
 let approvals: Approvals | undefined;
@@ -101,7 +106,7 @@ if (executorUrl && executorKey) {
 }
 
 const storage = await openNodeSqliteStorage(join(DATA_DIR, "cua-bot.sqlite"));
-const harness = await Harness.open(storage, { models, registry }, context);
+const harness = await Harness.open(storage, { models, registry, env: pcEnv }, context);
 const root = await harness.root(context, { agent: AGENT });
 // root() sets the agent only when it creates the conversation; apply the configured model to an existing one too.
 await root.commit((tx) => configure(tx, root.id, AGENT), context);
@@ -141,7 +146,11 @@ const bots = await createBots({
 });
 log(`bots: ${bots.list().map((bot) => bot.name).join(", ")}`);
 const live = createLiveScreen(openLiveStream);
-createBotServer({ say, bots, memory, model: MODEL.modelId, context, log, viewer: viewerLink, live, push, ...(approvals === undefined ? {} : { approvals }) }).listen(PORT, "127.0.0.1", () =>
+const botMemory = (id: number) => {
+	const bot = bots.list().find((b) => b.id === id);
+	return bot === undefined ? undefined : memories.of(bot);
+};
+createBotServer({ say, bots, memory, botMemory, model: MODEL.modelId, context, log, viewer: viewerLink, live, push, ...(approvals === undefined ? {} : { approvals }) }).listen(PORT, "127.0.0.1", () =>
 	log(`listening: web app http://127.0.0.1:${PORT}/ · chat POST http://127.0.0.1:${PORT}/say`),
 );
 
