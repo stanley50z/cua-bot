@@ -13,7 +13,7 @@ import type { Message } from "@earendil-works/pi-ai";
 import { createModels } from "@earendil-works/pi-ai/models";
 import { fauxAssistantMessage, fauxProvider, fauxText, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
 import { createRegistry, Harness, MemoryStorage } from "@earendil-works/pi-durable";
-import { botMemories, type BotView, createBots, createBotsExtension } from "../src/bots.ts";
+import { botMemories, type BotView, createBots, createBotsExtension, defaultAvatar, readBots } from "../src/bots.ts";
 import type { ChatItem } from "../src/chat.ts";
 import { bindRoutines, createRoutinesExtension, deleteRoutine, removeBotRoutines, type RoutineView, syncRoutines } from "../src/routines.ts";
 import { createBotServer } from "../src/web.ts";
@@ -253,6 +253,51 @@ test("each bot's folder holds its agent file and memory, and follows it through 
 
 		assert.equal((await send(bot.base, "DELETE", `/api/bots/${scout.id}`)).status, 204);
 		assert.equal(existsSync(join(bot.dir, "travel")), false, "a deleted bot's folder goes with it");
+	} finally {
+		await bot.close();
+	}
+});
+
+test("each bot has an avatar: a default from its id until the owner picks one, validated and kept in the bot list", { timeout: 20_000 }, async () => {
+	const bot = await open();
+	try {
+		const listed = async () => (await (await fetch(`${bot.base}/api/bots`)).json()).bots as BotView[];
+		const [main] = await listed();
+		assert.deepEqual(main?.avatar, defaultAvatar(bot.bots.main(), true));
+		assert.equal(main?.avatar.color, "black", "the main bot is black by default");
+		for (let id = 0; id < 40; id++) {
+			assert.deepEqual(defaultAvatar(id, false), defaultAvatar(id, false), "the default never changes between reloads");
+			assert.notEqual(defaultAvatar(id, false).color, "black", "black stays the main bot's");
+		}
+
+		const plain = (await (await send(bot.base, "POST", "/api/bots", { name: "Scout" })).json()) as BotView;
+		assert.deepEqual(plain.avatar, defaultAvatar(plain.id, false), "a bot made without one gets the default");
+		assert.deepEqual(plain.defaultAvatar, plain.avatar);
+
+		const picked = await send(bot.base, "POST", "/api/bots", { name: "Travel", avatar: { shape: "cloud", color: "green" } });
+		assert.equal(picked.status, 201);
+		const travel = (await picked.json()) as BotView;
+		assert.deepEqual(travel.avatar, { shape: "cloud", color: "green" });
+
+		const badShape = await send(bot.base, "POST", "/api/bots", { name: "Odd", avatar: { shape: "<svg>", color: "green" } });
+		assert.equal(badShape.status, 400);
+		assert.match((await badShape.json()).error, /No avatar shape is named <svg>/);
+		assert.equal((await send(bot.base, "PUT", `/api/bots/${travel.id}`, { name: "Travel", avatar: { shape: "cloud", color: "#00ff00" } })).status, 400);
+		assert.equal((await send(bot.base, "PUT", `/api/bots/${travel.id}`, { name: "Travel", avatar: "cloud" })).status, 400);
+		assert.ok(!(await listed()).some((b) => b.name === "Odd"), "a bad avatar adds no bot");
+
+		assert.equal((await send(bot.base, "PUT", `/api/bots/${travel.id}`, { name: "Travel", avatar: { shape: "pumpkin", color: "orange" } })).status, 200);
+		assert.deepEqual(
+			(await readBots(bot.harness, context)).find((b) => b.id === travel.id)?.avatar,
+			{ shape: "pumpkin", color: "orange" },
+			"the pick is saved in the bot list doc",
+		);
+		await send(bot.base, "PUT", `/api/bots/${travel.id}`, { name: "Trips", instructions: "Plan trips." });
+		assert.deepEqual((await listed()).find((b) => b.id === travel.id)?.avatar, { shape: "pumpkin", color: "orange" }, "an edit without an avatar keeps it");
+
+		const reset = await send(bot.base, "PUT", `/api/bots/${travel.id}`, { name: "Trips", avatar: null });
+		assert.deepEqual(((await reset.json()) as BotView).avatar, defaultAvatar(travel.id, false), "null goes back to the default");
+		assert.deepEqual((await listed()).find((b) => b.id === travel.id)?.avatar, defaultAvatar(travel.id, false));
 	} finally {
 		await bot.close();
 	}

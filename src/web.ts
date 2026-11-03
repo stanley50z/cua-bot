@@ -193,7 +193,12 @@ function botInput(body: unknown): BotInput {
 	const record = body !== null && typeof body === "object" && !Array.isArray(body) ? (body as Record<string, unknown>) : {};
 	const instructions = record.instructions ?? "";
 	if (typeof record.name !== "string" || typeof instructions !== "string") throw new HttpError(400, "name and instructions must be strings");
-	return { name: record.name, instructions };
+	// The ids themselves are checked by bots.ts against its lists.
+	const avatar = record.avatar;
+	if (avatar === undefined || avatar === null) return { name: record.name, instructions, ...(avatar === null ? { avatar } : {}) };
+	const { shape, color } = typeof avatar === "object" ? (avatar as Record<string, unknown>) : {};
+	if (typeof shape !== "string" || typeof color !== "string") throw new HttpError(400, "avatar must be {shape, color} or null");
+	return { name: record.name, instructions, avatar: { shape, color } };
 }
 
 // The bot list: every bot with its newest message, and adding, editing, or deleting one.

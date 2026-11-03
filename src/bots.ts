@@ -38,8 +38,40 @@ const MESSAGE_MAX = 8000;
 const SEND_LIMIT = 20;
 const HOUR_MS = 60 * 60 * 1000;
 
+/** The avatar characters the web app draws, by id; src/app.html holds each shape's drawing and each color's value. */
+export const AVATAR_SHAPES = [
+	"blob",
+	"pebble",
+	"squircle",
+	"tablet",
+	"wedge",
+	"hex",
+	"cloud",
+	"teardrop",
+	"flower",
+	"star",
+	"ghost",
+	"gumdrop",
+	"gem",
+	"pumpkin",
+] as const;
+export const AVATAR_COLORS = ["black", "brown", "red", "orange", "yellow", "green", "cyan", "blue", "violet", "magenta", "gray"] as const;
+export type Avatar = { shape: (typeof AVATAR_SHAPES)[number]; color: (typeof AVATAR_COLORS)[number] };
+
+/** A bot's avatar until the owner picks one. It comes from the id, so it never changes between reloads; the main bot's is black. */
+export function defaultAvatar(id: number, main: boolean): Avatar {
+	// Knuth's multiplicative hash, so neighbouring ids get unrelated shapes and colors.
+	const hash = Math.imul(id + 1, 2654435761) >>> 0;
+	const colors = AVATAR_COLORS.filter((color) => color !== "black");
+	return {
+		shape: AVATAR_SHAPES[hash % AVATAR_SHAPES.length] ?? "blob",
+		color: main ? "black" : (colors[(hash >>> 8) % colors.length] ?? "blue"),
+	};
+}
+
 // Instructions live in the bot's agent file; records from before agent files still carry an ignored `instructions`.
-type BotRecord = { name: string; createdAt: number };
+// `avatar` is absent until the owner picks one.
+type BotRecord = { name: string; createdAt: number; avatar?: Avatar };
 type BotsState = { main?: number; bots: { [conversationId: string]: BotRecord } };
 
 const BotsDoc = defineDoc<BotsState>({
@@ -50,10 +82,17 @@ const BotsDoc = defineDoc<BotsState>({
 	checkpointWhen: () => false,
 });
 
-type BotEntry = { id: number; name: string; main: boolean; createdAt: number };
+/** `avatar` is the one to draw: the owner's pick, else `defaultAvatar`, which the web app's Reset goes back to. */
+type BotEntry = { id: number; name: string; main: boolean; createdAt: number; avatar: Avatar; defaultAvatar: Avatar };
 /** `folder` is the bot's folder and `file` its agent file, as paths from the project root, for the web app. */
 export type Bot = BotEntry & { instructions: string; folder: string; file: string };
-export type BotInput = { name: string; instructions: string };
+/** `avatar` is ids to validate; an edit without one keeps the bot's avatar, and null goes back to the default. */
+export type BotInput = { name: string; instructions: string; avatar?: { shape: string; color: string } | null };
+
+const entryOf = (id: number, record: BotRecord, main: boolean): BotEntry => {
+	const fallback = defaultAvatar(id, main);
+	return { id, name: record.name, createdAt: record.createdAt, main, avatar: record.avatar ?? fallback, defaultAvatar: fallback };
+};
 
 export class BotError extends Error {
 	readonly status: 400 | 404;
@@ -65,7 +104,7 @@ export class BotError extends Error {
 
 const botsOf = (state: Readonly<BotsState> | null | undefined): BotEntry[] =>
 	Object.entries(state?.bots ?? {})
-		.map(([id, record]) => ({ id: Number(id), name: record.name, createdAt: record.createdAt, main: Number(id) === state?.main }))
+		.map(([id, record]) => entryOf(Number(id), record, Number(id) === state?.main))
 		.sort((a, b) => Number(b.main) - Number(a.main) || a.createdAt - b.createdAt);
 
 /** Every bot, the main bot first. Used by src/routines.ts, which keeps one routine file per bot. */
@@ -135,7 +174,19 @@ export function botMemories(dir = DEFAULT_BOTS_DIR) {
 	};
 }
 
-function validInput(input: BotInput, others: BotEntry[]): BotInput {
+// The ids checked against the lists above; undefined and null pass through for update() to keep or clear.
+function validAvatar(avatar: BotInput["avatar"]): Avatar | null | undefined {
+	if (avatar === undefined || avatar === null) return avatar;
+	const shape = AVATAR_SHAPES.find((id) => id === avatar.shape);
+	if (shape === undefined) throw new BotError(400, `No avatar shape is named ${avatar.shape}. Shapes: ${AVATAR_SHAPES.join(", ")}.`);
+	const color = AVATAR_COLORS.find((id) => id === avatar.color);
+	if (color === undefined) throw new BotError(400, `No avatar color is named ${avatar.color}. Colors: ${AVATAR_COLORS.join(", ")}.`);
+	return { shape, color };
+}
+
+type ValidInput = { name: string; instructions: string; avatar: Avatar | null | undefined };
+
+function validInput(input: BotInput, others: BotEntry[]): ValidInput {
 	const name = input.name.trim().replace(/\s+/g, " ");
 	const instructions = input.instructions.trim();
 	if (name === "") throw new BotError(400, "A bot needs a name.");
@@ -145,7 +196,7 @@ function validInput(input: BotInput, others: BotEntry[]): BotInput {
 	const slug = slugOf(name);
 	const clash = others.find((bot) => slug !== "" && slugOf(bot.name) === slug);
 	if (clash !== undefined) throw new BotError(400, `${name} would share a folder with ${clash.name}; pick another name.`);
-	return { name, instructions };
+	return { name, instructions, avatar: validAvatar(input.avatar) };
 }
 
 type Commit = <T>(run: (tx: Tx) => Promise<T>) => Promise<T>;
@@ -158,8 +209,9 @@ async function createBot(commit: Commit, dir: string, input: BotInput, agent: Ag
 		const valid = validInput(input, botsOf(doc));
 		const { id } = await tx.createConversation({ ownership: { kind: "ownerless" } });
 		await configure(tx, id, agent);
-		doc.bots[String(id)] = { name: valid.name, createdAt: now };
-		return { id: Number(id), ...valid, main: false, createdAt: now };
+		const record: BotRecord = { name: valid.name, createdAt: now, ...(valid.avatar == null ? {} : { avatar: valid.avatar }) };
+		doc.bots[String(id)] = record;
+		return { ...entryOf(Number(id), record, false), instructions: valid.instructions };
 	});
 	await writeAgentFile(dir, bot, bot.instructions);
 	return { ...bot, ...pathsOf(dir, bot) };
@@ -423,13 +475,15 @@ export async function createBots(deps: {
 				const record = doc.bots[String(id)];
 				if (record === undefined) throw new BotError(404, "No such bot.");
 				const valid = validInput(input, botsOf(doc).filter((b) => b.id !== id));
-				const before = { id, name: record.name, main: id === doc.main, createdAt: record.createdAt };
+				const before = entryOf(id, record, id === doc.main);
 				const moved = botFolder(before) !== botFolder({ id, name: valid.name });
 				if (moved && existsSync(join(dir, botFolder({ id, name: valid.name })))) {
 					throw new BotError(400, `${basename(dir)}/${botFolder({ id, name: valid.name })} already exists; move it away or pick another name.`);
 				}
 				record.name = valid.name;
-				return { bot: { ...before, ...valid }, before };
+				if (valid.avatar === null) delete record.avatar;
+				else if (valid.avatar !== undefined) record.avatar = valid.avatar;
+				return { bot: { ...entryOf(id, record, before.main), instructions: valid.instructions }, before };
 			}, context);
 			// The folder, with its routines and memory, follows a rename.
 			const from = join(dir, botFolder(before));
