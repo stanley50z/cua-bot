@@ -7,7 +7,7 @@
 <!--
  The cua-bot web app (Workbench layout), served by src/web.ts at GET /. One self-contained document:
  inline CSS and JS, no dependencies, works offline. Talks to /api/bots (the bot list and its edits),
- /api/chat?bot=<id> (one bot's history, send, stop),
+ /api/chat?bot=<id> (one bot's history, send, react, stop),
  /api/chat/events (server-sent live state), /api/chat/computer, /api/computer/control, /api/push, /api/routines,
  and /shots/. Registers /sw.js for Web Push once the owner turns notifications on.
  Every server string is rendered with textContent or built DOM nodes, never parsed as HTML.
@@ -69,7 +69,8 @@ code, pre, .mono { font-family: "Cascadia Code", Consolas, monospace; }
 
 /* messages between bots */
 .m.peer { align-self: flex-start; }
-.m.peer .bubble { background: var(--bg); border: 1px solid var(--line); border-radius: 12px 12px 12px 3px; padding: 8px 13px; overflow-wrap: anywhere; }
+/* Every bot's text sits in a bubble: replies, the reply still streaming, and messages from other bots. */
+.bubble { position: relative; width: fit-content; max-width: 100%; background: var(--bg); border: 1px solid var(--line); border-radius: 12px 12px 12px 3px; padding: 8px 13px; overflow-wrap: anywhere; }
 .m.peer p, .m.peer ul, .m.peer ol, .relay p, .relay ul, .relay ol { margin: 0 0 8px; }
 .m.peer ul, .m.peer ol, .relay ul, .relay ol { padding-left: 20px; }
 .m.peer .text > :last-child, .relay .text > :last-child { margin-bottom: 0; }
@@ -86,7 +87,8 @@ dialog .row .btn.danger { margin-right: auto; }
 .empty { margin: auto; text-align: center; color: var(--muted); max-width: 44ch; }
 .empty b { display: block; color: var(--ink); font: 600 16px "Bahnschrift", sans-serif; margin-bottom: 4px; }
 .m { max-width: 82%; }
-.m.me { align-self: flex-end; background: var(--me); border-radius: 12px 12px 3px 12px; padding: 8px 13px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.m.me { position: relative; align-self: flex-end; background: var(--me); border-radius: 12px 12px 3px 12px; padding: 8px 13px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.m.me .quote { border-left: 3px solid #9FB2C8; padding-left: 9px; margin-bottom: 6px; color: var(--muted); display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 .m.me.queued { opacity: .65; }
 .m.me .note { display: block; font-size: 11.5px; color: var(--muted); margin-top: 2px; }
 .m.bot { overflow-wrap: anywhere; }
@@ -95,9 +97,26 @@ dialog .row .btn.danger { margin-right: auto; }
 .m.bot ul, .m.bot ol { padding-left: 20px; }
 .m.bot code { background: var(--bg); border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; font-size: 12.5px; }
 .m.bot a { color: var(--accent); }
+.bubble code { background: #fff; border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; font-size: 12.5px; }
 .m.bot .stopped { color: var(--muted); font-style: italic; }
 .m.bot .error { color: var(--bad); background: var(--bad-bg); border-radius: 6px; padding: 6px 10px; }
-.m.bot .partial { color: var(--muted); }
+.m.bot > * + .stopped, .m.bot > * + .error { margin-top: 6px; }
+/* hover toolbar beside a message: React (bot replies only) and Reply */
+.acts { position: absolute; left: 100%; bottom: 0; padding-left: 6px; opacity: 0; user-select: none; z-index: 2; white-space: normal; }
+.m.me .acts { left: auto; right: 100%; padding: 0 6px 0 0; }
+.bubble:hover > .acts, .m.me:hover > .acts, .acts:focus-within, .acts.open { opacity: 1; }
+.acts .tray { display: flex; gap: 2px; padding: 2px; background: #fff; border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 2px 8px rgba(27,33,41,.08); }
+.acts button { width: 28px; height: 28px; border: 0; background: transparent; border-radius: 6px; cursor: pointer; color: var(--muted); display: grid; place-items: center; }
+.acts button:hover, .acts button[aria-expanded="true"] { background: var(--bg); color: var(--ink); }
+.acts svg { width: 16px; height: 16px; }
+.picker { position: absolute; left: 6px; bottom: calc(100% + 4px); display: flex; gap: 2px; padding: 4px; background: #fff; border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 6px 20px rgba(27,33,41,.14); }
+.acts .picker button { width: 34px; height: 34px; font-size: 19px; color: inherit; }
+.acts .picker button[aria-pressed="true"] { background: var(--me); }
+.reacts { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+.reacts button { height: 24px; border: 1px solid #9FB2C8; background: var(--me); border-radius: 999px; padding: 0 9px; font-size: 14px; cursor: pointer; }
+.reacts button:hover { border-color: var(--accent); }
+.add-quote { position: fixed; z-index: 10; transform: translate(-50%, calc(-100% - 6px)); display: flex; align-items: center; gap: 10px; border: 0; background: var(--ink); color: #fff; border-radius: 8px; padding: 5px 10px; font-size: 12.5px; cursor: pointer; box-shadow: 0 4px 14px rgba(27,33,41,.22); white-space: nowrap; }
+.add-quote kbd { font: inherit; font-size: 11.5px; color: #A9B3C0; }
 .routine { align-self: stretch; border-left: 3px solid var(--accent); padding: 3px 0 3px 12px; font-size: 13px; color: var(--muted); }
 .routine b { color: var(--ink); font-weight: 600; }
 .marker { align-self: center; font-size: 12px; color: var(--muted); font-style: italic; }
@@ -111,7 +130,13 @@ dialog .row .btn.danger { margin-right: auto; }
 .thumbs { display: flex; gap: 8px; flex-wrap: wrap; margin: 0 0 8px; }
 .thumbs a { display: block; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
 .thumbs img { display: block; height: 110px; width: auto; }
-.composer { flex: none; margin: 8px 22px 18px; border: 1px solid var(--line); border-radius: 12px; display: flex; align-items: flex-end; gap: 8px; padding: 8px 8px 8px 14px; background: #fff; }
+.composer { flex: none; margin: 8px 22px 18px; border: 1px solid var(--line); border-radius: 12px; display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px; padding: 8px 8px 8px 14px; background: #fff; }
+.quotes { flex-basis: 100%; display: flex; flex-direction: column; gap: 6px; padding-top: 2px; }
+.quotes .quote { display: grid; grid-template-columns: minmax(0, 1fr) 24px; gap: 8px; align-items: start; border-left: 3px solid #9FB2C8; padding-left: 9px; font-size: 13px; color: var(--muted); }
+.quotes .quote span { white-space: pre-wrap; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.quotes .quote button { width: 24px; height: 24px; border: 0; background: transparent; border-radius: 6px; cursor: pointer; color: var(--muted); display: grid; place-items: center; }
+.quotes .quote button:hover { background: var(--bg); color: var(--ink); }
+.quotes svg { width: 13px; height: 13px; }
 .composer:focus-within { border-color: #9FB2C8; }
 .composer textarea { flex: 1; border: 0; resize: none; font: inherit; min-height: 44px; max-height: 200px; outline: none; color: var(--ink); background: transparent; padding: 4px 0; }
 .icon { width: 36px; height: 36px; flex: none; border-radius: 9px; border: 1px solid var(--line); background: #fff; cursor: pointer; display: grid; place-items: center; }
@@ -239,7 +264,9 @@ dialog .row { display: flex; gap: 8px; justify-content: flex-end; margin-top: 18
  <symbol id="i-send" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M6 11l6-6 6 6"/></symbol>
  <symbol id="i-stop" viewBox="0 0 24 24" fill="currentColor"><rect x="7" y="7" width="10" height="10" rx="1.5"/></symbol>
  <symbol id="i-plus" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></symbol>
- <symbol id="i-edit" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13 7l4 4"/></symbol>
+ <symbol id="i-smile" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="8.5"/><path d="M8.5 14.2a4.2 4.2 0 0 0 7 0"/><path d="M9.2 9.6v.1M14.8 9.6v.1" stroke-width="2.4"/></symbol>
+ <symbol id="i-reply" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M10 6.5L4.5 12l5.5 5.5"/><path d="M4.5 12H14a5.5 5.5 0 0 1 5.5 5.5v1"/></symbol>
+ <symbol id="i-edit"viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13 7l4 4"/></symbol>
 </svg>
 
 <div class="app">
@@ -261,6 +288,7 @@ dialog .row { display: flex; gap: 8px; justify-content: flex-end; margin-top: 18
     <div class="banner" id="chat-error" role="alert" hidden></div>
     <div class="msgs" id="msgs" aria-live="polite"></div>
     <form class="composer" id="composer">
+     <div class="quotes" id="quotes" aria-label="Quoted in your next message" hidden></div>
      <textarea id="input" rows="1" aria-label="Message cua-bot" placeholder="Message cua-bot"></textarea>
      <button type="button" class="icon" id="stop" aria-label="Stop the current reply" title="Stop the current reply" hidden><svg><use href="#i-stop"/></svg></button>
      <button type="submit" class="icon primary" id="send" aria-label="Send" title="Send (Enter)"><svg><use href="#i-send"/></svg></button>
@@ -305,6 +333,8 @@ dialog .row { display: flex; gap: 8px; justify-content: flex-end; margin-top: 18
   <div class="steps"><h2 id="steps-h">Steps</h2><ol id="steps"></ol></div>
  </aside>
 </div>
+
+<button type="button" class="add-quote" id="add-quote" hidden>Add to chat <kbd>Ctrl+L</kbd></button>
 
 <dialog id="routine-dialog" aria-labelledby="form-h">
  <form id="routine-form" method="dialog">
@@ -436,8 +466,9 @@ function markdown(text) {
 }
 
 /* ---------- chat state ---------- */
-// `bot` is the id of the bot whose chat is open; `bots` is the list from /api/bots.
-const state = { bot: null, bots: [], items: [], ids: new Set(), before: null, live: { busy: false, partial: "", tools: [] }, queued: [], open: new Set(), computer: { steps: [] }, approvals: [] };
+// `bot` is the id of the bot whose chat is open; `bots` is the list from /api/bots. `picking` is the reply whose
+// reaction picker is open; `reacting` holds reactions sent but not yet back as items, by "<reply id>:<emoji>".
+const state = { bot: null, bots: [], items: [], ids: new Set(), before: null, live: { busy: false, partial: "", tools: [] }, queued: [], open: new Set(), computer: { steps: [] }, approvals: [], picking: null, reacting: new Map() };
 const currentBot = () => state.bots.find((b) => b.id === state.bot) || { id: state.bot, name: "cua-bot", instructions: "", main: true };
 const mainId = () => (state.bots.find((b) => b.main) || {}).id;
 const botNamed = (to) => {
@@ -500,8 +531,253 @@ function addItems(items) {
       const at = state.queued.findIndex((text) => text.trim() === item.text.trim());
       if (at >= 0) state.queued.splice(at, 1);
     }
+    if (item.kind === "reaction") {
+      const key = item.target + ":" + item.emoji;
+      if (state.reacting.get(key)?.on === item.on) state.reacting.delete(key);
+    }
   }
   state.items.sort((a, b) => a.id - b.id);
+}
+
+/* ---------- reactions ---------- */
+const QUICK_REACTIONS = [["👍", "Thumbs up"], ["👎", "Thumbs down"], ["❤️", "Heart"], ["😂", "Laughing"], ["🎉", "Party"], ["😮", "Surprised"]];
+const reactionName = (emoji) => (QUICK_REACTIONS.find(([e]) => e === emoji) || [emoji, emoji])[1];
+
+// Each reply's reactions as a Map of emoji to on/off: the reaction items in entry order (the newest wins), then the
+// ones still on their way. renderChat folds them onto their replies; the items themselves never show.
+function reactionsOf() {
+  const byReply = new Map();
+  const set = ({ target, emoji, on }) => {
+    if (!byReply.has(target)) byReply.set(target, new Map());
+    byReply.get(target).set(emoji, on);
+  };
+  for (const item of state.items) if (item.kind === "reaction") set(item);
+  for (const pending of state.reacting.values()) set(pending);
+  return byReply;
+}
+
+// Turns the owner's reaction on a reply on or off. It shows at once; POST /api/chat/react records it in the
+// transcript, where the bot reads it on its next turn and other tabs get it as a reaction item.
+async function react(target, emoji, on) {
+  const key = target + ":" + emoji;
+  state.reacting.set(key, { target, emoji, on });
+  state.picking = null;
+  renderChat();
+  try {
+    await request("POST", "/api/chat/react", { bot: state.bot, entryId: target, emoji, on });
+    showChatError("");
+  } catch (error) {
+    if (state.reacting.get(key)?.on === on) state.reacting.delete(key);
+    renderChat();
+    showChatError("Your reaction wasn't saved: " + error.message);
+  }
+}
+
+/* ---------- quoted replies ---------- */
+// Quotes for the next message, oldest first. They pile up (the same text once) until sent or removed with their ✕,
+// and stay while the owner switches bots, so a reply from one bot can be quoted to another.
+const quotes = [];
+
+function addQuote(text) {
+  const clean = text.replace(/^(?:[ \t]*\n)+/, "").trimEnd();
+  if (clean !== "" && !quotes.includes(clean)) quotes.push(clean);
+  renderQuotes();
+  $("input").focus();
+}
+
+function renderQuotes() {
+  const box = $("quotes");
+  box.textContent = "";
+  box.hidden = quotes.length === 0;
+  quotes.forEach((text, index) => {
+    const row = el("div", "quote");
+    const body = el("span", "", text);
+    body.title = text;
+    const remove = el("button");
+    remove.type = "button";
+    remove.setAttribute("aria-label", "Remove this quote");
+    remove.title = "Remove";
+    remove.append(icon("i-x"));
+    remove.addEventListener("click", () => { quotes.splice(index, 1); renderQuotes(); $("input").focus(); });
+    row.append(body, remove);
+    box.append(row);
+  });
+}
+
+// The text the bot receives: each quote as markdown blockquote lines, a blank line, then what the owner typed.
+function withQuotes(typed) {
+  const blocks = quotes.map((quote) => quote.split("\n").map((line) => (line === "" ? ">" : "> " + line)).join("\n"));
+  return [...blocks, ...(typed.trim() === "" ? [] : [typed])].join("\n\n");
+}
+
+// The owner's message split into its leading blockquotes (without their "> ") and the rest, for their bubble.
+function splitQuotes(text) {
+  const lines = text.split("\n"), quoted = [];
+  let i = 0;
+  while (i < lines.length) {
+    if (lines[i].startsWith(">")) {
+      const block = [];
+      while (i < lines.length && lines[i].startsWith(">")) block.push(lines[i++].replace(/^> ?/, ""));
+      quoted.push(block.join("\n"));
+    } else if (quoted.length > 0 && lines[i].trim() === "") i++;
+    else break;
+  }
+  return { quoted, rest: lines.slice(i).join("\n") };
+}
+
+// The owner's bubble: quote blocks first, then the text. Queued messages use it too.
+function ownMessage(text, className) {
+  const node = el("div", className);
+  const { quoted, rest } = splitQuotes(text);
+  for (const quote of quoted) { const block = el("div", "quote", quote); block.title = quote; node.append(block); }
+  if (rest !== "") node.append(rest);
+  else if (node.lastElementChild) node.lastElementChild.style.marginBottom = "0";
+  return node;
+}
+
+// The hover toolbar beside a message: Reply quotes the whole message; a bot reply also gets React, which opens the
+// quick picker. `mine` is the reply's reactions from reactionsOf().
+function messageActions(item, mine) {
+  const acts = el("div", "acts" + (state.picking === item.id ? " open" : ""));
+  const tray = el("div", "tray");
+  const button = (label, iconId, onClick) => {
+    const b = el("button");
+    b.type = "button";
+    b.setAttribute("aria-label", label);
+    b.title = label;
+    b.append(icon(iconId));
+    b.addEventListener("click", onClick);
+    tray.append(b);
+    return b;
+  };
+  if (item.kind === "assistant") {
+    const open = button("React", "i-smile", () => { state.picking = state.picking === item.id ? null : item.id; renderChat(); });
+    open.setAttribute("aria-expanded", String(state.picking === item.id));
+    if (state.picking === item.id) {
+      const picker = el("div", "picker");
+      picker.setAttribute("role", "group");
+      picker.setAttribute("aria-label", "Reactions");
+      for (const [emoji, name] of QUICK_REACTIONS) {
+        const pick = el("button", "", emoji);
+        pick.type = "button";
+        pick.title = name;
+        pick.setAttribute("aria-label", name);
+        pick.setAttribute("aria-pressed", String(mine.get(emoji) === true));
+        pick.addEventListener("click", () => react(item.id, emoji, mine.get(emoji) !== true));
+        picker.append(pick);
+      }
+      acts.append(picker);
+    }
+  }
+  button("Reply", "i-reply", () => addQuote(item.text));
+  acts.prepend(tray);
+  return acts;
+}
+
+// The pills under a reply for each reaction that is on; clicking one takes it back.
+function reactionPills(item, mine) {
+  const pills = el("div", "reacts");
+  for (const [emoji, on] of mine) {
+    if (!on) continue;
+    const pill = el("button", "", emoji);
+    pill.type = "button";
+    pill.title = "Remove your reaction";
+    pill.setAttribute("aria-label", "Remove your " + reactionName(emoji) + " reaction");
+    pill.addEventListener("click", () => react(item.id, emoji, false));
+    pills.append(pill);
+  }
+  return pills.childElementCount > 0 ? pills : null;
+}
+
+// A bubble of bot text. `key` (an item id, or "live" for the streaming reply) lets a selection inside it survive
+// re-renders and marks it as quotable; `item` adds the hover toolbar.
+function bubble(key, text, item, mine) {
+  const node = el("div", "bubble");
+  node.dataset.key = String(key);
+  node.append(markdown(text));
+  if (item) node.append(messageActions(item, mine || new Map()));
+  return node;
+}
+
+/* ---------- selections: Add to chat ---------- */
+const keyedOf = (node) => (node && (node.nodeType === 1 ? node : node.parentElement))?.closest("[data-key]") || null;
+
+// The owner's selection when it lies inside one message, with its text and box; otherwise null.
+function selectedQuote() {
+  const selection = document.getSelection();
+  if (!selection || selection.rangeCount === 0 || selection.isCollapsed) return null;
+  const root = keyedOf(selection.anchorNode);
+  if (!root || root !== keyedOf(selection.focusNode) || !$("msgs").contains(root)) return null;
+  const text = selection.toString();
+  if (text.trim() === "") return null;
+  return { root, text, rect: selection.getRangeAt(0).getBoundingClientRect() };
+}
+
+function quoteSelection() {
+  const picked = selectedQuote();
+  if (!picked) return false;
+  document.getSelection().removeAllRanges();
+  addQuote(picked.text);
+  return true;
+}
+
+// The floating Add to chat button sits above the selection once the mouse is up.
+let selecting = false;
+function placeAddQuote() {
+  const picked = selecting ? null : selectedQuote();
+  const button = $("add-quote");
+  button.hidden = !picked;
+  if (picked) {
+    button.style.left = picked.rect.left + picked.rect.width / 2 + "px";
+    button.style.top = picked.rect.top + "px";
+  }
+}
+document.addEventListener("selectionchange", placeAddQuote);
+document.addEventListener("mousedown", (event) => { if (event.target !== $("add-quote")) selecting = true; });
+document.addEventListener("mouseup", () => { selecting = false; placeAddQuote(); });
+$("msgs").addEventListener("scroll", placeAddQuote);
+// Keep the selection when the button is pressed, so its click can read it.
+$("add-quote").addEventListener("mousedown", (event) => event.preventDefault());
+$("add-quote").addEventListener("click", quoteSelection);
+document.addEventListener("keydown", (event) => {
+  if ((event.ctrlKey || event.metaKey) && !event.shiftKey && !event.altKey && event.key.toLowerCase() === "l" && selectedQuote()) {
+    event.preventDefault();
+    quoteSelection();
+  } else if (event.key === "Escape" && state.picking !== null) {
+    state.picking = null;
+    renderChat();
+  }
+});
+// A click anywhere but a toolbar closes the reaction picker.
+document.addEventListener("click", (event) => {
+  if (state.picking !== null && !event.target.closest(".acts")) { state.picking = null; renderChat(); }
+});
+
+// renderChat rebuilds the messages, which drops the selection; these keep it as text offsets in its message.
+function textOffset(root, node, offset) {
+  const range = document.createRange();
+  range.selectNodeContents(root);
+  range.setEnd(node, offset);
+  return range.toString().length;
+}
+function textPoint(root, offset) {
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+    if (offset <= node.length) return [node, offset];
+    offset -= node.length;
+  }
+  return [root, root.childNodes.length];
+}
+function keepSelection(box) {
+  const selection = document.getSelection();
+  if (!selection || selection.rangeCount === 0 || selection.isCollapsed) return null;
+  const root = keyedOf(selection.anchorNode);
+  if (!root || root !== keyedOf(selection.focusNode) || !box.contains(root)) return null;
+  return { key: root.dataset.key, anchor: textOffset(root, selection.anchorNode, selection.anchorOffset), focus: textOffset(root, selection.focusNode, selection.focusOffset) };
+}
+function restoreSelection(box, kept) {
+  const root = kept && box.querySelector(`[data-key="${kept.key}"]`);
+  if (root) document.getSelection().setBaseAndExtent(...textPoint(root, kept.anchor), ...textPoint(root, kept.focus));
 }
 
 function routineTitle(text) {
@@ -644,6 +920,7 @@ function renderChat() {
   // Re-rendering detaches the card being typed in; put focus and the caret back afterwards.
   const active = box.contains(document.activeElement) ? document.activeElement : null;
   const caret = active && typeof active.selectionStart === "number" ? [active.selectionStart, active.selectionEnd] : null;
+  const selection = keepSelection(box);
   box.textContent = "";
   if (state.before) {
     const more = el("button", "more", "Show earlier messages");
@@ -654,8 +931,9 @@ function renderChat() {
   const results = new Map();
   for (const item of state.items) if (item.kind === "tool") results.set(item.callId, item);
   const running = new Map(state.live.tools.map((tool) => [tool.callId, tool]));
+  const reactions = reactionsOf();
   let day = "";
-  const visible = state.items.filter((item) => item.kind !== "tool" && item.kind !== "approval");
+  const visible = state.items.filter((item) => item.kind !== "tool" && item.kind !== "approval" && item.kind !== "reaction");
   if (visible.length === 0 && !state.live.busy && state.queued.length === 0) {
     const bot = currentBot();
     const empty = el("div", "empty");
@@ -670,14 +948,16 @@ function renderChat() {
       const label = dayLabel(item.at);
       if (label !== day) { day = label; box.append(el("div", "day", label)); }
     }
-    if (item.kind === "user") box.append(el("div", "m me", item.text));
-    else if (item.kind === "bot") {
+    if (item.kind === "user") {
+      const node = ownMessage(item.text, "m me");
+      node.dataset.key = String(item.id);
+      node.append(messageActions(item));
+      box.append(node);
+    } else if (item.kind === "bot") {
       const node = el("div", "m peer");
-      const bubble = el("div", "bubble");
-      bubble.append(markdown(item.text));
       const from = el("div", "from");
       from.append("Message from ", avatar(state.bots.find((b) => b.id === item.from) || { id: item.from, name: item.name }, true), item.name);
-      node.append(bubble, from);
+      node.append(bubble(item.id, item.text, item), from);
       box.append(node);
     } else if (item.kind === "routine") {
       const line = el("div", "routine");
@@ -685,7 +965,7 @@ function renderChat() {
       line.title = item.text;
       box.append(line);
     } else if (item.kind === "marker") box.append(el("div", "marker", item.text));
-    else if (item.kind === "assistant") box.append(renderReply(item, results, running));
+    else if (item.kind === "assistant") box.append(renderReply(item, results, running, reactions.get(item.id) || new Map()));
   }
   // Waiting cards whose reply isn't loaded (older history, or a turn still streaming) go last.
   const shown = new Set(visible.flatMap((item) => (item.kind === "assistant" ? item.tools.map((t) => t.id) : [])));
@@ -697,9 +977,9 @@ function renderChat() {
     }
   }
   for (const text of state.queued) {
-    const bubble = el("div", "m me queued", text);
-    bubble.append(el("span", "note", state.live.busy ? "Queued until the current reply finishes" : "Sending…"));
-    box.append(bubble);
+    const node = ownMessage(text, "m me queued");
+    node.append(el("span", "note", state.live.busy ? "Queued until the current reply finishes" : "Sending…"));
+    box.append(node);
   }
   if (state.live.busy) {
     const done = new Set(state.items.filter((i) => i.kind === "assistant").flatMap((i) => i.tools.map((t) => t.id)));
@@ -711,7 +991,8 @@ function renderChat() {
         for (const tool of pending) chips.append(el("span", "chip run", toolLabel({ name: tool.name, args: {} })));
         live.append(chips);
       }
-      if (state.live.partial) live.append(markdown(state.live.partial));
+      // The same bubble the finished reply gets, so it keeps its shape when it lands.
+      if (state.live.partial) live.append(bubble("live", state.live.partial));
       box.append(live);
     }
   }
@@ -719,10 +1000,13 @@ function renderChat() {
     active.focus({ preventScroll: true });
     if (caret) active.setSelectionRange(caret[0], caret[1]);
   }
+  restoreSelection(box, selection);
   if (nearBottom) box.scrollTop = box.scrollHeight;
 }
 
-function renderReply(item, results, running) {
+// One assistant entry: tool chips and their results above, relays to other bots, the text bubble with its reaction
+// pills, then approval cards and any error. `mine` is its reactions from reactionsOf().
+function renderReply(item, results, running, mine) {
   const node = el("div", "m bot");
   if (item.tools.length > 0) {
     const chips = el("div", "chips");
@@ -768,7 +1052,11 @@ function renderReply(item, results, running) {
       node.append(relay);
     }
   }
-  if (item.text) node.append(markdown(item.text));
+  if (item.text) {
+    node.append(bubble(item.id, item.text, item, mine));
+    const pills = reactionPills(item, mine);
+    if (pills) node.append(pills);
+  }
   for (const call of item.tools) {
     const approval = approvalFor(call.id);
     if (approval) node.append(approvalCard(approval));
@@ -962,7 +1250,8 @@ function renderBots() {
     who.append(el("span", "name", bot.name));
     if (bot.busy) { const dot = el("span", "busy"); dot.title = "Working"; who.append(dot); }
     const text = el("span");
-    const peek = bot.preview ? bot.preview.text.replace(/\*\*|`/g, "").replace(/\s+/g, " ") : bot.main ? "Your main bot" : "No messages yet";
+    const said = bot.preview && (splitQuotes(bot.preview.text).rest || bot.preview.text);
+    const peek = said ? said.replace(/\*\*|`/g, "").replace(/\s+/g, " ") : bot.main ? "Your main bot" : "No messages yet";
     text.append(who, el("span", "peek", peek));
     row.append(avatar(bot), text);
     row.addEventListener("click", () => selectBot(bot.id));
@@ -985,7 +1274,7 @@ async function selectBot(id) {
   history.replaceState(null, "", id === mainId() ? location.pathname : "#bot=" + id);
   renderBots();
   if (!switched && source) return;
-  Object.assign(state, { items: [], ids: new Set(), before: null, live: { busy: false, partial: "", tools: [] }, queued: [], open: new Set(), computer: { steps: [] } });
+  Object.assign(state, { items: [], ids: new Set(), before: null, live: { busy: false, partial: "", tools: [] }, queued: [], open: new Set(), computer: { steps: [] }, picking: null, reacting: new Map() });
   showChatError("");
   renderChat();
   renderComputer();
@@ -1039,10 +1328,13 @@ $("b-delete").addEventListener("click", async () => {
 $("composer").addEventListener("submit", async (event) => {
   event.preventDefault();
   const input = $("input");
-  const text = input.value;
-  if (text.trim() === "") return;
+  const typed = input.value;
+  if (typed.trim() === "" && quotes.length === 0) return;
+  const text = withQuotes(typed);
+  const sent = quotes.splice(0);
   input.value = "";
   grow();
+  renderQuotes();
   state.queued.push(text);
   renderChat();
   $("msgs").scrollTop = $("msgs").scrollHeight;
@@ -1051,8 +1343,10 @@ $("composer").addEventListener("submit", async (event) => {
     showChatError("");
   } catch (error) {
     state.queued.splice(state.queued.indexOf(text), 1);
-    input.value = text;
+    input.value = typed;
+    quotes.unshift(...sent);
     grow();
+    renderQuotes();
     renderChat();
     showChatError("Your message was not sent: " + error.message);
   }

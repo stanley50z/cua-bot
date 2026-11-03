@@ -1,5 +1,5 @@
 // The web chat API: POST /api/chat, the /api/chat/events stream, GET /api/chat history paging,
-// stop, and /shots/ file serving. Exercised over real HTTP against createBotServer with a faux model.
+// emoji reactions, stop, and /shots/ file serving. Exercised over real HTTP against createBotServer with a faux model.
 // Run from the repo root:  node --test test/chat.test.ts
 import assert from "node:assert/strict";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
@@ -10,10 +10,10 @@ import { test } from "node:test";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { Type } from "@earendil-works/pi-ai";
 import { createModels } from "@earendil-works/pi-ai/models";
-import { fauxAssistantMessage, fauxProvider, fauxText, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
+import { type FauxResponseStep, fauxAssistantMessage, fauxProvider, fauxText, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
 import { createRegistry, defineExtension, defineTool, Harness, MemoryStorage } from "@earendil-works/pi-durable";
 import { createBots } from "../src/bots.ts";
-import { BOT_MESSAGE, type ChatEvent, type ChatItem, toChatItem } from "../src/chat.ts";
+import { BOT_MESSAGE, type ChatEvent, type ChatItem, REACTION, reactionText, toChatItem } from "../src/chat.ts";
 import { createBotServer } from "../src/web.ts";
 
 const context = BACKGROUND_CONTEXT;
@@ -25,16 +25,18 @@ const lookTool = defineTool({
 	execute: async () => ({ output: [{ type: "text" as const, text: "Saw the desktop. Screenshot: data/shots/2026-10-31T10-00-00.png" }] }),
 });
 
-async function open() {
+const SCRIPT: FauxResponseStep[] = [
+	fauxAssistantMessage([fauxText("Hello there.")]),
+	fauxAssistantMessage([fauxToolCall("look", {}, { id: "call-1" })], { stopReason: "toolUse" }),
+	fauxAssistantMessage([fauxText("Your desktop is tidy.")]),
+];
+
+async function open(responses = SCRIPT) {
 	const dir = await mkdtemp(join(tmpdir(), "cua-bot-chat-"));
 	const faux = fauxProvider();
 	const models = createModels();
 	models.setProvider(faux.provider);
-	faux.setResponses([
-		fauxAssistantMessage([fauxText("Hello there.")]),
-		fauxAssistantMessage([fauxToolCall("look", {}, { id: "call-1" })], { stopReason: "toolUse" }),
-		fauxAssistantMessage([fauxText("Your desktop is tidy.")]),
-	]);
+	faux.setResponses(responses);
 	const registry = createRegistry();
 	registry.install(defineExtension({ name: "test", tools: [lookTool] }));
 	const harness = await Harness.open(new MemoryStorage(), { models, registry }, context);
@@ -49,6 +51,7 @@ async function open() {
 	return {
 		dir,
 		base,
+		faux,
 		harness,
 		root,
 		bots,
@@ -196,4 +199,75 @@ test("routine firings and context markers are labeled for the chat", () => {
 		model: [{ role: "user", content: "[bot] Message from Job Search (id 7)…", timestamp: 9 }],
 	});
 	assert.deepEqual(message, { id: 4, kind: "bot", from: 7, name: "Job Search", text: "Found 3 roles.", at: 9 });
+});
+
+test("a reaction lands on its reply without a turn, and the bot reads it on the next one", async () => {
+	const BOOKED = "Booked the 9:00 train.\nSeat 14A.";
+	let seen: string[] = [];
+	const bot = await open([
+		fauxAssistantMessage([fauxText(BOOKED)]),
+		(context) => {
+			seen = context.messages.flatMap((message) =>
+				message.role === "user" ? [typeof message.content === "string" ? message.content : message.content.map((part) => (part.type === "text" ? part.text : "")).join("")] : [],
+			);
+			return fauxAssistantMessage([fauxText("Glad it works.")]);
+		},
+	]);
+	try {
+		const first = await collect(bot.base, settled(["user", "assistant"]), async () => {
+			await post(bot.base, "/api/chat", { text: "book it" });
+		});
+		const [user, reply] = items(first);
+		assert.ok(user !== undefined && reply?.kind === "assistant");
+
+		const reacted = await collect(bot.base, (events) => items(events).some((item) => item.kind === "reaction"), async () => {
+			const response = await post(bot.base, "/api/chat/react", { entryId: reply.id, emoji: "👍", on: true });
+			assert.equal(response.status, 202);
+		});
+		const reaction = items(reacted).find((item) => item.kind === "reaction");
+		assert.deepEqual(reaction && { ...reaction, id: 0, at: 0 }, { id: 0, kind: "reaction", target: reply.id, emoji: "👍", on: true, at: 0 });
+		assert.equal((await post(bot.base, "/api/chat/react", { entryId: reply.id, emoji: "👍", on: false })).status, 202);
+		assert.equal(bot.faux.state.callCount, 1, "reacting starts no model call");
+
+		const history = (await (await fetch(`${bot.base}/api/chat`)).json()).items as ChatItem[];
+		assert.deepEqual(
+			history.flatMap((item) => (item.kind === "reaction" ? [[item.target, item.emoji, item.on]] : [])),
+			[
+				[reply.id, "👍", true],
+				[reply.id, "👍", false],
+			],
+			"taking it back is a second entry, newest wins",
+		);
+
+		await collect(bot.base, settled(["user", "assistant"]), async () => {
+			await post(bot.base, "/api/chat", { text: "thanks" });
+		});
+		assert.deepEqual(seen, [
+			"book it",
+			reactionText("👍", true, BOOKED),
+			reactionText("👍", false, BOOKED),
+			"thanks",
+		]);
+		assert.match(seen[1] ?? "", /^\[The owner reacted 👍 to your message: "Booked the 9:00 train\. Seat 14A\."\./);
+
+		assert.equal((await post(bot.base, "/api/chat/react", { entryId: user.id, emoji: "👍", on: true })).status, 404, "only replies take reactions");
+		assert.equal((await post(bot.base, "/api/chat/react", { entryId: reply.id, emoji: "ok", on: true })).status, 400);
+		assert.equal((await post(bot.base, "/api/chat/react", { entryId: reply.id, emoji: "❤️" })).status, 400);
+		assert.equal((await post(bot.base, "/api/chat/react", { entryId: "1", emoji: "❤️", on: true })).status, 400);
+	} finally {
+		await bot.close();
+	}
+});
+
+test("reaction entries become reaction items, and a long reply is quoted short", () => {
+	const item = toChatItem({
+		conversationId: 0 as never,
+		id: 12 as never,
+		kind: REACTION,
+		data: { target: 10, emoji: "🎉", on: false },
+		model: [{ role: "user", content: "[The owner took back their 🎉 reaction…]", timestamp: 7 }],
+	});
+	assert.deepEqual(item, { id: 12, kind: "reaction", target: 10, emoji: "🎉", on: false, at: 7 });
+	const note = reactionText("😂", true, "word ".repeat(40));
+	assert.match(note, /: "(word ){15}word…"\. You don't need to reply/);
 });

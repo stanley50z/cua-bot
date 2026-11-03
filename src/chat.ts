@@ -1,6 +1,7 @@
 // Owner chat over one bot's conversation, for the web app in src/web.ts.
 // src/bots.ts calls createChat({ harness, conversation, context, computer }) once per bot. The server uses history() for
-// pages of past messages, send()/stop() for input, computer() for the computer pane, and subscribe()
+// pages of past messages, send()/stop() for input, react() for the owner's emoji reactions (REACTION entries),
+// computer() for the computer pane, and subscribe()
 // for live updates: the streaming partial reply, running tool calls, every new transcript entry, and
 // computer pane snapshots while computer_use runs. Entries are normalized to ChatItem so the browser
 // never sees provider message shapes.
@@ -31,6 +32,14 @@ const SHOT_PATTERN = /shots[\\/]([\w.-]+\.png)/g;
 export const BOT_MESSAGE = "cua-bot.bot-message";
 export type BotMessage = { from: number; name: string; text: string };
 
+/**
+ * Entry kind of the owner's emoji reaction to a reply; its data is a Reaction. Taking one back is another entry with
+ * `on: false`, so the newest entry for a reply and emoji wins. Each carries a user message telling the bot, without a turn.
+ */
+export const REACTION = "cua-bot.reaction";
+export type Reaction = { target: number; emoji: string; on: boolean };
+const QUOTE_MAX = 80;
+
 export type ChatTool = { id: string; name: string; args: Record<string, unknown> };
 
 export type ChatItem =
@@ -40,6 +49,8 @@ export type ChatItem =
 	| { id: number; kind: "approval"; text: string; at: number }
 	/** A message another bot sent this one, shown as "Message from <name>". */
 	| { id: number; kind: "bot"; from: number; name: string; text: string; at: number }
+	/** The owner's reaction to the reply `target`. The app folds these onto their reply instead of showing them. */
+	| { id: number; kind: "reaction"; target: number; emoji: string; on: boolean; at: number }
 	| { id: number; kind: "assistant"; text: string; at: number; tools: ChatTool[]; error?: string; aborted: boolean }
 	| { id: number; kind: "tool"; callId: string; name: string; text: string; isError: boolean; shots: string[]; images: number }
 	| { id: number; kind: "marker"; text: string };
@@ -74,6 +85,10 @@ export function toChatItem(entry: EntryRecord): ChatItem | undefined {
 	if (entry.kind === BOT_MESSAGE && message?.role === "user") {
 		const data = (entry.data ?? {}) as Partial<BotMessage>;
 		return { id, kind: "bot", from: Number(data.from), name: String(data.name ?? "A bot"), text: String(data.text ?? ""), at: message.timestamp };
+	}
+	if (entry.kind === REACTION) {
+		const data = (entry.data ?? {}) as Partial<Reaction>;
+		return { id, kind: "reaction", target: Number(data.target), emoji: String(data.emoji ?? ""), on: data.on !== false, at: message?.timestamp ?? 0 };
 	}
 	if (UserEntry.is(entry) && message?.role === "user") {
 		const user = message as UserMessage;
@@ -114,6 +129,15 @@ export function toChatItem(entry: EntryRecord): ChatItem | undefined {
 	if (CompactionEntry.is(entry)) return { id, kind: "marker", text: "Earlier messages were summarized." };
 	if (ResetEntry.is(entry)) return { id, kind: "marker", text: "Started a fresh context." };
 	return undefined;
+}
+
+/** What the bot reads about a reaction on its next turn, quoting the start of the reply it was on. */
+export function reactionText(emoji: string, on: boolean, reply: string): string {
+	const flat = reply.replace(/\s+/g, " ").trim();
+	const quote = flat.length > QUOTE_MAX ? `${flat.slice(0, QUOTE_MAX - 1)}…` : flat;
+	return on
+		? `[The owner reacted ${emoji} to your message: "${quote}". You don't need to reply; act on it only if it's useful.]`
+		: `[The owner took back their ${emoji} reaction to your message: "${quote}".]`;
 }
 
 /** Reduce the conversation's live document to what the chat shows while the bot works. */
@@ -206,6 +230,18 @@ export function createChat(deps: { harness: Harness; conversation: Conversation;
 		return items;
 	}
 
+	// Emits entries that no live-doc change announces, such as a reaction written while the bot is idle.
+	function pull(): Promise<void> {
+		if (watching === undefined) return Promise.resolve();
+		const started = watching;
+		pump = pump.then(async () => {
+			await started;
+			const items = await newEntries(context);
+			if (items.length > 0) emit({ type: "items", items });
+		});
+		return pump;
+	}
+
 	async function startWatch(): Promise<void> {
 		const newest = await conversation.entries({ order: "descending" }, 1, undefined, context);
 		lastSeen = newest.items[0]?.id;
@@ -236,6 +272,24 @@ export function createChat(deps: { harness: Harness; conversation: Conversation;
 		/** Queue an owner message. It runs after the current turn when the bot is busy. Does not wait for the answer. */
 		async send(text: string) {
 			const submission = await conversation.submit({ type: "input", content: text, whenBusy: "followUp" }, context);
+			return { submissionId: submission.id as number };
+		},
+		/**
+		 * Record the owner's reaction to the reply entry `target`, or take it back with `on: false`. A passive write: it
+		 * starts no turn, and the bot reads it on its next one; while the bot is busy it lands at the next step. Returns
+		 * undefined when `target` is not a reply with text in this chat.
+		 */
+		async react(target: number, emoji: string, on: boolean) {
+			const id = target as EntryId;
+			const entry = (await conversation.entries({ order: "ascending", minEntryId: id, maxEntryId: id }, 1, undefined, context)).items[0];
+			const reply = entry === undefined ? undefined : toChatItem(entry);
+			if (reply?.kind !== "assistant" || reply.text.trim() === "") return undefined;
+			const data: Reaction = { target, emoji, on };
+			const submission = await conversation.submit(
+				{ type: "write", entry: { kind: REACTION, data, model: [{ role: "user", content: reactionText(emoji, on, reply.text), timestamp: Date.now() }] } },
+				context,
+			);
+			await pull();
 			return { submissionId: submission.id as number };
 		},
 		/** Stop the current turn and drop queued messages. Routines keep their schedules. */

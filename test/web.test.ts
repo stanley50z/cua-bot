@@ -106,6 +106,8 @@ test("GET / serves the web app with chat, computer pane, and routines", { timeou
 		assert.match(html, /\/api\/routines/);
 		assert.match(html, /id="routine-dir"/);
 		assert.match(html, /id="f-bot"/, "a new routine picks its bot");
+		assert.match(html, /\/api\/chat\/react/, "reactions are posted");
+		assert.match(html, /id="quotes"/, "quotes wait above the composer");
 		assert.doesNotMatch(html, /innerHTML/, "server text is rendered with DOM nodes only");
 	} finally {
 		await close(session);

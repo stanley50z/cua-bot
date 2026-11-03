@@ -1,5 +1,5 @@
 // The bot's HTTP surface on 127.0.0.1: the web app at GET / with its service worker at /sw.js, its JSON
-// API under /api/ (the bot list and its edits, routines CRUD, each bot's chat history/send/stop, a server-sent
+// API under /api/ (the bot list and its edits, routines CRUD, each bot's chat history/send/react/stop, a server-sent
 // event stream of one bot's live chat state, Web Push subscriptions, and the Mac's live screen), screenshots under /shots/, and the original POST /say. Loopback only, no auth, same trust as /say always had.
 // Mutations go through the routines manager and the chat module, so every surface agrees.
 import { readFile } from "node:fs/promises";
@@ -135,6 +135,19 @@ function chatText(body: unknown): string {
 	const text = body !== null && typeof body === "object" && "text" in body ? body.text : undefined;
 	if (typeof text !== "string" || text.trim() === "") throw new HttpError(400, "text must be a non-empty string");
 	return text;
+}
+
+// One emoji (with any skin tone, variation selector, or joined parts), as the app's reaction picker sends it.
+const EMOJI = /^\p{Extended_Pictographic}[\p{Extended_Pictographic}\p{Emoji_Modifier}‍️]*$/u;
+
+// POST /api/chat/react's body: { entryId, emoji, on }, plus the optional `bot` routeChat reads.
+function reactionInput(body: unknown): { entryId: number; emoji: string; on: boolean } {
+	const record = body !== null && typeof body === "object" && !Array.isArray(body) ? (body as Record<string, unknown>) : {};
+	const { entryId, emoji, on } = record;
+	if (typeof entryId !== "number" || !Number.isInteger(entryId)) throw new HttpError(400, "entryId must be a reply's entry id");
+	if (typeof emoji !== "string" || emoji.length > 16 || !EMOJI.test(emoji)) throw new HttpError(400, "emoji must be one emoji");
+	if (typeof on !== "boolean") throw new HttpError(400, "on must be true or false");
+	return { entryId, emoji, on };
 }
 
 // One SSE client of one bot's chat: a `live` snapshot right away, then every chat event, the full
@@ -401,6 +414,16 @@ async function routeChat(req: IncomingMessage, res: ServerResponse, deps: BotSer
 		const chat = await chatFor(bots, which);
 		deps.log?.(`owner (web${which === null || which === undefined ? "" : `, bot ${String(which)}`}):`, text);
 		sendJson(res, 202, await chat.send(text));
+		return;
+	}
+	if (method === "POST" && url.pathname === "/api/chat/react") {
+		const body = await readJson(req);
+		const { entryId, emoji, on } = reactionInput(body);
+		const which = (body as { bot?: unknown }).bot ?? bot;
+		const done = await (await chatFor(bots, which)).react(entryId, emoji, on);
+		if (done === undefined) throw new HttpError(404, "No reply with text has that entryId in this chat.");
+		deps.log?.(`owner (web${which === null || which === undefined ? "" : `, bot ${String(which)}`}): ${on ? "reacted" : "took back"} ${emoji} on entry ${entryId}`);
+		sendJson(res, 202, done);
 		return;
 	}
 	if (method === "POST" && url.pathname === "/api/chat/stop") {
