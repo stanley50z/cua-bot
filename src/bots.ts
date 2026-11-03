@@ -355,15 +355,29 @@ export function createBotsExtension(options: { agent: () => AgentChange; dir?: s
 
 export type BotView = Bot & {
 	busy: boolean;
-	/** The newest message in the bot's chat, for the bot list. */
+	/** The newest message between the owner and the bot, for the bot list. */
 	preview?: { text: string; at: number };
+	/** The newest message from another bot; the web app shows it instead when it is newer and bot talk is on. */
+	botPreview?: { text: string; at: number };
 };
 
-function previewOf(item: ChatItem): BotView["preview"] {
-	if (item.kind === "user" || item.kind === "routine") return { text: item.kind === "routine" ? "Ran a routine" : item.text, at: item.at };
-	if (item.kind === "bot") return { text: `${item.name}: ${item.text}`, at: item.at };
-	if (item.kind === "assistant" && item.text.trim() !== "") return { text: item.text, at: item.at };
+/** What the host tracks per bot beyond its record. */
+type ListView = Pick<BotView, "busy" | "preview" | "botPreview">;
+
+// An item's line for the bot list, under the field it updates; undefined for items the list ignores.
+function previewOf(item: ChatItem): { field: "preview" | "botPreview"; text: string; at: number } | undefined {
+	if (item.kind === "user" || item.kind === "routine") return { field: "preview", text: item.kind === "routine" ? "Ran a routine" : item.text, at: item.at };
+	if (item.kind === "bot") return { field: "botPreview", text: `${item.name}: ${item.text}`, at: item.at };
+	if (item.kind === "assistant" && item.text.trim() !== "") return { field: "preview", text: item.text, at: item.at };
 	return undefined;
+}
+
+// Sets each preview field to its newest line among `items`, oldest first; fields without a line keep their value.
+function applyPreviews(view: ListView, items: ChatItem[]): void {
+	for (const item of items) {
+		const line = previewOf(item);
+		if (line !== undefined) view[line.field] = { text: line.text, at: line.at };
+	}
 }
 
 export type Bots = Awaited<ReturnType<typeof createBots>>;
@@ -403,7 +417,7 @@ export async function createBots(deps: {
 	}
 
 	const chats = new Map<number, { chat: Chat; stop: () => void }>();
-	const views = new Map<number, Pick<BotView, "busy" | "preview">>();
+	const views = new Map<number, ListView>();
 	const listeners = new Set<(bots: BotView[]) => void>();
 	let bots: Bot[] = [];
 	let lastSent = "";
@@ -424,15 +438,15 @@ export async function createBots(deps: {
 		if (conversation === undefined) return;
 		const computer = deps.computer?.(conversation);
 		const chat = createChat({ harness, conversation, context, ...(computer === undefined ? {} : { computer }) });
-		const newest = (await chat.history(20)).items.flatMap((item) => previewOf(item) ?? []).at(-1);
-		views.set(bot.id, { busy: chat.live.busy, ...(newest === undefined ? {} : { preview: newest }) });
+		const first: ListView = { busy: chat.live.busy };
+		applyPreviews(first, (await chat.history(20)).items);
+		views.set(bot.id, first);
 		const stop = chat.subscribe(
 			(event) => {
 				const view = views.get(bot.id) ?? { busy: false };
 				if (event.type === "live") view.busy = event.live.busy;
 				if (event.type === "items") {
-					const preview = event.items.flatMap((item) => previewOf(item) ?? []).at(-1);
-					if (preview !== undefined) view.preview = preview;
+					applyPreviews(view, event.items);
 					for (const item of event.items) {
 						// A reply's text is only what it sent with send_message, so a reply that sent nothing stays silent.
 						if (item.kind !== "assistant" || item.aborted || item.text.trim() === "") continue;

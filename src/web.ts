@@ -1,6 +1,6 @@
 // The bot's HTTP surface on 127.0.0.1: the web app at GET / with its service worker at /sw.js, its JSON
 // API under /api/ (the bot list and its edits, routines CRUD, each bot's chat history/send/react/stop, a server-sent
-// event stream of one bot's live chat state, Web Push subscriptions, and the Mac's live screen), screenshots under /shots/, and the original POST /say. Loopback only, no auth, same trust as /say always had.
+// event stream of one bot's live chat state, Web Push subscriptions, and the Mac's live screen with the owner's control of it), screenshots under /shots/, and the original POST /say. Loopback only, no auth, same trust as /say always had.
 // Mutations go through the routines manager and the chat module, so every surface agrees.
 import { readFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
@@ -12,8 +12,9 @@ import { BotError, type BotInput, type Bots } from "./bots.ts";
 import type { Chat } from "./chat.ts";
 import { type Memory, MemoryError } from "./memory.ts";
 import { DATA_DIR } from "./log.ts";
-import type { LiveScreen } from "./live-screen.ts";
+import type { InputEvent, LiveScreen } from "./live-screen.ts";
 import { isSubscription, type Push } from "./push.ts";
+import type { ScreenControl } from "./screen-control.ts";
 import {
 	addRoutine,
 	deleteRoutine,
@@ -106,10 +107,10 @@ export type BotServerDeps = {
 	/** Shown in the chat header, e.g. "grok-4.7". */
 	model?: string;
 	shotsDir?: string;
-	/** Enables POST /api/computer/control: mints a link to the Mac's live viewer for the owner. */
-	viewer?: () => Promise<{ url: string; expiresAt: string }>;
 	/** Enables GET /api/computer/live: the Mac's screen as a stream of H.264 access units. */
 	live?: LiveScreen;
+	/** With `live`, enables POST /api/computer/control and /api/computer/input: the owner driving the Mac. */
+	control?: ScreenControl;
 	/** Enables GET/POST /api/push: the VAPID public key, and a browser's push subscription. */
 	push?: Push;
 	log?: (...parts: unknown[]) => void;
@@ -151,26 +152,31 @@ function reactionInput(body: unknown): { entryId: number; emoji: string; on: boo
 }
 
 // One SSE client of one bot's chat: a `live` snapshot right away, then every chat event, the full
-// approvals list whenever it changes, and the bot list whenever it changes, until the socket closes.
-function streamChat(req: IncomingMessage, res: ServerResponse, chat: Chat, bots: Bots, approvals: Approvals | undefined): void {
+// approvals list whenever it changes, the bot list whenever it changes, and who drives the Mac (a `control`
+// event right away and on every change), until the socket closes.
+function streamChat(req: IncomingMessage, res: ServerResponse, chat: Chat, bots: Bots, deps: BotServerDeps): void {
 	res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-store", connection: "keep-alive" });
 	const send = (event: unknown) => res.write(`data: ${JSON.stringify(event)}\n\n`);
 	send({ type: "live", live: chat.live });
+	if (deps.control !== undefined) send({ type: "control", owner: deps.control.owner });
 	const unsubscribe = chat.subscribe(send);
-	const unwatch = approvals?.subscribe((list) => send({ type: "approvals", approvals: list }));
+	const unwatch = deps.approvals?.subscribe((list) => send({ type: "approvals", approvals: list }));
 	const unwatchBots = bots.subscribe((list) => send({ type: "bots", bots: list }));
+	const unwatchControl = deps.control?.subscribe((owner) => send({ type: "control", owner }));
 	const ping = setInterval(() => res.write(": ping\n\n"), 25_000);
 	req.on("close", () => {
 		clearInterval(ping);
 		unsubscribe();
 		unwatch?.();
 		unwatchBots();
+		unwatchControl?.();
 	});
 }
 
 // One pane's live screen: each access unit as a 1-byte flag (1 = keyframe), a 4-byte big-endian length,
-// then the Annex-B bytes. The response ends when the stream does, and the page reconnects.
-function streamLive(res: ServerResponse, live: LiveScreen, log: BotServerDeps["log"]): void {
+// then the Annex-B bytes. The response ends when the stream does, and the page reconnects. Once no pane
+// watches, nobody can see the screen to drive it, so control goes back to the bots.
+function streamLive(res: ServerResponse, live: LiveScreen, control: ScreenControl | undefined, log: BotServerDeps["log"]): void {
 	res.writeHead(200, { "content-type": "application/octet-stream", "cache-control": "no-store" });
 	const unsubscribe = live.subscribe(
 		(frame) => {
@@ -186,7 +192,48 @@ function streamLive(res: ServerResponse, live: LiveScreen, log: BotServerDeps["l
 			res.end();
 		},
 	);
-	res.on("close", unsubscribe);
+	res.on("close", () => {
+		unsubscribe();
+		if (live.watching() === 0 && control?.owner) {
+			control.set(false);
+			log?.("owner (web): left the live screen, so the bots have the computer again");
+		}
+	});
+}
+
+// The owner driving the Mac from the expanded live view. POST /api/computer/control with `{ owner }` takes
+// control (the bots' on-screen steps wait) or hands it back; POST /api/computer/input with `{ events }`
+// performs the owner's mouse and keyboard on the Mac, in order, and is refused while the bots have control.
+async function routeControl(req: IncomingMessage, res: ServerResponse, deps: BotServerDeps, url: URL, method: string) {
+	const { live, control } = deps;
+	if (live === undefined || control === undefined || method !== "POST") throw new HttpError(404, "not found");
+	if (url.pathname === "/api/computer/control") {
+		const { owner } = ((await readJson(req)) ?? {}) as { owner?: unknown };
+		if (typeof owner !== "boolean") throw new HttpError(400, "owner must be true or false");
+		if (owner !== control.owner) deps.log?.(owner ? "owner (web): took control of the computer" : "owner (web): handed the computer back to the bots");
+		control.set(owner);
+		return sendJson(res, 200, { owner });
+	}
+	if (url.pathname === "/api/computer/input") {
+		const events = inputEvents(await readJson(req));
+		if (!control.owner) throw new HttpError(409, "take control of the computer first");
+		if (!live.input(events)) throw new HttpError(503, "the live screen is not connected yet");
+		res.writeHead(204).end();
+		return;
+	}
+	throw new HttpError(404, "not found");
+}
+
+const INPUT_KINDS = new Set(["text_commit", "key", "pointer", "scroll"]);
+
+// POST /api/computer/input's body. cua-spacesd checks each event's fields; this keeps out anything but events.
+function inputEvents(body: unknown): InputEvent[] {
+	const events = body !== null && typeof body === "object" && "events" in body ? body.events : undefined;
+	const valid =
+		Array.isArray(events) &&
+		events.every((event: unknown) => event !== null && typeof event === "object" && "kind" in event && INPUT_KINDS.has(String(event.kind)));
+	if (!valid) throw new HttpError(400, "events must be a list of input events");
+	return events as InputEvent[];
 }
 
 function botInput(body: unknown): BotInput {
@@ -323,18 +370,12 @@ async function route(req: IncomingMessage, res: ServerResponse, deps: BotServerD
 		res.writeHead(200, { "content-type": "image/png", "cache-control": "max-age=31536000, immutable" }).end(file);
 		return;
 	}
-	if (method === "POST" && url.pathname === "/api/computer/control") {
-		if (deps.viewer === undefined) throw new HttpError(404, "not found");
-		const link = await deps.viewer();
-		deps.log?.("owner (web): took control of the computer");
-		sendJson(res, 200, link);
-		return;
-	}
 	if (method === "GET" && url.pathname === "/api/computer/live") {
 		if (deps.live === undefined) throw new HttpError(404, "not found");
-		streamLive(res, deps.live, deps.log);
+		streamLive(res, deps.live, deps.control, deps.log);
 		return;
 	}
+	if (url.pathname.startsWith("/api/computer/")) return routeControl(req, res, deps, url, method);
 	if (url.pathname === "/api/push") return routePush(req, res, deps, method);
 	if (url.pathname.startsWith("/api/bots")) return routeBots(req, res, deps, url, method);
 	if (url.pathname.startsWith("/api/chat")) return routeChat(req, res, deps, url, method);
@@ -444,7 +485,7 @@ async function routeChat(req: IncomingMessage, res: ServerResponse, deps: BotSer
 		res.writeHead(204).end();
 		return;
 	}
-	if (method === "GET" && url.pathname === "/api/chat/events") return streamChat(req, res, await chatFor(bots, bot), bots, deps.approvals);
+	if (method === "GET" && url.pathname === "/api/chat/events") return streamChat(req, res, await chatFor(bots, bot), bots, deps);
 	if (method === "GET" && url.pathname === "/api/chat/computer") {
 		sendJson(res, 200, (await (await chatFor(bots, bot)).computer()) ?? { steps: [] });
 		return;

@@ -1,19 +1,23 @@
-// The computer pane's shared live stream: one media session for every viewer, keyframe gating, and
-// closing when the last viewer leaves. Exercised against a fake opener.
+// The computer pane's shared live stream: one media session for every viewer, keyframe gating, closing
+// when the last viewer leaves, and the owner's input over it. Exercised against a fake opener.
 // Run from the repo root:  node --test test/live-screen.test.ts
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { createLiveScreen, type LiveFrame, type OpenLiveStream } from "../src/live-screen.ts";
+import { createLiveScreen, type InputEvent, type LiveFrame, type OpenLiveStream } from "../src/live-screen.ts";
 
 type Sink = Parameters<OpenLiveStream>[0];
 
 function fakeMac() {
-	const mac = { opens: 0, closes: 0, keyframeRequests: 0, sinks: [] as Sink[], fail: undefined as Error | undefined };
+	const mac = { opens: 0, closes: 0, keyframeRequests: 0, sinks: [] as Sink[], input: [] as InputEvent[][], fail: undefined as Error | undefined };
 	const open: OpenLiveStream = async (sink) => {
 		mac.opens++;
 		if (mac.fail !== undefined) throw mac.fail;
 		mac.sinks.push(sink);
-		return { requestKeyframe: () => void mac.keyframeRequests++, close: async () => void mac.closes++ };
+		return {
+			requestKeyframe: () => void mac.keyframeRequests++,
+			input: (events) => void mac.input.push(events),
+			close: async () => void mac.closes++,
+		};
 	};
 	return { mac, open };
 }
@@ -96,4 +100,19 @@ test("a stale session's late close does not end the viewers of a newer one", asy
 	mac.sinks[0]!.closed("closed by client");
 	assert.deepEqual(ended, []);
 	assert.equal(mac.opens, 2);
+});
+
+test("input goes over the open session, and is refused until one is open", async () => {
+	const { mac, open } = fakeMac();
+	const live = createLiveScreen(open);
+	const typed: InputEvent[] = [{ kind: "text_commit", text: "hi" }];
+	assert.equal(live.input(typed), false);
+	const leave = live.subscribe(() => true, () => {});
+	assert.equal(live.watching(), 1);
+	await settle();
+	assert.equal(live.input(typed), true);
+	assert.deepEqual(mac.input, [typed]);
+	leave();
+	assert.equal(live.watching(), 0);
+	assert.equal(live.input(typed), false);
 });

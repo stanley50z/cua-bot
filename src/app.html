@@ -33,6 +33,7 @@ code, pre, .mono { font-family: "Cascadia Code", Consolas, monospace; }
 .rail button[aria-pressed="true"] { background: #2E3846; color: #fff; }
 .rail button:hover { color: #fff; }
 .rail svg { width: 21px; height: 21px; }
+.rail .foot { margin-top: auto; }
 
 /* main column */
 .main { display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--panel); border-right: 1px solid var(--line); }
@@ -95,6 +96,9 @@ code, pre, .mono { font-family: "Cascadia Code", Consolas, monospace; }
 .m.peer ul, .m.peer ol, .relay ul, .relay ol { padding-left: 20px; }
 .m.peer .text > :last-child, .relay .text > :last-child { margin-bottom: 0; }
 .m.peer .from { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); margin-top: 4px; }
+/* the time under a message; the owner's sits outside its bubble, pulled up against it past the list's gap */
+.stamp { font-size: 11.5px; color: var(--muted); margin-top: 4px; }
+.stamp.me { align-self: flex-end; margin-top: -10px; }
 .relay { margin: 0 0 8px; border-left: 3px solid var(--line); padding: 2px 0 2px 12px; }
 .relay .to { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); margin-bottom: 2px; }
 #b-error { color: var(--bad); }
@@ -141,6 +145,7 @@ dialog .row .btn.danger { margin-right: auto; }
 .routine b { color: var(--ink); font-weight: 600; }
 .marker { align-self: center; font-size: 12px; color: var(--muted); font-style: italic; }
 .chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 8px; }
+.chips:empty { display: none; }
 .chip { font: 12.5px "Bahnschrift", sans-serif; letter-spacing: .01em; border: 1px solid var(--line); border-radius: 6px; padding: 2px 8px; color: var(--muted); background: var(--bg); cursor: pointer; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .chip.done::before { content: "✓ "; color: var(--ok); }
 .chip.error { color: var(--bad); border-color: #E5B6B1; background: var(--bad-bg); } .chip.error::before { content: "✕ "; }
@@ -201,12 +206,35 @@ dialog .row .btn.danger { margin-right: auto; }
 .side { display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--bg); }
 .side .bar { background: var(--bg); }
 .side .bar .state { margin-left: auto; }
-.screen { flex: none; margin: 16px 16px 0; border-radius: 8px; overflow: hidden; aspect-ratio: 16 / 10; background: #000; border: 1px solid var(--line); position: relative; display: grid; place-items: center; }
+.screen { flex: none; margin: 16px 16px 0; padding: 0; border-radius: 8px; overflow: hidden; aspect-ratio: 16 / 10; background: #000; border: 1px solid var(--line); position: relative; display: grid; place-items: center; cursor: zoom-in; }
 .screen.drive { outline: 3px solid var(--drive); outline-offset: -1px; border-color: var(--drive); }
 /* The canvas hides while the stream is down, so a stale frame never lingers over the black pane. */
 .screen canvas { width: 100%; height: 100%; object-fit: contain; display: none; }
-.screen.live canvas { display: block; }
+.screen.live canvas, .stage.live canvas { display: block; }
 .screen .tag { position: absolute; right: 8px; bottom: 8px; background: var(--drive); color: #fff; font: 600 11.5px "Bahnschrift", sans-serif; padding: 3px 8px; border-radius: 5px; }
+.screen .expand { position: absolute; right: 8px; top: 8px; display: flex; align-items: center; gap: 5px; background: rgba(20,20,20,.72); color: #fff; font: 600 11.5px "Bahnschrift", sans-serif; padding: 3px 8px 3px 6px; border-radius: 5px; opacity: .8; transition: opacity .12s; }
+.screen:hover .expand, .screen:focus-visible .expand { opacity: 1; }
+.screen .expand svg { width: 13px; height: 13px; }
+
+/* expanded live screen: the pane's canvas moves in here, sized to the video so pointer positions map 1:1 */
+#screen-view { width: 100vw; height: 100vh; max-width: none; max-height: none; margin: 0; padding: 56px 40px 22px; border: 0; border-radius: 0; background: #141414; color: #fff; box-shadow: none; }
+#screen-view[open] { display: flex; flex-direction: column; align-items: center; gap: 16px; }
+#screen-view::backdrop { background: #141414; }
+#screen-view .close { position: absolute; top: 10px; right: 12px; width: 38px; height: 38px; border: 0; border-radius: 8px; background: transparent; color: #C9CDD3; cursor: pointer; display: grid; place-items: center; }
+#screen-view .close:hover { background: rgba(255,255,255,.1); color: #fff; }
+#screen-view .close svg { width: 20px; height: 20px; }
+.stage { flex: 1; min-height: 0; width: 100%; container-type: size; display: grid; place-items: center; }
+.stage canvas { display: none; width: min(100cqw, 100cqh * var(--ratio, 1.6)); height: auto; aspect-ratio: var(--ratio, 1.6); border-radius: 10px; touch-action: none; }
+.stage.live .wait { display: none; }
+.stage .wait { color: #9AA1AB; margin: 0; }
+.pill { flex: none; display: flex; align-items: center; gap: 12px; background: #fff; color: var(--ink); border-radius: 999px; padding: 5px 5px 5px 14px; font-size: 14px; }
+.pill .who { display: flex; align-items: center; gap: 7px; color: var(--muted); }
+.pill .who.drive { color: var(--drive); }
+.pill .who.mine { color: var(--ink); }
+.pill .who svg { width: 16px; height: 16px; flex: none; }
+.pill .btn { border-radius: 999px; padding: 6px 16px; font-size: 13.5px; }
+/* Focus sits here while the owner drives, so the browser's own keyboard handling turns keys into text. */
+.keys { position: absolute; left: 0; top: 0; width: 1px; height: 1px; padding: 0; border: 0; opacity: 0; resize: none; pointer-events: none; }
 .shot-time { flex: none; margin: 6px 16px 0; font-size: 12px; color: var(--muted); }
 .steps { margin: 12px 16px 16px; overflow: auto; flex: 1; min-height: 0; }
 .steps h2 { font: 600 13px "Bahnschrift", sans-serif; margin: 0 0 6px; color: var(--muted); letter-spacing: .02em; }
@@ -252,6 +280,17 @@ dialog .row .btn.danger { margin-right: auto; }
 .facts li .x:hover { background: var(--bad-bg); color: var(--bad); }
 .facts li .x svg { width: 14px; height: 14px; }
 .facts .none { display: block; color: var(--muted); border-bottom: 0; }
+
+/* settings */
+.settings { padding: 8px 24px 24px; overflow: auto; flex: 1; }
+.setting { display: flex; align-items: center; gap: 24px; max-width: 640px; padding: 14px 0; border-bottom: 1px solid var(--line); cursor: pointer; }
+.setting span { flex: 1; }
+.setting b { display: block; font-weight: 600; }
+.setting small { display: block; color: var(--muted); font-size: 12.5px; }
+.setting input { appearance: none; flex: none; position: relative; width: 36px; height: 20px; margin: 0; border-radius: 999px; background: var(--line); cursor: pointer; transition: background .15s; }
+.setting input::after { content: ""; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(27,33,41,.25); transition: transform .15s; }
+.setting input:checked { background: var(--accent); }
+.setting input:checked::after { transform: translateX(16px); }
 
 dialog { border: 1px solid var(--line); border-radius: 12px; padding: 22px 24px; width: min(560px, 92vw); color: var(--ink); box-shadow: 0 18px 50px rgba(27,33,41,.22); }
 dialog::backdrop { background: rgba(27,33,41,.35); }
@@ -307,6 +346,10 @@ dialog .row { display: flex; gap: 8px; justify-content: flex-end; margin-top: 18
  <symbol id="i-smile" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="8.5"/><path d="M8.5 14.2a4.2 4.2 0 0 0 7 0"/><path d="M9.2 9.6v.1M14.8 9.6v.1" stroke-width="2.4"/></symbol>
  <symbol id="i-reply" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M10 6.5L4.5 12l5.5 5.5"/><path d="M4.5 12H14a5.5 5.5 0 0 1 5.5 5.5v1"/></symbol>
  <symbol id="i-pin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4h6l-1 6 4 4H6l4-4z"/><path d="M12 14v6"/></symbol>
+ <symbol id="i-gear" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M10.3 3h3.4l.5 2.6 1.8 1 2.5-.9 1.7 2.9-2 1.8v2.1l2 1.8-1.7 2.9-2.5-.9-1.8 1-.5 2.6h-3.4l-.5-2.6-1.8-1-2.5.9-1.7-2.9 2-1.8v-2.1l-2-1.8 1.7-2.9 2.5.9 1.8-1z"/><circle cx="12" cy="12" r="3"/></symbol>
+ <symbol id="i-expand" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 4h6v6M10 20H4v-6M20 4l-6.5 6.5M4 20l6.5-6.5"/></symbol>
+ <symbol id="i-eye" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="3"/></symbol>
+ <symbol id="i-pointer" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M6 3.5l12.5 7.2-5.6 1.4 3.3 5.9-2.6 1.5-3.3-5.9-4.3 3.9z"/></symbol>
  <symbol id="i-edit"viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13 7l4 4"/></symbol>
 </svg>
 
@@ -316,6 +359,7 @@ dialog .row { display: flex; gap: 8px; justify-content: flex-end; margin-top: 18
   <button type="button" aria-label="Chat" aria-pressed="true" data-view="chat"><svg><use href="#i-chat"/></svg></button>
   <button type="button" aria-label="Routines" aria-pressed="false" data-view="routines"><svg><use href="#i-clock"/></svg></button>
   <button type="button" aria-label="Memory" aria-pressed="false" data-view="memory"><svg><use href="#i-mem"/></svg></button>
+  <button type="button" class="foot" aria-label="Settings" title="Settings" aria-pressed="false" data-view="settings"><svg><use href="#i-gear"/></svg></button>
  </nav>
 
  <main class="main">
@@ -366,17 +410,30 @@ dialog .row { display: flex; gap: 8px; justify-content: flex-end; margin-top: 18
    </div>
    <p class="file">Saved as markdown: this bot's in <code id="own-dir">bots/&lt;bot&gt;/memory</code>, the shared memory in <code id="memory-dir">data/memory</code>. Each has <code>profile.md</code> and one file per month under <code>log/</code>. Edit them by hand anytime; the bots read them fresh on every reply.</p>
   </section>
+  <section class="view" id="view-settings" aria-labelledby="settings-h" hidden>
+   <div class="bar"><h1 id="settings-h">Settings</h1><span class="aside">Saved in this browser.</span></div>
+   <div class="settings">
+    <label class="setting"><span><b>Show messages between bots</b><small>What one bot sends another, in both bots' chats and the bot list. The tools a bot runs for another bot still show.</small></span><input type="checkbox" id="set-bot-talk"></label>
+   </div>
+  </section>
  </main>
 
  <aside class="side" aria-labelledby="space-h">
-  <div class="bar"><h1 id="space-h">Computer</h1><span class="state" id="space-state"></span><button class="btn" id="take-control" type="button" title="Open the live desktop in a new tab, with your mouse and keyboard">Take control</button></div>
-  <div class="screen" id="screen"><canvas id="live-screen" aria-label="Live screen of the computer"></canvas><span class="tag" hidden>Bot is driving</span></div>
+  <div class="bar"><h1 id="space-h">Computer</h1><span class="state" id="space-state"></span><button class="btn" id="take-control" type="button" title="Expand the live screen and drive it with your mouse and keyboard">Take control</button></div>
+  <button type="button" class="screen" id="screen" aria-label="Expand the live screen"><canvas id="live-screen" aria-label="Live screen of the computer"></canvas><span class="expand"><svg aria-hidden="true"><use href="#i-expand"/></svg>Expand</span><span class="tag" hidden>Bot is driving</span></button>
   <div class="shot-time" id="shot-time"></div>
   <div class="steps"><h2 id="steps-h">Steps</h2><ol id="steps"></ol></div>
  </aside>
 </div>
 
 <button type="button" class="add-quote" id="add-quote" hidden>Add to chat <kbd>Ctrl+L</kbd></button>
+
+<dialog id="screen-view" aria-label="Live screen of the computer">
+ <button type="button" class="close" id="view-close" aria-label="Close the live screen" title="Close"><svg aria-hidden="true"><use href="#i-x"/></svg></button>
+ <div class="stage" id="stage"><p class="wait" id="view-wait"></p></div>
+ <div class="pill"><span class="who" id="view-who"></span><button type="button" class="btn primary" id="view-control">Take control</button></div>
+ <textarea class="keys" id="view-keys" aria-label="Keyboard for the computer" autocapitalize="off" autocomplete="off" spellcheck="false"></textarea>
+</dialog>
 
 <dialog id="routine-dialog" aria-labelledby="form-h">
  <form id="routine-form" method="dialog">
@@ -414,7 +471,7 @@ dialog .row { display: flex; gap: 8px; justify-content: flex-end; margin-top: 18
   <label for="b-instructions">Agent file</label>
   <textarea id="b-instructions" rows="18" spellcheck="false" placeholder="Track job openings that fit my profile and tell me about new ones each week."></textarea>
   <p class="hint" id="b-file"></p>
-  <p class="hint">Each bot has its own chat and shares your memory, accounts, and computer. Bots can message each other, and you see those messages in their chats.</p>
+  <p class="hint">Each bot has its own chat and shares your memory, accounts, and computer. Bots can message each other; turn on Show messages between bots in Settings to see those messages in their chats.</p>
   <p id="b-error" role="alert"></p>
   <div class="row"><button type="button" class="btn danger" id="b-delete" hidden>Delete bot</button><button type="button" class="btn" id="b-cancel">Cancel</button><button type="submit" class="btn primary" id="b-save">Add bot</button></div>
  </form>
@@ -452,6 +509,12 @@ async function request(method, path, payload) {
 
 const time = (ms) => new Date(ms).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
 const timeSec = (ms) => new Date(ms).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit", second: "2-digit" });
+// The time under a message, with the full date on hover.
+function stamp(ms, className = "stamp") {
+  const node = el("div", className, time(ms));
+  node.title = new Date(ms).toLocaleString(undefined, { dateStyle: "full", timeStyle: "short" });
+  return node;
+}
 function dayLabel(ms) {
   const d = new Date(ms), today = new Date();
   const start = (x) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
@@ -521,6 +584,13 @@ function markdown(text) {
 // `bot` is the id of the bot whose chat is open; `bots` is the list from /api/bots. `picking` is the reply whose
 // reaction picker is open; `reacting` holds reactions sent but not yet back as items, by "<reply id>:<emoji>".
 const state = { bot: null, bots: [], items: [], ids: new Set(), before: null, live: { busy: false, partial: "", tools: [] }, queued: [], open: new Set(), computer: { steps: [] }, approvals: [], picking: null, reacting: new Map() };
+// The expanded live screen (see "expanded live screen" below): whether the owner has control of the Mac, the
+// keys they hold down there, and their input on its way.
+const view = { owner: false, held: new Map(), queue: [], sending: null, lastMove: 0 };
+// The owner's display choices, kept in this browser. `botTalk` shows the messages bots send each other.
+const SETTINGS_KEY = "cua-bot.settings";
+const settings = { botTalk: false };
+try { Object.assign(settings, JSON.parse(localStorage.getItem(SETTINGS_KEY) || "{}")); } catch { /* unreadable: keep the defaults */ }
 const currentBot = () => state.bots.find((b) => b.id === state.bot) || { id: state.bot, name: "cua-bot", instructions: "", main: true };
 const mainId = () => (state.bots.find((b) => b.main) || {}).id;
 const botNamed = (to) => {
@@ -1065,7 +1135,7 @@ function renderChat() {
   const running = new Map(state.live.tools.map((tool) => [tool.callId, tool]));
   const reactions = reactionsOf();
   let day = "";
-  const visible = state.items.filter((item) => item.kind !== "tool" && item.kind !== "approval" && item.kind !== "reaction");
+  const visible = state.items.filter((item) => item.kind !== "tool" && item.kind !== "approval" && item.kind !== "reaction" && (settings.botTalk || item.kind !== "bot"));
   if (visible.length === 0 && !state.live.busy && state.queued.length === 0) {
     const bot = currentBot();
     const empty = el("div", "empty");
@@ -1075,6 +1145,9 @@ function renderChat() {
       : about || "It has the same tools as your other bots. Tell it what it's for, or give it standing instructions with the pencil next to its name.");
     box.append(empty);
   }
+  // The reply block still open for more chips: consecutive replies that only ran tools share one block, so their
+  // chips run on in one wrapping row. Anything appended after it (a day label, another message) ends it.
+  let open = null;
   for (const item of visible) {
     if (item.at !== undefined) {
       const label = dayLabel(item.at);
@@ -1084,11 +1157,11 @@ function renderChat() {
       const node = ownMessage(item.text, "m me");
       node.dataset.key = String(item.id);
       node.append(messageActions(item));
-      box.append(node);
+      box.append(node, stamp(item.at, "stamp me"));
     } else if (item.kind === "bot") {
       const node = el("div", "m peer");
       const from = el("div", "from");
-      from.append("Message from ", avatar(state.bots.find((b) => b.id === item.from) || { id: item.from, name: item.name }, true), item.name);
+      from.append("Message from ", avatar(state.bots.find((b) => b.id === item.from) || { id: item.from, name: item.name }, true), item.name, " · " + time(item.at));
       node.append(bubble(item.id, item.text, item), from);
       box.append(node);
     } else if (item.kind === "routine") {
@@ -1097,7 +1170,12 @@ function renderChat() {
       line.title = item.text;
       box.append(line);
     } else if (item.kind === "marker") box.append(el("div", "marker", item.text));
-    else if (item.kind === "assistant") box.append(renderReply(item, results, running, reactions.get(item.id) || new Map()));
+    else if (item.kind === "assistant") {
+      const into = open && box.lastElementChild === open.node ? open : null;
+      const reply = renderReply(item, results, running, reactions.get(item.id) || new Map(), into);
+      if (!into) box.append(reply.node);
+      open = reply.closed ? null : reply;
+    }
   }
   // Waiting cards whose reply isn't loaded (older history, or a turn still streaming) go last.
   const shown = new Set(visible.flatMap((item) => (item.kind === "assistant" ? item.tools.map((t) => t.id) : [])));
@@ -1117,15 +1195,16 @@ function renderChat() {
     const done = new Set(state.items.filter((i) => i.kind === "assistant").flatMap((i) => i.tools.map((t) => t.id)));
     const pending = state.live.tools.filter((tool) => !done.has(tool.callId));
     if (state.live.partial || pending.length > 0) {
-      const live = el("div", "m bot");
-      if (pending.length > 0) {
-        const chips = el("div", "chips");
-        for (const tool of pending) chips.append(el("span", "chip run", toolLabel({ name: tool.name, args: {} })));
-        live.append(chips);
+      // The streaming reply joins the open block, as it will once it lands.
+      let live = open && box.lastElementChild === open.node ? open : null;
+      if (!live) {
+        live = { node: el("div", "m bot"), chips: el("div", "chips") };
+        live.node.append(live.chips);
+        box.append(live.node);
       }
+      for (const tool of pending) live.chips.append(el("span", "chip run", toolLabel({ name: tool.name, args: {} })));
       // The same bubble the finished reply gets, so it keeps its shape when it lands.
-      if (state.live.partial) live.append(bubble("live", state.live.partial));
-      box.append(live);
+      if (state.live.partial) live.node.append(bubble("live", state.live.partial));
     }
   }
   if (active && active.isConnected && document.activeElement !== active) {
@@ -1137,20 +1216,23 @@ function renderChat() {
 }
 
 // One assistant entry: tool chips and their results above, relays to other bots, the text bubble with its reaction
-// pills, then approval cards and any error. `mine` is its reactions from reactionsOf().
-function renderReply(item, results, running, mine) {
-  const node = el("div", "m bot");
+// pills, then approval cards, any error, and its time. `mine` is its reactions from reactionsOf(). `into` is an open
+// block ({node, chips, below}) from earlier tool-only replies to add to, or null for a new one. Returns the block,
+// `closed` once this entry showed more than chips.
+function renderReply(item, results, running, mine, into) {
+  const block = into || { node: el("div", "m bot"), chips: el("div", "chips"), below: el("div") };
+  if (!into) block.node.append(block.chips, block.below);
+  const { node, chips, below } = block;
+  const shown = node.childElementCount;
   if (item.tools.length > 0) {
-    const chips = el("div", "chips");
-    const below = el("div");
     for (const call of item.tools) {
       const result = results.get(call.id);
       const live = running.get(call.id);
       const approval = approvalFor(call.id);
       const waiting = approval && (approval.status === "waiting" || approval.status === "running");
       const status = result ? (result.isError ? "error" : waiting ? "wait" : "done") : live && live.status !== "done" ? "run" : "done";
-      // A delivered bot message shows as its own block below; only a failed one needs a chip.
-      if (call.name === "message_bot" && status === "done") continue;
+      // A delivered bot message shows as its own block below while bot talk is on; otherwise it gets a chip.
+      if (call.name === "message_bot" && status === "done" && settings.botTalk) continue;
       const label = approval ? `${approval.title}: ${approvalWord(approval)}` : toolLabel(call);
       const chip = el("button", "chip " + status, label);
       chip.type = "button";
@@ -1162,7 +1244,9 @@ function renderReply(item, results, running, mine) {
       chips.append(chip);
       if (state.open.has(key)) below.append(el("pre", "result", result.text || "(no output)"));
       if (result.shots.length > 0) {
-        const thumbs = el("div", "thumbs");
+        // Screenshots run on in one row too, until an expanded result comes between them.
+        const last = below.lastElementChild;
+        const thumbs = last && last.classList.contains("thumbs") ? last : el("div", "thumbs");
         for (const shot of result.shots) {
           const link = el("a"); link.href = "/shots/" + encodeURIComponent(shot); link.target = "_blank"; link.rel = "noopener";
           const img = el("img"); img.src = link.href; img.alt = "Screenshot from " + toolLabel(call); img.loading = "lazy";
@@ -1171,11 +1255,9 @@ function renderReply(item, results, running, mine) {
         below.append(thumbs);
       }
     }
-    if (chips.childElementCount > 0) node.append(chips);
-    node.append(below);
     // What this bot told another bot, as the other bot received it.
     for (const call of item.tools) {
-      if (call.name !== "message_bot" || typeof call.args.text !== "string" || !results.has(call.id) || results.get(call.id).isError) continue;
+      if (!settings.botTalk || call.name !== "message_bot" || typeof call.args.text !== "string" || !results.has(call.id) || results.get(call.id).isError) continue;
       const to = botNamed(call.args.to) || { id: 0, name: String(call.args.to || "a bot") };
       const relay = el("div", "relay");
       const head = el("div", "to");
@@ -1195,7 +1277,9 @@ function renderReply(item, results, running, mine) {
   }
   if (item.error) node.append(el("div", "error", item.error));
   else if (item.aborted) node.append(el("div", "stopped", "Stopped."));
-  return node;
+  const closed = node.childElementCount > shown;
+  if (closed) node.append(stamp(item.at));
+  return { ...block, closed };
 }
 
 function renderLive() {
@@ -1205,12 +1289,19 @@ function renderLive() {
   label.className = "state" + (live.retry ? " bad" : driving ? " drive" : live.busy ? " busy" : "");
   label.textContent = live.retry ? `Retrying after an error: ${live.retry.error}` : driving ? "Using the computer" : live.busy ? (live.partial ? "Replying" : "Working") : "";
   $("stop").hidden = !live.busy;
+  // While the owner has control, a running computer task waits for them instead of driving.
+  const botDriving = driving && !view.owner;
   const space = $("space-state");
-  space.className = "state" + (driving ? " drive" : "");
-  space.textContent = driving ? "Bot is driving" : "Idle";
-  $("screen").classList.toggle("drive", driving);
-  const tag = $("screen").querySelector(".tag");
-  if (tag) tag.hidden = !driving;
+  space.className = "state" + (botDriving ? " drive" : "");
+  space.textContent = view.owner ? "You're in control" : botDriving ? "Bot is driving" : "Idle";
+  $("screen").classList.toggle("drive", botDriving);
+  $("screen").querySelector(".tag").hidden = !botDriving;
+  const who = $("view-who");
+  who.className = "who" + (view.owner ? " mine" : botDriving ? " drive" : "");
+  who.replaceChildren(icon(view.owner ? "i-pointer" : "i-eye"),
+    view.owner ? (driving ? "You're in control. The bot waits for you" : "You're in control") : botDriving ? "Watching the bot drive" : "Watching. The bot is idle");
+  $("view-control").textContent = view.owner ? "I'm done" : "Take control";
+  $("view-control").title = view.owner ? "Give the computer back to the bot" : "Drive the computer with your mouse and keyboard";
 }
 
 function renderComputer() {
@@ -1232,8 +1323,10 @@ function renderComputer() {
 }
 
 function captionScreen() {
-  $("shot-time").textContent = liveScreen.playing ? "Live"
+  const caption = liveScreen.playing ? "Live"
     : typeof VideoDecoder === "undefined" ? "This browser can't play the live screen" : "Connecting…";
+  $("shot-time").textContent = caption;
+  $("view-wait").textContent = caption;
 }
 
 /* ---------- live screen ---------- */
@@ -1256,6 +1349,7 @@ function avcCodec(data) {
 function showLive(playing) {
   liveScreen.playing = playing;
   $("screen").classList.toggle("live", playing);
+  $("stage").classList.toggle("live", playing);
   captionScreen();
 }
 
@@ -1270,6 +1364,7 @@ async function playLive() {
     output: (frame) => {
       if (canvas.width !== frame.displayWidth || canvas.height !== frame.displayHeight) {
         canvas.width = frame.displayWidth; canvas.height = frame.displayHeight;
+        canvas.style.setProperty("--ratio", String(frame.displayWidth / frame.displayHeight));
       }
       ctx.drawImage(frame, 0, 0);
       frame.close();
@@ -1312,10 +1407,159 @@ async function playLive() {
   }
 }
 
+// The stream stays up in a hidden tab while the owner has control: the server hands control back to the bots
+// once no pane watches.
 document.addEventListener("visibilitychange", () => {
-  if (document.hidden) { clearTimeout(liveScreen.retry); liveScreen.abort?.abort(); }
+  if (document.hidden) { if (!view.owner) { clearTimeout(liveScreen.retry); liveScreen.abort?.abort(); } }
   else { liveScreen.delay = 2000; playLive(); }
 });
+
+/* ---------- expanded live screen ---------- */
+// Clicking the pane's live screen moves its canvas into a full-window view. There the owner can take control
+// (POST /api/computer/control): the bots' on-screen steps wait while the owner's mouse and keyboard reach the
+// Mac over the live session (POST /api/computer/input). "I'm done", or closing the view, hands it back.
+// Keys map as in cua-spacesd's own viewer: text comes from a focused, hidden textarea, so keyboard layouts,
+// dead keys and IMEs work, and other keys and shortcuts go as key events named after the physical key.
+const NAMED_KEYS = new Set(["Enter", "Tab", "Backspace", "Delete", "Escape", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight",
+  "Home", "End", "PageUp", "PageDown", "Insert", "CapsLock", "ContextMenu", "PrintScreen", "Pause", "ScrollLock", "NumLock"]);
+const MODIFIER_KEYS = new Set(["Shift", "Control", "Alt", "Meta"]);
+const BUTTONS = ["left", "middle", "right"];
+
+const controlling = () => view.owner && $("screen-view").open;
+
+function openScreenView() {
+  if ($("screen-view").open) return;
+  $("stage").append($("live-screen"));
+  $("screen-view").showModal();
+}
+
+// Takes control or hands it back. Keys still held go up first, while the Mac still takes the owner's input.
+async function setControl(owner) {
+  $("view-control").disabled = true;
+  if (!owner) { releaseKeys(); await view.sending; }
+  try { applyControl((await request("POST", "/api/computer/control", { owner })).owner); }
+  catch (error) { showChatError((owner ? "Could not take control: " : "Could not give the computer back: ") + error.message); }
+  finally { $("view-control").disabled = false; }
+}
+
+// Also run for the event stream's `control` events, so every tab shows who drives.
+function applyControl(owner) {
+  view.owner = owner;
+  if (!owner) view.held.clear();
+  if (controlling()) $("view-keys").focus({ preventScroll: true });
+  renderLive();
+}
+
+// One request at a time keeps the events in order; whatever queues meanwhile goes in the next one.
+// `view.sending` is the drain in progress, so handing control back can wait for it.
+function sendInput(event) {
+  if (!view.owner) return;
+  view.queue.push(event);
+  view.sending ??= (async () => {
+    while (view.queue.length > 0) {
+      const events = view.queue.splice(0);
+      await fetch("/api/computer/input", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ events }) }).catch(() => {});
+    }
+    view.sending = null;
+  })();
+}
+
+function releaseKeys() {
+  for (const held of view.held.values()) sendInput({ ...held, state: "up", repeat: false });
+  view.held.clear();
+}
+
+const modifiersOf = (event) => [event.shiftKey && "shift", event.ctrlKey && "control", event.altKey && "option", event.metaKey && "command"].filter(Boolean);
+
+// The pointer as a fraction of the video, which the stage sizes the canvas to exactly.
+function pointOf(event) {
+  const box = $("live-screen").getBoundingClientRect();
+  const clamp = (value) => Math.min(1, Math.max(0, value));
+  return { x_normalized: clamp((event.clientX - box.left) / box.width), y_normalized: clamp((event.clientY - box.top) / box.height) };
+}
+
+// A keydown or keyup as a key event, or null when it is text the textarea's beforeinput will commit.
+function keyInput(event, state) {
+  if (event.isComposing || event.keyCode === 229 || ["Dead", "Unidentified", "Process", "AltGraph"].includes(event.key)) return null;
+  const base = { kind: "key", state, repeat: state === "down" && event.repeat };
+  if (MODIFIER_KEYS.has(event.key)) return { ...base, key: event.key.toLowerCase(), modifiers: [] };
+  if (NAMED_KEYS.has(event.key) || /^F([1-9]|1[0-9]|2[0-4])$/.test(event.key)) return { ...base, key: event.key.toLowerCase(), modifiers: modifiersOf(event) };
+  const altGraph = event.getModifierState?.("AltGraph");
+  if (altGraph || !(event.ctrlKey || event.metaKey || event.altKey)) return null;
+  const physical = /^(?:Key([A-Z])|Digit([0-9]))$/.exec(event.code);
+  const key = physical ? (physical[1] ?? physical[2]).toLowerCase() : event.key === " " ? "space" : event.key.toLowerCase();
+  return { ...base, key, modifiers: modifiersOf(event) };
+}
+
+$("screen").addEventListener("click", openScreenView);
+$("take-control").addEventListener("click", () => { openScreenView(); if (!view.owner) setControl(true); });
+$("view-control").addEventListener("click", () => setControl(!view.owner));
+$("view-close").addEventListener("click", () => $("screen-view").close());
+// Escape belongs to the Mac while the owner drives; the keydown handler below stops it closing the view.
+$("screen-view").addEventListener("cancel", (event) => { if (view.owner) event.preventDefault(); });
+$("screen-view").addEventListener("close", () => {
+  if (view.owner) setControl(false);
+  $("screen").prepend($("live-screen"));
+});
+
+const keys = $("view-keys");
+keys.addEventListener("keydown", (event) => {
+  const mapped = view.owner ? keyInput(event, "down") : null;
+  if (!mapped) return;
+  event.preventDefault();
+  view.held.set(event.code || mapped.key, mapped);
+  sendInput(mapped);
+});
+// Releases exactly what went down for this physical key, even if the modifiers changed in between.
+keys.addEventListener("keyup", (event) => {
+  const held = view.held.get(event.code || event.key);
+  if (!held) return;
+  event.preventDefault();
+  view.held.delete(event.code || event.key);
+  sendInput({ ...held, state: "up", repeat: false });
+});
+keys.addEventListener("beforeinput", (event) => {
+  if (event.isComposing || event.inputType === "insertCompositionText") return;
+  event.preventDefault();
+  const press = (key) => [{ kind: "key", key, state: "down", modifiers: [], repeat: false }, { kind: "key", key, state: "up", modifiers: [], repeat: false }];
+  const events = ["insertText", "insertReplacementText", "insertFromComposition", "insertFromPaste"].includes(event.inputType)
+    ? (event.data ? [{ kind: "text_commit", text: event.data }] : [])
+    : event.inputType === "insertLineBreak" || event.inputType === "insertParagraph" ? press("enter")
+    : event.inputType === "deleteContentBackward" ? press("backspace")
+    : event.inputType === "deleteContentForward" ? press("delete") : [];
+  for (const mapped of events) sendInput(mapped);
+});
+keys.addEventListener("compositionend", (event) => {
+  if (event.data) sendInput({ kind: "text_commit", text: event.data });
+  keys.value = "";
+});
+keys.addEventListener("blur", releaseKeys);
+
+const liveCanvas = $("live-screen");
+liveCanvas.addEventListener("pointerdown", (event) => {
+  if (!controlling()) return;
+  event.preventDefault();
+  keys.focus({ preventScroll: true });
+  liveCanvas.setPointerCapture(event.pointerId);
+  sendInput({ kind: "pointer", phase: "down", button: BUTTONS[event.button] ?? "left", ...pointOf(event), modifiers: modifiersOf(event) });
+});
+liveCanvas.addEventListener("pointermove", (event) => {
+  const now = performance.now();
+  if (!controlling() || now - view.lastMove < 16) return;
+  view.lastMove = now;
+  sendInput({ kind: "pointer", phase: "move", button: null, ...pointOf(event), modifiers: modifiersOf(event) });
+});
+liveCanvas.addEventListener("pointerup", (event) => {
+  if (!controlling()) return;
+  sendInput({ kind: "pointer", phase: "up", button: BUTTONS[event.button] ?? "left", ...pointOf(event), modifiers: modifiersOf(event) });
+});
+liveCanvas.addEventListener("contextmenu", (event) => { if (controlling()) event.preventDefault(); });
+liveCanvas.addEventListener("wheel", (event) => {
+  if (!controlling()) return;
+  event.preventDefault();
+  const scale = event.deltaMode === 1 ? 40 : event.deltaMode === 2 ? 400 : 1;
+  sendInput({ kind: "scroll", ...pointOf(event), delta_x: event.deltaX * scale, delta_y: event.deltaY * scale, phase: "none", momentum_phase: "none", precise: event.deltaMode === 0 });
+}, { passive: false });
 
 /* ---------- chat I/O ---------- */
 function showChatError(message) { $("chat-error").textContent = message; $("chat-error").hidden = !message; }
@@ -1361,6 +1605,7 @@ function connect() {
     else if (data.type === "computer") { state.computer = data.computer; renderComputer(); }
     else if (data.type === "approvals") { state.approvals = data.approvals; renderChat(); }
     else if (data.type === "bots") { state.bots = data.bots; renderBots(); }
+    else if (data.type === "control") applyControl(data.owner);
   };
 }
 
@@ -1393,7 +1638,8 @@ function renderBots() {
     who.append(el("span", "name", bot.name));
     if (bot.busy) { const dot = el("span", "busy"); dot.title = "Working"; who.append(dot); }
     const text = el("span");
-    const said = bot.preview && (splitQuotes(bot.preview.text).rest || bot.preview.text);
+    const line = settings.botTalk && bot.botPreview && !(bot.preview && bot.preview.at > bot.botPreview.at) ? bot.botPreview : bot.preview;
+    const said = line && (splitQuotes(line.text).rest || line.text);
     const peek = said ? said.replace(/\*\*|`/g, "").replace(/\s+/g, " ") : bot.main ? "Your main bot" : "No messages yet";
     text.append(who, el("span", "peek", peek));
     row.append(avatar(bot), text);
@@ -1643,19 +1889,6 @@ $("stop").addEventListener("click", async () => {
   catch (error) { showChatError("Could not stop: " + error.message); }
   finally { $("stop").disabled = false; }
 });
-// The viewer refuses to be framed, so it opens in a tab. The tab opens on the click itself, before the
-// link is minted, so popup blockers let it through.
-$("take-control").addEventListener("click", async () => {
-  const tab = window.open("", "_blank");
-  $("take-control").disabled = true;
-  try {
-    const link = await request("POST", "/api/computer/control");
-    if (tab) { tab.opener = null; tab.location.href = link.url; } else window.open(link.url, "_blank", "noopener");
-  } catch (error) {
-    tab?.close();
-    showChatError("Could not open the computer: " + error.message);
-  } finally { $("take-control").disabled = false; }
-});
 
 /* ---------- notifications ---------- */
 // Web Push (src/push.ts): once the owner allows it, every message a bot sends the owner (send_message)
@@ -1693,13 +1926,20 @@ $("notify").addEventListener("click", async () => {
 document.querySelectorAll(".rail button[data-view]").forEach((button) => button.addEventListener("click", () => {
   const view = button.dataset.view;
   document.querySelectorAll(".rail button[data-view]").forEach((b) => b.setAttribute("aria-pressed", String(b === button)));
-  $("view-chat").hidden = view !== "chat";
-  $("view-routines").hidden = view !== "routines";
-  $("view-memory").hidden = view !== "memory";
+  for (const name of ["chat", "routines", "memory", "settings"]) $("view-" + name).hidden = view !== name;
   if (view === "routines") loadRoutines();
   else if (view === "memory") { memoryBot = state.bot; loadMemory(); }
   else $("input").focus();
 }));
+
+/* ---------- settings ---------- */
+$("set-bot-talk").checked = settings.botTalk;
+$("set-bot-talk").addEventListener("change", () => {
+  settings.botTalk = $("set-bot-talk").checked;
+  localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+  renderBots();
+  renderChat();
+});
 
 /* ---------- memory ---------- */
 function showMemoryError(message) { $("memory-error").textContent = message; $("memory-error").hidden = !message; }

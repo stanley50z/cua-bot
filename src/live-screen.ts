@@ -1,14 +1,45 @@
 // The computer pane's live view of the paired Mac. src/main.ts builds one with createLiveScreen(openLiveStream)
-// and src/web.ts streams it to each open pane at GET /api/computer/live. Every pane shares one view-only
-// H.264 media session: the first viewer opens it, the last one to leave closes it, and a viewer that joins
-// late, or falls behind, skips frames until the next keyframe so its decoder never sees a broken GOP.
+// and src/web.ts streams it to each open pane at GET /api/computer/live. Every pane shares one H.264 media
+// session: the first viewer opens it, the last one to leave closes it, and a viewer that joins late, or falls
+// behind, skips frames until the next keyframe so its decoder never sees a broken GOP. The same session carries
+// the owner's mouse and keyboard (POST /api/computer/input) while they have control.
 
 /** One H.264 access unit (Annex-B). A keyframe carries its SPS and PPS. */
 export type LiveFrame = { keyframe: boolean; data: Uint8Array };
 
+/**
+ * One wire v2 `InteractiveInputEvent`, as cua-spacesd's HTML5 viewer sends it. Points are normalized to the
+ * video frame ([0,1] from its top-left); keys use lower-cased DOM names; text arrives as committed strings.
+ */
+export type InputEvent =
+	| { kind: "text_commit"; text: string }
+	| { kind: "key"; key: string; state: "down" | "up"; modifiers: InputModifier[]; repeat: boolean }
+	| {
+			kind: "pointer";
+			phase: "move" | "down" | "up" | "cancel";
+			button: "left" | "right" | "middle" | null;
+			x_normalized: number;
+			y_normalized: number;
+			modifiers: InputModifier[];
+	  }
+	| {
+			kind: "scroll";
+			x_normalized: number;
+			y_normalized: number;
+			delta_x: number;
+			delta_y: number;
+			phase: "none";
+			momentum_phase: "none";
+			precise: boolean;
+	  };
+
+export type InputModifier = "command" | "shift" | "option" | "control";
+
 /** What createLiveScreen needs from the Mac: frames into `sink` until `close()` or `sink.closed`. */
 export type OpenLiveStream = (sink: { frame(frame: LiveFrame): void; closed(reason: string): void }) => Promise<{
 	requestKeyframe(): void;
+	/** Performs the events on the Mac, in order. */
+	input(events: InputEvent[]): void;
 	close(): Promise<void>;
 }>;
 
@@ -73,6 +104,14 @@ export function createLiveScreen(open: OpenLiveStream) {
 				session = undefined;
 				void stream?.close().catch(() => {});
 			};
+		},
+		/** How many viewers are subscribed. */
+		watching: () => viewers.size,
+		/** Sends the owner's input over the open session. Returns false while none is open yet. */
+		input(events: InputEvent[]): boolean {
+			const stream = session?.stream;
+			stream?.input(events);
+			return stream !== undefined;
 		},
 	};
 }

@@ -141,6 +141,8 @@ test("a bot's message lands in the other bot's chat and wakes it", { timeout: 20
 			(view) => view?.preview?.text === "On it." && !view.busy,
 		);
 		assert.equal(preview?.name, "Scout");
+		// The message from cua-bot stays out of the owner's preview, so the list can hide bot talk.
+		assert.equal(preview?.botPreview?.text, "cua-bot: Find flights to Tokyo.");
 
 		// What each bot sent with send_message is reported for a push; its private "Done." is not.
 		await until(async () => bot.replies.length, (n) => n >= 2);

@@ -15,6 +15,8 @@ import { fauxAssistantMessage, fauxProvider, fauxText } from "@earendil-works/pi
 import { type Conversation, createRegistry, Harness, MemoryStorage } from "@earendil-works/pi-durable";
 import { AVATAR_COLORS, AVATAR_SHAPES } from "../src/bots.ts";
 import { bindRoutines, createRoutinesExtension, syncRoutines, type RoutineView } from "../src/routines.ts";
+import { createLiveScreen, type InputEvent } from "../src/live-screen.ts";
+import { createScreenControl } from "../src/screen-control.ts";
 import { createBotServer } from "../src/web.ts";
 
 const context = BACKGROUND_CONTEXT;
@@ -225,25 +227,57 @@ test("POST /say still answers plain text", { timeout: 20_000 }, async () => {
 	}
 });
 
-test("POST /api/computer/control returns a fresh viewer link, and 404 without a Space", { timeout: 20_000 }, async () => {
-	const link = { url: "http://100.64.0.1:43141/viewer/#ticket=t", expiresAt: "2026-11-01T06:00:00Z" };
-	let minted = 0;
-	const server = createBotServer({ say: async () => "", context, viewer: async () => (minted++, link) });
+test("the owner takes control, drives the Mac through the live session, and hands it back; 404 without a Space", { timeout: 20_000 }, async () => {
+	const sent: InputEvent[][] = [];
+	const live = createLiveScreen(async (sink) => {
+		setImmediate(() => sink.frame({ keyframe: true, data: new Uint8Array([0, 0, 1, 0x67]) }));
+		return { requestKeyframe: () => {}, input: (events) => void sent.push(events), close: async () => {} };
+	});
+	const control = createScreenControl();
+	const server = createBotServer({ say: async () => "", context, live, control });
 	await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
 	const address = server.address();
 	assert.ok(address !== null && typeof address === "object");
+	const base = `http://127.0.0.1:${address.port}`;
+	const post = async (path: string, body: unknown) =>
+		(await fetch(`${base}${path}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) })).status;
+	const click: InputEvent[] = [
+		{ kind: "pointer", phase: "down", button: "left", x_normalized: 0.5, y_normalized: 0.25, modifiers: [] },
+		{ kind: "pointer", phase: "up", button: "left", x_normalized: 0.5, y_normalized: 0.25, modifiers: [] },
+	];
+	const watcher = new AbortController();
 	try {
-		const response = await fetch(`http://127.0.0.1:${address.port}/api/computer/control`, { method: "POST" });
-		assert.equal(response.status, 200);
-		assert.deepEqual(await response.json(), link);
-		assert.equal(minted, 1);
+		const watching = await fetch(`${base}/api/computer/live`, { signal: watcher.signal });
+		assert.equal(watching.status, 200);
+		assert.equal(await post("/api/computer/input", { events: click }), 409);
+
+		const taken = await fetch(`${base}/api/computer/control`, { method: "POST", body: JSON.stringify({ owner: true }) });
+		assert.deepEqual(await taken.json(), { owner: true });
+		let botResumed = false;
+		void control.botTurn().then(() => (botResumed = true));
+		assert.equal(await post("/api/computer/input", { events: click }), 204);
+		assert.deepEqual(sent, [click]);
+		assert.equal(await post("/api/computer/input", { events: [{ kind: "launch", app: "Terminal" }] }), 400);
+		assert.equal(await post("/api/computer/control", { owner: "yes" }), 400);
+		assert.equal(botResumed, false);
+
+		assert.equal(await post("/api/computer/control", { owner: false }), 200);
+		await new Promise((resolve) => setImmediate(resolve));
+		assert.equal(botResumed, true);
+
+		// Leaving the live screen while in control hands the Mac back too.
+		assert.equal(await post("/api/computer/control", { owner: true }), 200);
+		watcher.abort();
+		await eventually(async () => !control.owner);
 	} finally {
+		watcher.abort();
 		await new Promise<void>((resolve) => server.close(() => resolve()));
 	}
 
 	const session = await open();
 	try {
-		assert.equal((await api(session, "POST", "/api/computer/control")).status, 404);
+		assert.equal((await api(session, "POST", "/api/computer/control", { owner: true })).status, 404);
+		assert.equal((await api(session, "POST", "/api/computer/input", { events: [] })).status, 404);
 	} finally {
 		await close(session);
 	}
@@ -261,6 +295,8 @@ test("GET /api/computer/live frames each access unit as flag, length, bytes, and
 				setImmediate(() => end("done"));
 				return () => void unsubscribed++;
 			},
+			watching: () => 0,
+			input: () => false,
 		},
 	});
 	await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));

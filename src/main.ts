@@ -9,7 +9,7 @@ import { configure, type ConversationId, createRegistry, type Cursor, defineExte
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { botMemories, createBots, createBotsExtension } from "./bots.ts";
 import { toChatItem } from "./chat.ts";
-import { createComputerExtension, openLiveStream, pairedSpaceText, spaceId, spaceLabel, viewerLink } from "./computer.ts";
+import { createComputerExtension, openLiveStream, pairedSpaceText, screenControl, spaceId, spaceLabel } from "./computer.ts";
 import { createLiveScreen } from "./live-screen.ts";
 import { createBotToolSearchExtension } from "./tool-search.ts";
 import { connectCua, createCuaExtension, defaultCuaCommand } from "./cua-mcp.ts";
@@ -164,7 +164,7 @@ const botMemory = (id: number) => {
 	const bot = bots.list().find((b) => b.id === id);
 	return bot === undefined ? undefined : memories.of(bot);
 };
-createBotServer({ say, bots, memory, botMemory, model: MODEL.modelId, context, log, viewer: viewerLink, live, push, ...(approvals === undefined ? {} : { approvals }) }).listen(PORT, "127.0.0.1", () =>
+createBotServer({ say, bots, memory, botMemory, model: MODEL.modelId, context, log, control: screenControl, live, push, ...(approvals === undefined ? {} : { approvals }) }).listen(PORT, "127.0.0.1", () =>
 	log(`listening: web app http://127.0.0.1:${PORT}/ · chat POST http://127.0.0.1:${PORT}/say`),
 );
 

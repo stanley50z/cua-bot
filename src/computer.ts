@@ -20,6 +20,7 @@ import {
 import { toLlmContent, type CallToolResult, type LlmContent } from "@earendil-works/pi-mcp";
 import type { OpenLiveStream } from "./live-screen.ts";
 import { botModel } from "./models.ts";
+import { createScreenControl } from "./screen-control.ts";
 
 const SHOT_EDGE = 1200;
 const SHOTS_DIR = join(import.meta.dirname, "..", "data", "shots");
@@ -139,6 +140,9 @@ export async function captureScreenshot(): Promise<string> {
 	return savePng(new Uint8Array(shot.image));
 }
 
+/** Used by src/main.ts for the web app's Take control. While the owner has control, every driver call waits. */
+export const screenControl = createScreenControl();
+
 // Every bot shares the one Mac, so computer_use runs one task at a time across all of them.
 let screen: Promise<unknown> = Promise.resolve();
 function onScreen<T>(work: () => Promise<T>): Promise<T> {
@@ -244,34 +248,17 @@ export function spaceLabel(): string | undefined {
 }
 
 /**
- * Used by the web app's Take control button (POST /api/computer/control). A link to the paired Mac in
- * cua-spacesd's HTML5 viewer (live video, mouse and keyboard, clipboard, file drop), good for an hour.
- * The viewer refuses to be framed, so the app opens it in a new tab.
- */
-export async function viewerLink(): Promise<{ url: string; expiresAt: string }> {
-	const client = await (await connectSpace()).spacesd();
-	const minted: unknown = JSON.parse(
-		await client.callJson(
-			"/cua.env.v1.SystemService/CreateViewerTicket",
-			JSON.stringify({ policy: "SESSION_POLICY_ALLOW_ACTIVATION", clipboard: true }),
-			undefined,
-		),
-	);
-	if (minted === null || typeof minted !== "object" || !("viewerPath" in minted) || typeof minted.viewerPath !== "string") {
-		throw new Error("cua-spacesd returned no viewer link");
-	}
-	const expiresAt = "expiresAt" in minted && typeof minted.expiresAt === "string" ? minted.expiresAt : "";
-	return { url: new URL(minted.viewerPath, client.endpoint()).href, expiresAt };
-}
-
-/**
- * Used by src/main.ts as createLiveScreen's opener (src/live-screen.ts). A view-only H.264 stream of the
- * Mac's primary display, decoded by the web app. The SDK's own streamSession needs the Cua Spaces app's
- * streaming client, so this mints a media ticket and attaches to it directly.
+ * Used by src/main.ts as createLiveScreen's opener (src/live-screen.ts). An H.264 stream of the Mac's primary
+ * display, decoded by the web app, that also takes the owner's input while they have control. The SDK's own
+ * streamSession needs the Cua Spaces app's streaming client, so this mints a media ticket and attaches to it
+ * directly.
  */
 export const openLiveStream: OpenLiveStream = async (sink) => {
 	const space = await connectSpace();
-	const ticket = await space.openStream({ codecs: ["h264"], maxFps: 15, maxDimension: 1280, audio: false, policy: "view_only" });
+	const ticket = await space.openStream({ codecs: ["h264"], maxFps: 15, maxDimension: 1280, audio: false, policy: "allow_activation" });
+	// Input batches carry contiguous sequence numbers; the first one on a socket may start anywhere, and after a
+	// gap cua-spacesd names the sequence it expects next.
+	let sequence = 1;
 	const session = await space
 		.attachStream(
 			ticket,
@@ -280,6 +267,10 @@ export const openLiveStream: OpenLiveStream = async (sink) => {
 				onFrame: (frame) => sink.frame({ keyframe: frame.keyframe, data: new Uint8Array(frame.data.slice(0)) }),
 				onEvent: (event) => {
 					if (event.kind === "closed") sink.closed(`the Space closed the live stream: ${event.json}`);
+					if (event.kind === "error") {
+						const { code, expected_sequence } = (JSON.parse(event.json) as { payload?: { code?: string; expected_sequence?: number } }).payload ?? {};
+						if (code === "input_sequence_gap" && expected_sequence !== undefined) sequence = expected_sequence;
+					}
 				},
 			},
 			undefined,
@@ -290,6 +281,19 @@ export const openLiveStream: OpenLiveStream = async (sink) => {
 		});
 	return {
 		requestKeyframe: () => void session.requestKeyframe().catch(() => {}),
+		input: (events) => {
+			// 256 events is the protocol's bound on one batch.
+			for (let i = 0; i < events.length; i += 256) {
+				const batch = events.slice(i, i + 256);
+				const message = { type: "interactive_input", payload: { session_id: session.sessionId(), first_sequence: sequence, events: batch } };
+				try {
+					session.sendControl(JSON.stringify(message));
+				} catch {
+					return; // the socket closed, and its close event ends the viewers
+				}
+				sequence += batch.length;
+			}
+		},
 		close: async () => {
 			await session.close().catch(() => {});
 			await space.closeStream(ticket.mediaSessionId).catch(() => {});
@@ -401,6 +405,7 @@ function driverTool(info: DriverInfo, used: Set<string>): ToolRegistration {
 		executionMode: "sequential",
 		outputLimits: { maxBytes: 256 * 1024, maxLines: 4000, retain: "tail" },
 		execute: async (args) => {
+			await screenControl.botTurn();
 			const space = await connectSpace();
 			const callArgs = shotArgs(schema, args);
 			const result = await space.callTool(info.name, JSON.stringify(callArgs), toolService, undefined);
