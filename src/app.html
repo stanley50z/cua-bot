@@ -800,9 +800,8 @@ function focusInput(range = caretInInput()) {
   selection.addRange(range);
 }
 
-function addQuote(text) {
-  const clean = text.replace(/^(?:[ \t]*\n)+/, "").trimEnd();
-  if (clean === "") return;
+// A quote's chip for the message box, from text addQuote has already trimmed.
+function quoteChip(clean) {
   const chip = el("span", "qchip");
   chip.contentEditable = "false";
   chip.dataset.quote = clean;
@@ -814,6 +813,13 @@ function addQuote(text) {
   remove.append(icon("i-x"));
   remove.addEventListener("click", () => { chip.remove(); emptyInput(); focusInput(); });
   chip.append(icon("i-reply"), el("span", "", clean.replace(/\s+/g, " ")), remove);
+  return chip;
+}
+
+function addQuote(text) {
+  const clean = text.replace(/^(?:[ \t]*\n)+/, "").trimEnd();
+  if (clean === "") return;
+  const chip = quoteChip(clean);
   // A space after the chip gives the caret somewhere to sit, so typing continues right after it.
   const space = document.createTextNode(" ");
   const range = caretInInput();
@@ -831,24 +837,48 @@ $("input").addEventListener("input", emptyInput);
 
 const blockquote = (quote) => quote.split("\n").map((line) => (line === "" ? ">" : "> " + line)).join("\n");
 
-// The text the bot receives: the box's chips as markdown blockquotes and the owner's text between them, in order,
-// each part separated by a blank line.
-function composedText() {
+// The message box as its quotes ({quote}) and the owner's untrimmed text between them ({text}), in order.
+function inputParts() {
   const parts = [];
   let typed = "";
-  const flush = () => { if (typed.trim() !== "") parts.push(typed.trim()); typed = ""; };
+  const flush = () => { if (typed !== "") parts.push({ text: typed }); typed = ""; };
   const walk = (node) => {
     for (const child of node.childNodes) {
       if (child.nodeType === Node.TEXT_NODE) typed += child.data;
-      else if (child.classList?.contains("qchip")) { flush(); parts.push(blockquote(child.dataset.quote)); }
+      else if (child.classList?.contains("qchip")) { flush(); parts.push({ quote: child.dataset.quote }); }
       else if (child.nodeName === "BR") typed += "\n";
       else { if (child.nodeName === "DIV" && typed !== "") typed += "\n"; walk(child); }
     }
   };
   walk($("input"));
   flush();
-  return parts.join("\n\n");
+  return parts;
 }
+
+// The text the bot receives: the box's chips as markdown blockquotes and the owner's text between them, in order,
+// each part separated by a blank line.
+function composedText() {
+  return inputParts().map((part) => ("quote" in part ? blockquote(part.quote) : part.text.trim()))
+    .filter((part) => part !== "").join("\n\n");
+}
+
+// The unsent message box, kept in this browser so a reload or a cua-bot restart brings it back. The box is shared
+// across bots (see "quoted replies"), so there is one draft. Every change to the box saves it, including a send,
+// which empties it, and a failed send, which puts it back.
+const DRAFT_KEY = "cua-bot.draft";
+function restoreDraft() {
+  let parts = [];
+  try { parts = JSON.parse(localStorage.getItem(DRAFT_KEY) || "[]"); } catch { /* unreadable: start empty */ }
+  if (!Array.isArray(parts)) return;
+  $("input").replaceChildren(...parts.map((part) =>
+    typeof part?.quote === "string" ? quoteChip(part.quote) : document.createTextNode(String(part?.text ?? ""))));
+}
+restoreDraft();
+new MutationObserver(() => {
+  const parts = inputParts();
+  if (parts.length === 0) localStorage.removeItem(DRAFT_KEY);
+  else localStorage.setItem(DRAFT_KEY, JSON.stringify(parts));
+}).observe($("input"), { childList: true, subtree: true, characterData: true });
 
 // The owner's message as its blockquotes (without their "> ") and the text between them, in order.
 function quoteParts(text) {
