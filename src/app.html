@@ -334,6 +334,8 @@ dialog .row .btn.danger { margin-right: auto; }
 .conn.on .status { color: var(--ok); } .conn.here .status { color: var(--accent); font-weight: 600; }
 .conn .meta { grid-column: 2 / -1; color: var(--muted); font-size: 12.5px; overflow-wrap: anywhere; }
 .conn .spaces { grid-column: 2 / -1; margin-top: 6px; }
+.secret { filter: blur(4px); cursor: pointer; user-select: none; transition: filter .15s; }
+.secret.shown { filter: none; cursor: auto; user-select: text; }
 .spaces { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; max-width: 760px; }
 .conns > .spaces { margin: 8px 0 4px; }
 .space { display: grid; grid-template-columns: 15px minmax(0, 1fr) auto; align-items: center; column-gap: 8px; border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; background: var(--bg); font-size: 13px; }
@@ -2220,7 +2222,8 @@ function spaceList(spaces) {
       paired.title = "The paired Space: computer_use, space_bash, and the live screen use it";
       head.append(paired);
     }
-    row.append(icon("i-screen"), head, el("code", "id", space.id));
+    // A `direct:<host>:<port>` id carries the machine's address.
+    row.append(icon("i-screen"), head, space.id.startsWith("direct:") ? secret(space.id, "code", "id") : el("code", "id", space.id));
     const facts = [space.os, space.phase && capital(space.phase), space.version && "spacesd " + space.version].filter(Boolean);
     if (facts.length > 0) row.append(el("span", "about", facts.join(" · ")));
     list.append(row);
@@ -2228,13 +2231,29 @@ function spaceList(spaces) {
   return list;
 }
 
-// One computer: a status dot, its name, its status, a line per detail, and the Spaces it provides.
+// Blurred text, such as a user or an address, so a screenshot doesn't leak it; a click or Enter reveals it until the next render.
+function secret(text, tag = "span", className = "") {
+  const node = el(tag, (className + " secret").trim(), text);
+  node.tabIndex = 0;
+  node.setAttribute("role", "button");
+  node.title = "Click to reveal";
+  const reveal = () => { node.classList.add("shown"); node.removeAttribute("role"); node.removeAttribute("title"); node.removeAttribute("tabindex"); };
+  node.addEventListener("click", reveal, { once: true });
+  node.addEventListener("keydown", (event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); reveal(); } });
+  return node;
+}
+
+// One computer: a status dot, its name, its status, a line per detail (text and nodes, such as a secret), and the Spaces it provides.
 function connRow(kind, name, status, statusTitle, lines, spaces) {
   const row = el("div", "conn " + kind);
   const label = el("span", "status", status);
   label.title = statusTitle;
   row.append(el("span", "dot"), el("span", "name", name), label);
-  for (const line of lines) row.append(el("div", "meta", line));
+  for (const line of lines) {
+    const meta = el("div", "meta");
+    meta.append(...[line].flat());
+    row.append(meta);
+  }
   if (spaces.length > 0) row.append(spaceList(spaces));
   return row;
 }
@@ -2242,18 +2261,18 @@ function connRow(kind, name, status, statusTitle, lines, spaces) {
 function renderConnections(data) {
   const { here } = data;
   const hereLines = [
-    here.os + " · " + here.user,
+    [here.os + " · ", secret(here.user)],
     ...(here.aliases.length > 0 ? ["SSH as " + here.aliases.join(", ")] : []),
     "Running since " + shortDate(here.startedAt) + " · pid " + here.pid,
-    here.database,
+    [secret(here.database)],
   ];
   const computers = [connRow("here", here.name, "Runs cua-bot", "The Harness, every bot, and their routines run here; the coding tools act here unless a call names a machine", hereLines, here.spaces)];
   // Online machines first, each group in the SSH config's order.
   for (const m of data.machines.toSorted((a, b) => Number(b.online) - Number(a.online))) {
     const where = m.address + (m.port === 22 ? "" : ":" + m.port);
     computers.push(connRow(m.online ? "on" : "off", m.aliases.join(", "), m.online ? "Online" : "Not answering",
-      m.online ? `SSH port ${m.port} at ${m.address} accepted a connection` : `SSH port ${m.port} at ${m.address} didn't accept a connection within 3 seconds`,
-      [(m.user ? m.user + "@" : "") + where], m.spaces));
+      m.online ? `SSH port ${m.port} accepted a connection` : `SSH port ${m.port} didn't accept a connection within 3 seconds`,
+      [[secret((m.user ? m.user + "@" : "") + where)]], m.spaces));
   }
   const hint = (text) => el("p", "hint", text);
   const parts = [
