@@ -166,10 +166,7 @@ const bots = await createBots({
 });
 log(`bots: ${bots.list().map((bot) => bot.name).join(", ")}`);
 const live = createLiveScreen(openLiveStream);
-const botMemory = (id: number) => {
-	const bot = bots.list().find((b) => b.id === id);
-	return bot === undefined ? undefined : memories.of(bot);
-};
+const ownMemories = () => bots.list().map((bot) => ({ id: bot.id, memory: memories.of(bot) }));
 // The Connections tab: this computer, which runs the Harness and every bot, then the owner's SSH machines and the Spaces.
 const paired = spaceId();
 const connections = createConnections({
@@ -189,7 +186,7 @@ const connections = createConnections({
 	fallback: registrySpaces,
 	...(paired === undefined ? {} : { pairedSpace: paired }),
 });
-createBotServer({ say, bots, memory, botMemory, model: MODEL.modelId, context, log, control: screenControl, live, push, connections, ...(approvals === undefined ? {} : { approvals }) }).listen(PORT, "127.0.0.1", () =>
+createBotServer({ say, bots, memory, botMemories: ownMemories, model: MODEL.modelId, context, log, control: screenControl, live, push, connections, ...(approvals === undefined ? {} : { approvals }) }).listen(PORT, "127.0.0.1", () =>
 	log(`listening: web app http://127.0.0.1:${PORT}/ · chat POST http://127.0.0.1:${PORT}/say`),
 );
 

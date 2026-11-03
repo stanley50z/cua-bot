@@ -7,7 +7,7 @@
   "scripts": {
     "start": "node --env-file-if-exists=.env src/main.ts",
     "check": "tsc --noEmit",
-    "test": "node --test test/bots.test.ts test/cron.test.ts test/routines.test.ts test/routines-file.test.ts test/web.test.ts test/chat.test.ts test/computer-view.test.ts test/memory.test.ts test/models.test.ts test/executor.test.ts test/approvals.test.ts test/today.test.ts test/computer.test.ts test/cua-mcp.test.ts test/push.test.ts test/live-screen.test.ts test/pc.test.ts test/machines.test.ts"
+    "test": "node --test test/bots.test.ts test/cron.test.ts test/routines.test.ts test/routines-file.test.ts test/web.test.ts test/chat.test.ts test/computer-view.test.ts test/memory.test.ts test/models.test.ts test/executor.test.ts test/approvals.test.ts test/today.test.ts test/computer.test.ts test/cua-mcp.test.ts test/push.test.ts test/live-screen.test.ts test/pc.test.ts test/machines.test.ts test/connections.test.ts"
   },
   "engines": {
     "node": ">=22.19.0"

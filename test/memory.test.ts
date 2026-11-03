@@ -161,7 +161,7 @@ test("the web app lists, adds, and forgets facts", () =>
 	withDir(async (dir) => {
 		const memory = createMemory({ dir, now: () => new Date("2026-10-31T09:00:00") });
 		const own = createMemory({ dir: join(dir, "bot-7"), now: () => new Date("2026-10-31T09:00:00") });
-		const server: Server = createBotServer({ say: async (text) => text, memory, botMemory: (id) => (id === 7 ? own : undefined), context });
+		const server: Server = createBotServer({ say: async (text) => text, memory, botMemories: () => [{ id: 7, memory: own }], context });
 		await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
 		const address = server.address();
 		assert.ok(address !== null && typeof address === "object");
@@ -182,10 +182,11 @@ test("the web app lists, adds, and forgets facts", () =>
 			assert.deepEqual((await (await fetch(`${base}/api/memory`)).json()).log, []);
 
 			assert.equal((await post("/api/memory", { fact: "Reading list has Hackaday", tier: "profile", bot: 7 })).status, 201);
-			const both = await (await fetch(`${base}/api/memory?bot=7`)).json();
-			assert.deepEqual(both.own.profile.map((fact: { text: string }) => fact.text), ["Reading list has Hackaday"]);
-			assert.deepEqual(both.profile.map((fact: { text: string }) => fact.text), ["Timezone is Pacific"], "a bot's fact stays out of the shared memory");
-			assert.equal((await fetch(`${base}/api/memory?bot=8`)).status, 404);
+			const every = await (await fetch(`${base}/api/memory`)).json();
+			assert.deepEqual(every.bots.map((bot: { id: number }) => bot.id), [7], "one request lists every bot's own memory");
+			assert.deepEqual(every.bots[0].profile.map((fact: { text: string }) => fact.text), ["Reading list has Hackaday"]);
+			assert.deepEqual(every.profile.map((fact: { text: string }) => fact.text), ["Timezone is Pacific"], "a bot's fact stays out of the shared memory");
+			assert.equal((await post("/api/memory", { fact: "Lost", tier: "profile", bot: 8 })).status, 404);
 			assert.equal((await post("/api/memory/forget", { fact: "Reading list has Hackaday" })).status, 404, "forgetting without a bot looks only in the shared memory");
 			assert.equal((await post("/api/memory/forget", { fact: "Reading list has Hackaday", bot: 7 })).status, 200);
 		} finally {

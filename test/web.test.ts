@@ -17,6 +17,7 @@ import { AVATAR_COLORS, AVATAR_SHAPES } from "../src/bots.ts";
 import { bindRoutines, createRoutinesExtension, syncRoutines, type RoutineView } from "../src/routines.ts";
 import { createLiveScreen, type InputEvent } from "../src/live-screen.ts";
 import { createScreenControl } from "../src/screen-control.ts";
+import type { ConnectionsSnapshot } from "../src/connections.ts";
 import { createBotServer } from "../src/web.ts";
 
 const context = BACKGROUND_CONTEXT;
@@ -316,6 +317,33 @@ test("GET /api/computer/live frames each access unit as flag, length, bytes, and
 	const session = await open();
 	try {
 		assert.equal((await api(session, "GET", "/api/computer/live")).status, 404);
+	} finally {
+		await close(session);
+	}
+});
+
+test("GET /api/connections serves a fresh check, and 404s without one", { timeout: 20_000 }, async () => {
+	let checks = 0;
+	const here = { name: "desk", os: "Windows", user: "me", pid: 1, startedAt: 0, database: "db.sqlite", aliases: [], spaces: [] };
+	const server = createBotServer({
+		say: async () => "",
+		context,
+		connections: async (): Promise<ConnectionsSnapshot> => ({ here, machines: [], otherSpaces: [], checkedAt: ++checks }),
+	});
+	await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+	const address = server.address();
+	assert.ok(address !== null && typeof address === "object");
+	try {
+		const url = `http://127.0.0.1:${address.port}/api/connections`;
+		assert.equal((await (await fetch(url)).json()).checkedAt, 1);
+		assert.equal((await (await fetch(url)).json()).checkedAt, 2);
+	} finally {
+		await new Promise<void>((resolve) => server.close(() => resolve()));
+	}
+
+	const session = await open();
+	try {
+		assert.equal((await api(session, "GET", "/api/connections")).status, 404);
 	} finally {
 		await close(session);
 	}

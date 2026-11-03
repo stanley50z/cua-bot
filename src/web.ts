@@ -101,8 +101,8 @@ export type BotServerDeps = {
 	bots?: Bots;
 	/** Enables /api/memory*: the shared memory. */
 	memory?: Memory;
-	/** A bot's own memory, for /api/memory with a bot; undefined for an unknown bot. */
-	botMemory?: (id: number) => Memory | undefined;
+	/** Every bot's own memory, for /api/memory: GET lists them all, and a POST with a bot goes to that bot's. */
+	botMemories?: () => { id: number; memory: Memory }[];
 	/** Enables /api/approvals* and approval events on the chat stream. Absent when Executor is not configured. */
 	approvals?: Approvals;
 	/** Shown in the chat header, e.g. "grok-4.7". */
@@ -414,13 +414,13 @@ function factInput(body: unknown): { fact: string; tier: "profile" | "log"; bot?
 	return { fact: record.fact, tier, ...(typeof record.bot === "number" ? { bot: record.bot } : {}) };
 }
 
-// The Memory view: list every fact (log newest first) of the shared memory and, with a bot, that bot's
-// own; add one, or forget one by its text. A POST with `bot` goes to that bot's memory, else the shared one.
+// The Memory view: list every fact (log newest first) of the shared memory and of each bot's own, under
+// `bots`; add one, or forget one by its text. A POST with `bot` goes to that bot's memory, else the shared one.
 async function routeMemory(req: IncomingMessage, res: ServerResponse, deps: BotServerDeps, url: URL, method: string) {
 	const shared = deps.memory;
 	if (shared === undefined) throw new HttpError(404, "not found");
 	const ownOf = (bot: number) => {
-		const own = deps.botMemory?.(bot);
+		const own = deps.botMemories?.().find((entry) => entry.id === bot)?.memory;
 		if (own === undefined) throw new HttpError(404, "No such bot.");
 		return own;
 	};
@@ -430,9 +430,8 @@ async function routeMemory(req: IncomingMessage, res: ServerResponse, deps: BotS
 	};
 	try {
 		if (method === "GET" && url.pathname === "/api/memory") {
-			const bot = url.searchParams.get("bot");
-			const own = bot === null || bot === "" ? undefined : ownOf(Number(bot));
-			sendJson(res, 200, { ...(await listing(shared)), ...(own === undefined ? {} : { own: await listing(own) }) });
+			const bots = await Promise.all((deps.botMemories?.() ?? []).map(async ({ id, memory }) => ({ id, ...(await listing(memory)) })));
+			sendJson(res, 200, { ...(await listing(shared)), bots });
 			return;
 		}
 		if (method === "POST" && url.pathname === "/api/memory") {

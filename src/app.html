@@ -8,7 +8,7 @@
  The cua-bot web app (Workbench layout), served by src/web.ts at GET /. One self-contained document:
  inline CSS and JS, no dependencies, works offline. Talks to /api/bots (the bot list and its edits),
  /api/chat?bot=<id> (one bot's history, send, react, stop),
- /api/chat/events (server-sent live state), /api/chat/computer, /api/computer/control, /api/push, /api/routines,
+ /api/chat/events (server-sent live state), /api/chat/computer, /api/computer/control, /api/push, /api/routines, /api/connections,
  and /shots/. Registers /sw.js for Web Push once the owner turns notifications on.
  Every server string is rendered with textContent or built DOM nodes, never parsed as HTML.
 -->
@@ -275,17 +275,25 @@ dialog .row .btn.danger { margin-right: auto; }
 .table .none { color: var(--muted); padding: 24px 10px; }
 .file { padding: 0 24px 16px; color: var(--muted); font-size: 12.5px; }
 
-/* memory */
-.add-fact { display: flex; gap: 8px; padding: 16px 24px 4px; }
-.add-fact input { flex: 1; padding: 7px 10px; border: 1px solid var(--line); border-radius: 7px; font: inherit; color: var(--ink); }
-.add-fact select { padding: 6px 8px; border: 1px solid var(--line); border-radius: 7px; font: inherit; color: var(--ink); background: #fff; }
-.facts { padding: 12px 24px; overflow: auto; flex: 1; display: grid; grid-template-columns: 1fr 1fr; gap: 28px; align-content: start; }
-.facts h2 select { font: inherit; border: 1px solid var(--line); border-radius: 6px; padding: 2px 4px; color: var(--ink); background: #fff; }
-.facts h2 { grid-column: 1 / -1; font: 600 15px "Bahnschrift", sans-serif; margin: 0 0 -18px; }
-.facts h3 { font: 600 13px "Bahnschrift", sans-serif; color: var(--muted); margin: 0 0 6px; }
+/* memory: a sidebar of memories (every bot's shared one, then each bot's own) beside the open one's facts */
+#view-memory { flex-direction: row; }
+#memory-stores .navrow small { margin-left: auto; color: var(--muted); font-weight: 400; font-size: 12px; }
+#memory-stores .navsep { font: 600 11.5px "Bahnschrift", sans-serif; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; padding: 12px 10px 4px; }
+.bar .search { margin-left: auto; width: 240px; padding: 6px 10px; border: 1px solid var(--line); border-radius: 7px; font: inherit; font-size: 13px; color: var(--ink); }
+.facts { padding: 4px 24px 16px; overflow: auto; flex: 1; }
+.facts .note { margin: 12px 0 0; color: var(--muted); font-size: 12.5px; }
+.facts h2 { font: 600 13px "Bahnschrift", sans-serif; color: var(--muted); margin: 18px 0 2px; display: flex; align-items: baseline; gap: 8px; }
+.facts h2 small { font: 400 12px "Segoe UI Variable Text", "Segoe UI", sans-serif; }
 .facts ul { list-style: none; margin: 0; padding: 0; }
 .facts li { padding: 8px 0; border-bottom: 1px solid var(--line); font-size: 13.5px; display: grid; grid-template-columns: minmax(0, 1fr) auto 28px; gap: 10px; align-items: start; }
+.facts ul.hits li { grid-template-columns: minmax(0, 1fr) auto auto 28px; }
 .facts li .when { color: var(--muted); font-size: 12px; white-space: nowrap; padding-top: 1px; }
+.facts li .whose { font-size: 12px; padding: 1px 8px; border-radius: 5px; background: var(--bg); color: var(--muted); white-space: nowrap; }
+.facts li .whose.own { background: var(--me); color: var(--accent); }
+.facts mark { background: #FFE9A8; color: inherit; border-radius: 2px; }
+.facts .add { display: flex; padding: 8px 0; }
+.facts .add input { flex: 1; padding: 6px 10px; border: 1px dashed var(--line); border-radius: 7px; background: #FAFBFC; font: inherit; font-size: 13.5px; color: var(--ink); }
+.facts .add input:focus { border-style: solid; background: #fff; }
 .facts li .x { width: 26px; height: 26px; border: 0; background: transparent; border-radius: 6px; cursor: pointer; color: var(--muted); display: grid; place-items: center; }
 .facts li .x:hover { background: var(--bad-bg); color: var(--bad); }
 .facts li .x svg { width: 14px; height: 14px; }
@@ -305,6 +313,35 @@ dialog .row .btn.danger { margin-right: auto; }
 .setting.field input, .setting.field textarea { flex: none; width: 220px; border: 1px solid var(--line); border-radius: 7px; padding: 6px 9px; font: inherit; color: var(--ink); background: #fff; resize: vertical; }
 .setting.field input { font-size: 17px; letter-spacing: .12em; }
 .setting.field input:focus, .setting.field textarea:focus { outline: none; border-color: #9FB2C8; }
+/* settings' own sidebar, styled like the bot list: one row per tab */
+#view-settings { flex-direction: row; }
+.pane { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+.navrow { width: 100%; border: 0; background: transparent; border-radius: 9px; padding: 9px 10px; display: flex; align-items: center; gap: 10px; text-align: left; cursor: pointer; font-weight: 600; }
+.navrow svg { width: 18px; height: 18px; color: var(--muted); }
+.navrow:hover { background: #E9EDF2; }
+.navrow[aria-current="page"] { background: var(--panel); box-shadow: 0 0 0 1px var(--line); }
+
+/* connections: this computer, the owner's SSH machines, and the Spaces under the computer that provides each */
+.conns { padding: 4px 24px 24px; overflow: auto; flex: 1; }
+.conns h2 { max-width: 760px; font: 600 13px "Bahnschrift", sans-serif; color: var(--muted); letter-spacing: .02em; margin: 16px 0 0; }
+.conns .hint { max-width: 760px; margin: 2px 0 4px; color: var(--muted); font-size: 12.5px; }
+.conns .hint code { font-size: 12px; }
+.conn { max-width: 760px; display: grid; grid-template-columns: 8px minmax(0, 1fr) auto; column-gap: 12px; padding: 11px 0; border-bottom: 1px solid var(--line); }
+.conn .dot { width: 8px; height: 8px; border-radius: 50%; background: #B5BDC8; margin-top: 7px; }
+.conn.on .dot { background: var(--ok); } .conn.here .dot { background: var(--accent); }
+.conn .name { font-weight: 600; overflow-wrap: anywhere; }
+.conn .status { font-size: 12.5px; color: var(--muted); padding-top: 1px; }
+.conn.on .status { color: var(--ok); } .conn.here .status { color: var(--accent); font-weight: 600; }
+.conn .meta { grid-column: 2 / -1; color: var(--muted); font-size: 12.5px; overflow-wrap: anywhere; }
+.conn .spaces { grid-column: 2 / -1; margin-top: 6px; }
+.spaces { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; max-width: 760px; }
+.conns > .spaces { margin: 8px 0 4px; }
+.space { display: grid; grid-template-columns: 15px minmax(0, 1fr) auto; align-items: center; column-gap: 8px; border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; background: var(--bg); font-size: 13px; }
+.space svg { width: 15px; height: 15px; color: var(--muted); }
+.space .head { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 8px; min-width: 0; }
+.space .about { grid-column: 2 / -1; color: var(--muted); font-size: 12.5px; }
+.space .id { font-size: 12px; color: var(--muted); overflow-wrap: anywhere; text-align: right; }
+.space .paired { font: 600 11.5px "Bahnschrift", sans-serif; letter-spacing: .01em; padding: 1px 7px; border-radius: 5px; background: var(--me); color: var(--accent); }
 
 dialog { border: 1px solid var(--line); border-radius: 12px; padding: 22px 24px; width: min(560px, 92vw); color: var(--ink); box-shadow: 0 18px 50px rgba(27,33,41,.22); }
 dialog::backdrop { background: rgba(27,33,41,.35); }
@@ -364,6 +401,7 @@ dialog .row { display: flex; gap: 8px; justify-content: flex-end; margin-top: 18
  <symbol id="i-expand" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 4h6v6M10 20H4v-6M20 4l-6.5 6.5M4 20l6.5-6.5"/></symbol>
  <symbol id="i-eye" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="3"/></symbol>
  <symbol id="i-pointer" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M6 3.5l12.5 7.2-5.6 1.4 3.3 5.9-2.6 1.5-3.3-5.9-4.3 3.9z"/></symbol>
+ <symbol id="i-screen" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4.5" width="18" height="12" rx="1.5"/><path d="M9 20h6M12 16.5V20"/></symbol>
  <symbol id="i-edit"viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13 7l4 4"/></symbol>
 </svg>
 
@@ -405,32 +443,39 @@ dialog .row { display: flex; gap: 8px; justify-content: flex-end; margin-top: 18
    <p class="file">Each bot's routines are saved in its folder, <code><span id="routine-dir">bots</span>/&lt;bot name&gt;/routines.json</code>; a bot without routines has none. Hand edits to those files apply within a few seconds, and routines a bot creates in chat appear here.</p>
   </section>
   <section class="view" id="view-memory" aria-labelledby="memory-h" hidden>
-   <div class="bar"><h1 id="memory-h">Memory</h1><span class="aside">Each bot reads its own memory and the shared memory before every reply.</span></div>
-   <div class="banner" id="memory-error" role="alert" hidden></div>
-   <form class="add-fact" id="fact-form">
-    <input id="fact-text" maxlength="500" aria-label="A fact for the bot to remember" placeholder="Add a fact, for example: My partner is Dana" autocomplete="off">
-    <select id="fact-scope" aria-label="Who sees it"><option value="own" id="fact-scope-own">Only this bot</option><option value="shared">Every bot</option></select>
-    <select id="fact-tier" aria-label="Where to save it"><option value="profile">About you</option><option value="log">Recent</option></select>
-    <button type="submit" class="btn primary">Remember</button>
-   </form>
-   <div class="facts">
-    <h2><select id="memory-bot" aria-label="Whose memory to show"></select> only</h2>
-    <div><h3>Lasting</h3><ul id="own-profile"></ul></div>
-    <div><h3>Recent</h3><ul id="own-log"></ul></div>
-    <h2>Shared by every bot</h2>
-    <div><h3>About you</h3><ul id="facts-profile"></ul></div>
-    <div><h3>Recent</h3><ul id="facts-log"></ul></div>
+   <nav class="botlist" aria-labelledby="memory-h">
+    <div class="bar"><h2 id="memory-h">Memory</h2></div>
+    <ul id="memory-stores"></ul>
+   </nav>
+   <div class="pane">
+    <div class="bar"><h1 id="memory-title">Every bot</h1><input type="search" class="search" id="memory-search" placeholder="Search all memory" aria-label="Search all memory" autocomplete="off"></div>
+    <div class="banner" id="memory-error" role="alert" hidden></div>
+    <div class="facts" id="memory-facts"></div>
+    <p class="file" id="memory-file"></p>
    </div>
-   <p class="file">Saved as markdown: this bot's in <code id="own-dir">bots/&lt;bot&gt;/memory</code>, the shared memory in <code id="memory-dir">data/memory</code>. Each has <code>profile.md</code> and one file per month under <code>log/</code>. Edit them by hand anytime; the bots read them fresh on every reply.</p>
   </section>
   <section class="view" id="view-settings" aria-labelledby="settings-h" hidden>
-   <div class="bar"><h1 id="settings-h">Settings</h1><span class="aside">Saved in this browser.</span></div>
-   <div class="settings">
-    <label class="setting"><span><b>Show messages between bots</b><small>What one bot sends another, in both bots' chats and the bot list.</small></span><input type="checkbox" data-setting="botTalk"></label>
-    <label class="setting"><span><b>Show tool steps</b><small>A chip for each tool a bot runs, like space bash or Remembered, that opens its output, plus its screenshots.</small></span><input type="checkbox" data-setting="tools"></label>
-    <label class="setting"><span><b>Show routine runs</b><small>A line in the bot's chat each time one of its routines starts.</small></span><input type="checkbox" data-setting="routineRuns"></label>
-    <label class="setting field"><span><b>Quick replies</b><small>One per line. They show on the bar over text you select in a message; clicking one sends that text quoted, with the reply under it.</small></span><textarea id="set-phrases" rows="4" spellcheck="false"></textarea></label>
-    <label class="setting field"><span><b>Quick emoji</b><small>The reactions under a reply's smiley, and emoji replies on the bar over selected text, which send that text quoted with the emoji under it.</small></span><input type="text" id="set-emoji" spellcheck="false" autocomplete="off"></label>
+   <nav class="botlist" aria-labelledby="settings-h">
+    <div class="bar"><h2 id="settings-h">Settings</h2></div>
+    <ul id="settings-tabs">
+     <li><button type="button" class="navrow" data-tab="chat" aria-current="page"><svg aria-hidden="true"><use href="#i-chat"/></svg>Chat</button></li>
+     <li><button type="button" class="navrow" data-tab="connections" aria-current="false"><svg aria-hidden="true"><use href="#i-screen"/></svg>Connections</button></li>
+    </ul>
+   </nav>
+   <div class="pane" id="tab-chat">
+    <div class="bar"><h1>Chat</h1><span class="aside">Saved in this browser.</span></div>
+    <div class="settings">
+     <label class="setting"><span><b>Show messages between bots</b><small>What one bot sends another, in both bots' chats and the bot list.</small></span><input type="checkbox" data-setting="botTalk"></label>
+     <label class="setting"><span><b>Show tool steps</b><small>A chip for each tool a bot runs, like space bash or Remembered, that opens its output, plus its screenshots.</small></span><input type="checkbox" data-setting="tools"></label>
+     <label class="setting"><span><b>Show routine runs</b><small>A line in the bot's chat each time one of its routines starts.</small></span><input type="checkbox" data-setting="routineRuns"></label>
+     <label class="setting field"><span><b>Quick replies</b><small>One per line. They show on the bar over text you select in a message; clicking one sends that text quoted, with the reply under it.</small></span><textarea id="set-phrases" rows="4" spellcheck="false"></textarea></label>
+     <label class="setting field"><span><b>Quick emoji</b><small>The reactions under a reply's smiley, and emoji replies on the bar over selected text, which send that text quoted with the emoji under it.</small></span><input type="text" id="set-emoji" spellcheck="false" autocomplete="off"></label>
+    </div>
+   </div>
+   <div class="pane" id="tab-connections" hidden>
+    <div class="bar"><h1>Connections</h1><span class="aside" id="conn-checked"></span><button type="button" class="btn" id="conn-refresh">Check again</button></div>
+    <div class="banner" id="conn-error" role="alert" hidden></div>
+    <div class="conns" id="connections" aria-live="polite"></div>
    </div>
   </section>
  </main>
@@ -1745,7 +1790,7 @@ function connect() {
     else if (data.type === "live") { state.live = data.live; renderLive(); renderChat(); }
     else if (data.type === "computer") { state.computer = data.computer; renderComputer(); }
     else if (data.type === "approvals") { state.approvals = data.approvals; renderChat(); }
-    else if (data.type === "bots") { state.bots = data.bots; renderBots(); }
+    else if (data.type === "bots") { state.bots = data.bots; renderBots(); renderMemoryStores(); }
     else if (data.type === "control") applyControl(data.owner);
   };
 }
@@ -1852,11 +1897,12 @@ for (const type of ["resize", "blur"]) window.addEventListener(type, () => close
 document.addEventListener("scroll", () => closeBotMenu(false), true);
 
 // Opens a bot's chat: its history, its computer pane, and a fresh event stream. The choice is kept in the URL.
+// Picking a bot in the Memory view opens it too, so every view works on the same bot.
 async function selectBot(id) {
   if (!state.bots.some((b) => b.id === id)) id = mainId();
   const switched = id !== state.bot;
   state.bot = id;
-  history.replaceState(null, "", id === mainId() ? location.pathname : "#bot=" + id);
+  savePlace(false);
   renderBots();
   if (!switched && source) return;
   Object.assign(state, { items: [], ids: new Set(), before: null, live: { busy: false, partial: "", tools: [] }, queued: [], open: new Set(), computer: { steps: [] }, picking: null, reacting: new Map() });
@@ -1866,7 +1912,7 @@ async function selectBot(id) {
   connect();
   request("GET", "/api/chat/computer?bot=" + id).then((c) => { if (id === state.bot) { state.computer = c; renderComputer(); } }).catch(() => {});
   await loadHistory().catch((error) => showChatError("Could not load the conversation: " + error.message));
-  focusInput();
+  if (place.view === "chat") focusInput();
 }
 
 // The bot dialog's avatar: `picked` is what it shows and what Save sends; Reset goes back to `pickDefault`,
@@ -2062,15 +2108,59 @@ $("notify").addEventListener("click", async () => {
   showNotifyState();
 });
 
-/* ---------- views ---------- */
-document.querySelectorAll(".rail button[data-view]").forEach((button) => button.addEventListener("click", () => {
-  const view = button.dataset.view;
-  document.querySelectorAll(".rail button[data-view]").forEach((b) => b.setAttribute("aria-pressed", String(b === button)));
-  for (const name of ["chat", "routines", "memory", "settings"]) $("view-" + name).hidden = view !== name;
-  if (view === "routines") loadRoutines();
-  else if (view === "memory") { memoryBot = state.bot; loadMemory(); }
-  else focusInput();
-}));
+/* ---------- views and the URL ---------- */
+// The URL's hash keeps the owner's place, so a reload, Back, or a copied link lands there again: `view` (routines,
+// memory, settings; the chat when absent), `tab` (Settings' connections; its chat tab when absent), and `bot` (the open
+// bot; the main bot when absent). #bot=<id> links from before views had URLs still open that bot's chat.
+const VIEWS = ["chat", "routines", "memory", "settings"], TABS = ["chat", "connections"];
+let place = { view: "chat", tab: "chat" };
+
+function readPlace() {
+  const hash = new URLSearchParams(location.hash.slice(1));
+  const pick = (key, names) => (names.includes(hash.get(key)) ? hash.get(key) : names[0]);
+  return { view: pick("view", VIEWS), tab: pick("tab", TABS), bot: Number(hash.get("bot")) || undefined };
+}
+
+// A new view or tab is a new history entry, so Back returns to the last one; a bot switch replaces the entry.
+function savePlace(push) {
+  const hash = new URLSearchParams();
+  if (place.view !== "chat") hash.set("view", place.view);
+  if (place.view === "settings" && place.tab !== "chat") hash.set("tab", place.tab);
+  if (state.bot !== null && state.bot !== mainId()) hash.set("bot", state.bot);
+  const next = hash.size > 0 ? "#" + hash : "";
+  if (next === location.hash) return;
+  history[push ? "pushState" : "replaceState"](null, "", next || location.pathname + location.search);
+}
+
+function showView(view, tab = place.tab) {
+  place = { view, tab };
+  document.querySelectorAll(".rail button[data-view]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.view === view)));
+  for (const name of VIEWS) $("view-" + name).hidden = view !== name;
+  document.querySelectorAll("#settings-tabs button[data-tab]").forEach((b) => b.setAttribute("aria-current", b.dataset.tab === tab ? "page" : "false"));
+  for (const name of TABS) $("tab-" + name).hidden = tab !== name;
+}
+
+// Fetches what the open view shows; the chat keeps itself current over its event stream.
+function loadView() {
+  if (place.view === "routines") loadRoutines();
+  else if (place.view === "memory") loadMemory();
+  else if (place.view === "settings" && place.tab === "connections") loadConnections();
+  else if (place.view === "chat") focusInput();
+}
+
+function goTo(view, tab) {
+  showView(view, tab);
+  savePlace(true);
+  loadView();
+}
+document.querySelectorAll(".rail button[data-view]").forEach((button) => button.addEventListener("click", () => goTo(button.dataset.view)));
+document.querySelectorAll("#settings-tabs button[data-tab]").forEach((button) => button.addEventListener("click", () => goTo("settings", button.dataset.tab)));
+window.addEventListener("popstate", () => {
+  const next = readPlace();
+  showView(next.view, next.tab);
+  selectBot(next.bot ?? mainId());
+  loadView();
+});
 
 /* ---------- settings ---------- */
 // Each toggle names its key in `settings` with data-setting.
@@ -2102,63 +2192,211 @@ for (const { input, key, parse, join } of quickFields) {
   input.addEventListener("change", () => { input.value = settings[key].join(join); });
 }
 
+/* ---------- connections ---------- */
+function showConnError(message) { $("conn-error").textContent = message; $("conn-error").hidden = !message; }
+const capital = (text) => text.charAt(0).toUpperCase() + text.slice(1);
+
+// Every check is fresh on the server: it probes each SSH machine (up to 3 s) and asks Cua for its Spaces.
+async function loadConnections() {
+  const button = $("conn-refresh");
+  if (button.disabled) return;
+  button.disabled = true;
+  button.textContent = "Checking…";
+  try {
+    renderConnections(await request("GET", "/api/connections"));
+    showConnError("");
+  } catch (error) { showConnError("Could not check the connections: " + error.message); }
+  finally { button.disabled = false; button.textContent = "Check again"; }
+}
+$("conn-refresh").addEventListener("click", loadConnections);
+
+function spaceList(spaces) {
+  const list = el("ul", "spaces");
+  for (const space of spaces) {
+    const row = el("li", "space"), head = el("span", "head");
+    head.append(el("b", "", space.name || space.id));
+    if (space.paired) {
+      const paired = el("span", "paired", "Bots' computer");
+      paired.title = "The paired Space: computer_use, space_bash, and the live screen use it";
+      head.append(paired);
+    }
+    row.append(icon("i-screen"), head, el("code", "id", space.id));
+    const facts = [space.os, space.phase && capital(space.phase), space.version && "spacesd " + space.version].filter(Boolean);
+    if (facts.length > 0) row.append(el("span", "about", facts.join(" · ")));
+    list.append(row);
+  }
+  return list;
+}
+
+// One computer: a status dot, its name, its status, a line per detail, and the Spaces it provides.
+function connRow(kind, name, status, statusTitle, lines, spaces) {
+  const row = el("div", "conn " + kind);
+  const label = el("span", "status", status);
+  label.title = statusTitle;
+  row.append(el("span", "dot"), el("span", "name", name), label);
+  for (const line of lines) row.append(el("div", "meta", line));
+  if (spaces.length > 0) row.append(spaceList(spaces));
+  return row;
+}
+
+function renderConnections(data) {
+  const { here } = data;
+  const hereLines = [
+    here.os + " · " + here.user,
+    ...(here.aliases.length > 0 ? ["SSH as " + here.aliases.join(", ")] : []),
+    "Running since " + shortDate(here.startedAt) + " · pid " + here.pid,
+    here.database,
+  ];
+  const computers = [connRow("here", here.name, "Runs cua-bot", "The Harness, every bot, and their routines run here; the coding tools act here unless a call names a machine", hereLines, here.spaces)];
+  // Online machines first, each group in the SSH config's order.
+  for (const m of data.machines.toSorted((a, b) => Number(b.online) - Number(a.online))) {
+    const where = m.address + (m.port === 22 ? "" : ":" + m.port);
+    computers.push(connRow(m.online ? "on" : "off", m.aliases.join(", "), m.online ? "Online" : "Not answering",
+      m.online ? `SSH port ${m.port} at ${m.address} accepted a connection` : `SSH port ${m.port} at ${m.address} didn't accept a connection within 3 seconds`,
+      [(m.user ? m.user + "@" : "") + where], m.spaces));
+  }
+  const hint = (text) => el("p", "hint", text);
+  const parts = [
+    el("h2", "", "Computers"),
+    hint("This computer, then each host in your SSH config; the bots reach those by passing it as machine to read, write, edit, and bash."),
+    ...computers,
+  ];
+  if (data.otherSpaces.length > 0) parts.push(el("h2", "", "Other Spaces"), hint("Cloud Spaces, and Spaces on computers that aren't in your SSH config."), spaceList(data.otherSpaces));
+  if (data.spacesError) parts.push(hint("Cua didn't list its Spaces (" + data.spacesError + "), so they come from ~/.cua/spaces.json without their status."));
+  $("connections").replaceChildren(...parts);
+  $("conn-checked").textContent = "Checked " + timeSec(data.checkedAt);
+}
+
 /* ---------- memory ---------- */
+// The sidebar lists the shared memory every bot sees, then each bot's own; `memoryView.shared` says which is
+// open, the shared one or the open bot's (picking a bot here opens it everywhere). A search covers them all.
+const memoryView = { data: null, shared: true };
 function showMemoryError(message) { $("memory-error").textContent = message; $("memory-error").hidden = !message; }
 const factDate = (date) => new Date(date + "T12:00:00").toLocaleDateString(undefined, { month: "short", day: "numeric" });
-
-// The bot whose own memory the view shows; it starts as the bot whose chat is open.
-let memoryBot = null;
-$("memory-bot").addEventListener("change", () => { memoryBot = Number($("memory-bot").value); loadMemory(); });
+const memoryQuery = () => $("memory-search").value.trim();
+const ownMemory = (id) => memoryView.data?.bots.find((own) => own.id === id);
+$("memory-search").addEventListener("input", () => renderMemory());
 
 async function loadMemory() {
   try {
-    const bot = state.bots.find((b) => b.id === memoryBot) || currentBot();
-    memoryBot = bot.id;
-    $("memory-bot").replaceChildren(...state.bots.map((b) => { const option = el("option", "", b.name); option.value = b.id; option.selected = b.id === bot.id; return option; }));
-    const data = await request("GET", "/api/memory?bot=" + bot.id);
-    $("fact-scope-own").textContent = "Only " + bot.name;
-    $("memory-dir").textContent = data.dir;
-    $("own-dir").textContent = data.own.dir;
-    renderFacts($("own-profile"), data.own.profile, "Nothing yet. " + bot.name + " saves what only its job needs here.", bot.id);
-    renderFacts($("own-log"), data.own.log, "Nothing yet.", bot.id);
-    renderFacts($("facts-profile"), data.profile, "Nothing yet. The bots save lasting facts about you here as they learn them.");
-    renderFacts($("facts-log"), data.log, "Nothing yet. Dated events and plans go here.");
+    memoryView.data = await request("GET", "/api/memory");
     showMemoryError("");
+    renderMemory();
   } catch (error) { showMemoryError(error.message); }
 }
 
-// `bot` is set for a bot's own facts, so forgetting one leaves the shared memory alone.
-function renderFacts(list, facts, emptyText, bot) {
-  list.textContent = "";
-  if (facts.length === 0) { list.append(el("li", "none", emptyText)); return; }
-  for (const fact of facts) {
-    const row = el("li");
-    const forget = el("button", "x");
-    forget.type = "button";
-    forget.setAttribute("aria-label", "Forget: " + fact.text);
-    forget.title = "Forget";
-    forget.append(icon("i-x"));
-    forget.addEventListener("click", async () => {
-      forget.disabled = true;
-      try { await request("POST", "/api/memory/forget", { fact: fact.text, ...(bot === undefined ? {} : { bot }) }); await loadMemory(); }
-      catch (error) { showMemoryError(error.message); forget.disabled = false; }
-    });
-    row.append(el("span", "", fact.text), el("span", "when", factDate(fact.date)), forget);
-    list.append(row);
-  }
+// `bot` is a bot's id for its own memory, absent for the shared one.
+function openMemory(bot) {
+  memoryView.shared = bot === undefined;
+  $("memory-search").value = "";
+  if (bot !== undefined) selectBot(bot);
+  renderMemory();
 }
 
-$("fact-form").addEventListener("submit", async (event) => {
-  event.preventDefault();
-  const fact = $("fact-text").value;
-  if (fact.trim() === "") return;
-  try {
-    const own = $("fact-scope").value === "own";
-    await request("POST", "/api/memory", { fact, tier: $("fact-tier").value, ...(own ? { bot: memoryBot } : {}) });
-    $("fact-text").value = "";
-    await loadMemory();
-  } catch (error) { showMemoryError(error.message); }
-});
+// Also called when the bot list changes, so a renamed or new bot shows without redrawing the facts.
+function renderMemoryStores() {
+  const data = memoryView.data;
+  if (data === null) return;
+  const searching = memoryQuery() !== "";
+  const row = (label, store, current, bot) => {
+    const count = store ? store.profile.length + store.log.length : 0;
+    const button = el("button", "navrow", label);
+    button.type = "button";
+    button.setAttribute("aria-current", current && !searching ? "page" : "false");
+    button.setAttribute("aria-label", `${label}, ${count} ${count === 1 ? "fact" : "facts"}`);
+    if (count > 0) button.append(el("small", "", String(count)));
+    button.addEventListener("click", () => openMemory(bot));
+    const item = el("li");
+    item.append(button);
+    return item;
+  };
+  $("memory-stores").replaceChildren(row("Every bot", data, memoryView.shared), el("li", "navsep", "Only one bot"),
+    ...state.bots.map((bot) => row(bot.name, ownMemory(bot.id), !memoryView.shared && bot.id === state.bot, bot.id)));
+}
+
+function renderMemory() {
+  const data = memoryView.data;
+  if (data === null) return;
+  renderMemoryStores();
+  const query = memoryQuery();
+  if (query !== "") { renderMemoryHits(query); return; }
+  const bot = currentBot();
+  const store = memoryView.shared ? data : ownMemory(bot.id) ?? { profile: [], log: [], dir: "" };
+  const target = memoryView.shared ? undefined : bot.id;
+  $("memory-title").textContent = memoryView.shared ? "Every bot" : bot.name;
+  $("memory-facts").replaceChildren(
+    el("p", "note", memoryView.shared ? "Every bot sees these." : `Only ${bot.name} sees these, on top of everything under Every bot.`),
+    ...factSection("profile", "Lasting", "Read before every reply.", "Add a lasting fact, for example: My partner is Dana", store.profile.toReversed(), target),
+    ...factSection("log", "Dated", "Events and plans. The latest 30 are read before every reply; a bot finds older ones by searching.", "Add a dated event, for example: Dentist on Nov 12", store.log, target));
+  $("memory-file").hidden = !store.dir;
+  $("memory-file").replaceChildren("Saved as markdown in ", el("code", "", store.dir), ": ", el("code", "", "profile.md"), " for lasting facts and one file per month under ", el("code", "", "log/"), " for dated ones. Edit them by hand anytime; the bots read them fresh on every reply.");
+}
+
+// One kind of fact in the open memory, newest first, with its own add line: where you type decides who
+// sees the fact and its kind. `bot` is set in a bot's own memory.
+function factSection(tier, title, hint, placeholder, facts, bot) {
+  const heading = el("h2", "", title);
+  heading.append(el("small", "", hint));
+  const list = el("ul");
+  list.append(...facts.map((fact) => factRow(fact, bot, el("span", "when", factDate(fact.date)))));
+  const form = el("form", "add");
+  const input = el("input");
+  Object.assign(input, { placeholder, maxLength: 500, autocomplete: "off" });
+  input.dataset.tier = tier;
+  input.setAttribute("aria-label", `Add a ${title.toLowerCase()} fact`);
+  form.append(input);
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    if (input.value.trim() === "") return;
+    try {
+      await request("POST", "/api/memory", { fact: input.value, tier, ...(bot === undefined ? {} : { bot }) });
+      await loadMemory();
+      $("memory-facts").querySelector(`input[data-tier="${tier}"]`)?.focus();
+    } catch (error) { showMemoryError(error.message); }
+  });
+  return [heading, list, form];
+}
+
+// Every fact containing the search, in any memory, each labeled with whose it is.
+function renderMemoryHits(query) {
+  const data = memoryView.data;
+  const lower = query.toLowerCase();
+  const stores = [{ facts: [...data.profile, ...data.log] }, ...data.bots.map((own) => ({ bot: own.id, facts: [...own.profile, ...own.log] }))];
+  const hits = stores.flatMap(({ bot, facts }) => facts.filter((fact) => fact.text.toLowerCase().includes(lower)).map((fact) => ({ fact, bot })));
+  const whose = (bot) => bot === undefined ? el("span", "whose", "Every bot") : el("span", "whose own", state.bots.find((b) => b.id === bot)?.name ?? "A removed bot");
+  $("memory-title").textContent = `${hits.length} ${hits.length === 1 ? "match" : "matches"}`;
+  const list = el("ul", "hits");
+  list.append(...(hits.length > 0 ? hits.map(({ fact, bot }) => factRow(fact, bot, whose(bot), el("span", "when", factDate(fact.date)))) : [el("li", "none", "No fact matches.")]));
+  $("memory-facts").replaceChildren(el("p", "note", "Searching every memory."), list);
+  $("memory-file").hidden = true;
+}
+
+// A fact, what goes beside it, and its forget ✕. `bot` is set for a bot's own fact, so forgetting it leaves the
+// shared memory alone.
+function factRow(fact, bot, ...asides) {
+  const forget = el("button", "x");
+  forget.type = "button";
+  forget.setAttribute("aria-label", "Forget: " + fact.text);
+  forget.title = "Forget";
+  forget.append(icon("i-x"));
+  forget.addEventListener("click", async () => {
+    forget.disabled = true;
+    try { await request("POST", "/api/memory/forget", { fact: fact.text, ...(bot === undefined ? {} : { bot }) }); await loadMemory(); }
+    catch (error) { showMemoryError(error.message); forget.disabled = false; }
+  });
+  const row = el("li");
+  row.append(marked(fact.text, memoryQuery()), ...asides, forget);
+  return row;
+}
+
+// The text with the first match of `query` highlighted.
+function marked(text, query) {
+  const span = el("span");
+  const at = query === "" ? -1 : text.toLowerCase().indexOf(query.toLowerCase());
+  if (at < 0) span.textContent = text;
+  else span.append(text.slice(0, at), el("mark", "", text.slice(at, at + query.length)), text.slice(at + query.length));
+  return span;
+}
 
 /* ---------- routines ---------- */
 let routines = [];
@@ -2269,13 +2507,15 @@ $("routine-form").addEventListener("submit", async (event) => {
 });
 
 /* ---------- start ---------- */
-loadBots().then(() => selectBot(Number((location.hash.match(/^#bot=(\d+)$/) || [])[1]) || mainId()));
+const start = readPlace();
+showView(start.view, start.tab);
+loadBots().then(() => { selectBot(start.bot ?? mainId()); loadView(); });
 playLive();
 loadApprovals();
 showNotifyState();
 if (pushSupported && Notification.permission === "granted") turnOnPush();
 setInterval(() => { if (!$("view-routines").hidden) loadRoutines(); }, 30000);
-focusInput();
+if (start.view === "chat") focusInput();
 </script>
 </body>
 </html>

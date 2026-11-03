@@ -255,7 +255,7 @@ export function spaceLabel(): string | undefined {
  */
 export const openLiveStream: OpenLiveStream = async (sink) => {
 	const space = await connectSpace();
-	const ticket = await space.openStream({ codecs: ["h264"], maxFps: 15, maxDimension: 1280, audio: false, policy: "allow_activation" });
+	const ticket = await space.openStream({ codecs: ["h264"], maxFps: 15, maxDimension: 0, audio: false, policy: "allow_activation" });
 	// Input batches carry contiguous sequence numbers; the first one on a socket may start anywhere, and after a
 	// gap cua-spacesd names the sequence it expects next.
 	let sequence = 1;
