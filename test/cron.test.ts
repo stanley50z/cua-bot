@@ -97,6 +97,21 @@ test("labels name the common shapes and keep the raw spec otherwise", () => {
 	assert.equal(cronLabel("CRON_TZ=America/New_York 30 7 * * 1-5"), "weekdays 07:30 America/New_York");
 });
 
+test("labels spell out hour ranges, steps, lists, and calendar days", () => {
+	assert.equal(cronLabel("CRON_TZ=America/New_York 36 9-21 * * *"), "hourly 09:36–21:36 America/New_York");
+	assert.equal(cronLabel("17 8-22/2 * * *"), "every 2 hours 08:17–22:17");
+	assert.equal(cronLabel("0 9-18/4 * * *"), "every 4 hours 09:00–17:00");
+	assert.equal(cronLabel("0 */6 * * *"), "every 6 hours 00:00–18:00");
+	assert.equal(cronLabel("30 * * * *"), "hourly at :30");
+	assert.equal(cronLabel("0 8-18 * * 1-5"), "weekdays, hourly 08:00–18:00");
+	assert.equal(cronLabel("0 17,9,13 * * *"), "daily 09:00, 13:00 and 17:00");
+	assert.equal(cronLabel("0 9 1 * *"), "monthly on the 1st 09:00");
+	assert.equal(cronLabel("0 9 22 * *"), "monthly on the 22nd 09:00");
+	assert.equal(cronLabel("0 9 12 * *"), "monthly on the 12th 09:00");
+	assert.equal(cronLabel("0 9 9 11 *"), "yearly Nov 9 09:00");
+	assert.equal(cronLabel("0 9 1-7 * 1"), "0 9 1-7 * 1");
+});
+
 test("bad specs throw instead of guessing", () => {
 	const from = utc(2026, 10, 30, 0, 0);
 	for (const bad of ["", "banana", "61 * * * *", "* * * *", "0 9 * * * *", "@sometimes", "@every", "@every 0m", "@every 5x", "@every -5m"]) {

@@ -26,6 +26,7 @@ const NICKNAME_LABELS: Record<string, string> = {
 	"@annually": "yearly Jan 1 00:00",
 };
 const WEEKDAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const DOW_NAMES: Record<string, number> = { sun: 0, mon: 1, tue: 2, wed: 3, thu: 4, fri: 5, sat: 6 };
 const UNIT_MS: Record<string, number> = { s: 1_000, m: 60_000, h: 3_600_000, d: 86_400_000 };
 
@@ -142,22 +143,67 @@ export function toCronSpec(input: string | LegacySchedule): string {
 	return parseCron(typeof input === "string" ? input : legacyToCron(input)).spec;
 }
 
-/** One-line human label for wake text and listings: `weekdays 07:30`, `every 30m`, else the raw expression. */
+/** One-line human label for wake text and listings: `weekdays 07:30`, `hourly 09:36–21:36`, `every 30m`, else the raw expression. */
 export function cronLabel(spec: string): string {
 	const parsed = parseCron(spec);
 	if (parsed.kind === "every") return `every ${parsed.spec.slice("@every ".length)}`;
 	const suffix = parsed.timezone === undefined ? "" : ` ${parsed.timezone}`;
 	const expression = parsed.expression;
-	const nickname = NICKNAME_LABELS[expression];
-	if (nickname !== undefined) return `${nickname}${suffix}`;
+	return `${NICKNAME_LABELS[expression] ?? calendarLabel(expression) ?? expression}${suffix}`;
+}
+
+// The days and times of a single-minute expression, `weekdays, hourly 08:00–18:00`, else undefined.
+function calendarLabel(expression: string): string | undefined {
 	const [minute = "", hour = "", dayOfMonth = "", month = "", dayOfWeek = ""] = expression.split(" ");
-	if (/^\d+$/.test(minute) && /^\d+$/.test(hour) && dayOfMonth === "*" && month === "*") {
-		const at = `${hour.padStart(2, "0")}:${minute.padStart(2, "0")}`;
-		if (dayOfWeek === "*") return `daily ${at}${suffix}`;
-		const days = dowSet(dayOfWeek);
-		if (days !== undefined) return `${daysLabel(days)} ${at}${suffix}`;
+	if (!/^\d+$/.test(minute)) return undefined;
+	const times = timesLabel(Number(minute), hour);
+	const days = daysPart(dayOfMonth, month, dayOfWeek);
+	if (times === undefined || days === undefined) return undefined;
+	if (!times.repeats) return `${days} ${times.text}`;
+	return days === "daily" ? times.text : `${days}, ${times.text}`;
+}
+
+const clock = (hour: number, minute: number) => `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+
+// `09:00`, `09:00 and 17:00`, `hourly at :30`, `hourly 09:36–21:36`, `every 2 hours 08:17–22:17`. `repeats` marks the hourly shapes.
+function timesLabel(minute: number, hour: string): { text: string; repeats: boolean } | undefined {
+	if (/^\d+(,\d+)*$/.test(hour)) {
+		const hours = [...new Set(hour.split(",").map(Number))].sort((a, b) => a - b);
+		return { text: joinList(hours.map((h) => clock(h, minute))), repeats: false };
 	}
-	return `${expression}${suffix}`;
+	const stepped = hour.match(/^(?:\*|(\d+)-(\d+))(?:\/(\d+))?$/);
+	if (stepped === null) return undefined;
+	const lo = stepped[1] === undefined ? 0 : Number(stepped[1]);
+	const hi = stepped[2] === undefined ? 23 : Number(stepped[2]);
+	const step = stepped[3] === undefined ? 1 : Number(stepped[3]);
+	if (hi < lo || step < 1) return undefined;
+	if (hour === "*") return { text: `hourly at :${String(minute).padStart(2, "0")}`, repeats: true };
+	const span = `${clock(lo, minute)}–${clock(lo + Math.floor((hi - lo) / step) * step, minute)}`;
+	return { text: step === 1 ? `hourly ${span}` : `every ${step} hours ${span}`, repeats: true };
+}
+
+// `daily`, `weekdays`, `Tuesdays and Fridays`, `monthly on the 9th`, `yearly Nov 9`, else undefined.
+function daysPart(dayOfMonth: string, month: string, dayOfWeek: string): string | undefined {
+	if (dayOfMonth === "*" && month === "*") {
+		if (dayOfWeek === "*") return "daily";
+		const days = dowSet(dayOfWeek);
+		return days === undefined ? undefined : daysLabel(days);
+	}
+	if (dayOfWeek !== "*" || !/^\d+$/.test(dayOfMonth)) return undefined;
+	if (month === "*") return `monthly on the ${ordinal(Number(dayOfMonth))}`;
+	if (/^\d+$/.test(month)) return `yearly ${MONTHS[Number(month) - 1]} ${Number(dayOfMonth)}`;
+	return undefined;
+}
+
+function ordinal(day: number): string {
+	const teen = day % 100 >= 11 && day % 100 <= 13;
+	const suffix = teen ? "th" : ({ 1: "st", 2: "nd", 3: "rd" } as Record<number, string>)[day % 10] ?? "th";
+	return `${day}${suffix}`;
+}
+
+function joinList(items: string[]): string {
+	if (items.length <= 2) return items.join(" and ");
+	return `${items.slice(0, -1).join(", ")} and ${items.at(-1)}`;
 }
 
 // Sorted unique weekdays (0 = Sunday) for a simple list/range/name day-of-week field, else undefined.
@@ -196,7 +242,5 @@ function daysLabel(days: number[]): string {
 	if (key === "0,1,2,3,4,5,6") return "daily";
 	if (key === "1,2,3,4,5") return "weekdays";
 	if (key === "0,6") return "weekends";
-	const names = days.map((day) => `${WEEKDAYS[day]}s`);
-	if (names.length <= 2) return names.join(" and ");
-	return `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`;
+	return joinList(days.map((day) => `${WEEKDAYS[day]}s`));
 }

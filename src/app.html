@@ -140,8 +140,15 @@ dialog .row .btn.danger { margin-right: auto; }
 .reacts { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
 .reacts button { height: 24px; border: 1px solid #9FB2C8; background: var(--me); border-radius: 999px; padding: 0 9px; font-size: 14px; cursor: pointer; }
 .reacts button:hover { border-color: var(--accent); }
-.add-quote { position: fixed; z-index: 10; transform: translate(-50%, calc(-100% - 6px)); display: flex; align-items: center; gap: 10px; border: 0; background: var(--ink); color: #fff; border-radius: 8px; padding: 5px 10px; font-size: 12.5px; cursor: pointer; box-shadow: 0 4px 14px rgba(27,33,41,.22); white-space: nowrap; }
-.add-quote kbd { font: inherit; font-size: 11.5px; color: #A9B3C0; }
+/* the bar over selected text in a message: Add to chat, then the quick replies and quick emoji */
+.quote-bar { position: fixed; z-index: 10; transform: translate(-50%, calc(-100% - 6px)); display: flex; align-items: center; gap: 2px; background: var(--ink); color: #fff; border-radius: 8px; padding: 3px; font-size: 12.5px; box-shadow: 0 4px 14px rgba(27,33,41,.22); white-space: nowrap; user-select: none; }
+.quote-bar[hidden] { display: none; }
+.quote-bar button { height: 26px; border: 0; background: transparent; color: inherit; font: inherit; border-radius: 6px; padding: 0 8px; cursor: pointer; display: flex; align-items: center; gap: 10px; }
+.quote-bar button:hover, .quote-bar button:focus-visible { background: rgba(255,255,255,.14); outline: none; }
+.quote-bar .emoji { padding: 0 4px; font-size: 16px; }
+.quote-bar .quick { display: contents; }
+.quote-bar .sep { width: 1px; height: 16px; margin: 0 3px; background: rgba(255,255,255,.22); }
+.quote-bar kbd { font: inherit; font-size: 11.5px; color: #A9B3C0; }
 .routine { align-self: stretch; border-left: 3px solid var(--accent); padding: 3px 0 3px 12px; font-size: 13px; color: var(--muted); }
 .routine b { color: var(--ink); font-weight: 600; }
 .marker { align-self: center; font-size: 12px; color: var(--muted); font-style: italic; }
@@ -257,7 +264,6 @@ dialog .row .btn.danger { margin-right: auto; }
 .table th { text-align: left; font: 600 12.5px "Bahnschrift", sans-serif; color: var(--muted); padding: 10px 10px 8px; border-bottom: 1px solid var(--line); letter-spacing: .02em; }
 .table td { padding: 11px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
 .table td small { display: block; color: var(--muted); white-space: pre-wrap; overflow-wrap: anywhere; }
-.table .cron { font-size: 12.5px; color: var(--accent); }
 .table .acts { white-space: nowrap; text-align: right; }
 .btn { border: 1px solid var(--line); background: #fff; border-radius: 7px; padding: 4px 10px; font-size: 12.5px; cursor: pointer; }
 .btn:hover { background: var(--bg); }
@@ -290,10 +296,14 @@ dialog .row .btn.danger { margin-right: auto; }
 .setting span { flex: 1; }
 .setting b { display: block; font-weight: 600; }
 .setting small { display: block; color: var(--muted); font-size: 12.5px; }
-.setting input { appearance: none; flex: none; position: relative; width: 36px; height: 20px; margin: 0; border-radius: 999px; background: var(--line); cursor: pointer; transition: background .15s; }
-.setting input::after { content: ""; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(27,33,41,.25); transition: transform .15s; }
-.setting input:checked { background: var(--accent); }
-.setting input:checked::after { transform: translateX(16px); }
+.setting input[type="checkbox"] { appearance: none; flex: none; position: relative; width: 36px; height: 20px; margin: 0; border-radius: 999px; background: var(--line); cursor: pointer; transition: background .15s; }
+.setting input[type="checkbox"]::after { content: ""; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(27,33,41,.25); transition: transform .15s; }
+.setting input[type="checkbox"]:checked { background: var(--accent); }
+.setting input[type="checkbox"]:checked::after { transform: translateX(16px); }
+.setting.field { align-items: flex-start; cursor: default; }
+.setting.field input, .setting.field textarea { flex: none; width: 220px; border: 1px solid var(--line); border-radius: 7px; padding: 6px 9px; font: inherit; color: var(--ink); background: #fff; resize: vertical; }
+.setting.field input { font-size: 17px; letter-spacing: .12em; }
+.setting.field input:focus, .setting.field textarea:focus { outline: none; border-color: #9FB2C8; }
 
 dialog { border: 1px solid var(--line); border-radius: 12px; padding: 22px 24px; width: min(560px, 92vw); color: var(--ink); box-shadow: 0 18px 50px rgba(27,33,41,.22); }
 dialog::backdrop { background: rgba(27,33,41,.35); }
@@ -415,7 +425,11 @@ dialog .row { display: flex; gap: 8px; justify-content: flex-end; margin-top: 18
   <section class="view" id="view-settings" aria-labelledby="settings-h" hidden>
    <div class="bar"><h1 id="settings-h">Settings</h1><span class="aside">Saved in this browser.</span></div>
    <div class="settings">
-    <label class="setting"><span><b>Show messages between bots</b><small>What one bot sends another, in both bots' chats and the bot list. The tools a bot runs for another bot still show.</small></span><input type="checkbox" id="set-bot-talk"></label>
+    <label class="setting"><span><b>Show messages between bots</b><small>What one bot sends another, in both bots' chats and the bot list.</small></span><input type="checkbox" data-setting="botTalk"></label>
+    <label class="setting"><span><b>Show tool steps</b><small>A chip for each tool a bot runs, like space bash or Remembered, that opens its output, plus its screenshots.</small></span><input type="checkbox" data-setting="tools"></label>
+    <label class="setting"><span><b>Show routine runs</b><small>A line in the bot's chat each time one of its routines starts.</small></span><input type="checkbox" data-setting="routineRuns"></label>
+    <label class="setting field"><span><b>Quick replies</b><small>One per line. They show on the bar over text you select in a message; clicking one sends that text quoted, with the reply under it.</small></span><textarea id="set-phrases" rows="4" spellcheck="false"></textarea></label>
+    <label class="setting field"><span><b>Quick emoji</b><small>The reactions under a reply's smiley, and emoji replies on the bar over selected text, which send that text quoted with the emoji under it.</small></span><input type="text" id="set-emoji" spellcheck="false" autocomplete="off"></label>
    </div>
   </section>
  </main>
@@ -428,7 +442,7 @@ dialog .row { display: flex; gap: 8px; justify-content: flex-end; margin-top: 18
  </aside>
 </div>
 
-<button type="button" class="add-quote" id="add-quote" hidden>Add to chat <kbd>Ctrl+L</kbd></button>
+<div class="quote-bar" id="quote-bar" role="toolbar" aria-label="Selected text" hidden><button type="button" id="add-quote">Add to chat <kbd>Ctrl+L</kbd></button><span class="quick" id="quick-replies"></span></div>
 
 <dialog id="screen-view" aria-label="Live screen of the computer">
  <button type="button" class="close" id="view-close" aria-label="Close the live screen" title="Close"><svg aria-hidden="true"><use href="#i-x"/></svg></button>
@@ -589,10 +603,16 @@ const state = { bot: null, bots: [], items: [], ids: new Set(), before: null, li
 // The expanded live screen (see "expanded live screen" below): whether the owner has control of the Mac, the
 // keys they hold down there, and their input on its way.
 const view = { owner: false, held: new Map(), queue: [], sending: null, lastMove: 0 };
-// The owner's display choices, kept in this browser. `botTalk` shows the messages bots send each other.
+// The owner's display choices, kept in this browser. `botTalk` shows the messages bots send each other, `tools` the
+// tool chips and screenshots in replies, `routineRuns` the line each routine firing leaves in its chat. `phrases` and
+// `emoji` are the quick replies on the selection bar, and `emoji` also fills a reply's reaction picker.
 const SETTINGS_KEY = "cua-bot.settings";
-const settings = { botTalk: false };
+const QUICK = { phrases: ["Yes", "No", "Explain"], emoji: ["👍", "👎", "❤️", "😂", "🎉", "😮"] };
+const settings = { botTalk: false, tools: false, routineRuns: false, ...QUICK };
 try { Object.assign(settings, JSON.parse(localStorage.getItem(SETTINGS_KEY) || "{}")); } catch { /* unreadable: keep the defaults */ }
+for (const key of ["phrases", "emoji"]) {
+  if (!Array.isArray(settings[key]) || !settings[key].every((x) => typeof x === "string")) settings[key] = QUICK[key];
+}
 const currentBot = () => state.bots.find((b) => b.id === state.bot) || { id: state.bot, name: "cua-bot", instructions: "", main: true };
 const mainId = () => (state.bots.find((b) => b.main) || {}).id;
 const botNamed = (to) => {
@@ -744,8 +764,13 @@ function addItems(items) {
 }
 
 /* ---------- reactions ---------- */
-const QUICK_REACTIONS = [["👍", "Thumbs up"], ["👎", "Thumbs down"], ["❤️", "Heart"], ["😂", "Laughing"], ["🎉", "Party"], ["😮", "Surprised"]];
-const reactionName = (emoji) => (QUICK_REACTIONS.find(([e]) => e === emoji) || [emoji, emoji])[1];
+const REACTION_NAMES = { "👍": "Thumbs up", "👎": "Thumbs down", "❤️": "Heart", "😂": "Laughing", "🎉": "Party", "😮": "Surprised" };
+const reactionName = (emoji) => REACTION_NAMES[emoji] || emoji;
+// One emoji (with any skin tone, variation selector, or joined parts), the same test POST /api/chat/react applies.
+const EMOJI = /^\p{Extended_Pictographic}[\p{Extended_Pictographic}\p{Emoji_Modifier}‍️]*$/u;
+// The distinct emoji in what the owner typed into the Quick emoji setting, in order; anything else is dropped.
+const emojiIn = (text) => [...new Set([...new Intl.Segmenter().segment(text)].map((part) => part.segment))]
+  .filter((emoji) => emoji.length <= 16 && EMOJI.test(emoji));
 
 // Each reply's reactions as a Map of emoji to on/off: the reaction items in entry order (the newest wins), then the
 // ones still on their way. renderChat folds them onto their replies; the items themselves never show.
@@ -816,8 +841,11 @@ function quoteChip(clean) {
   return chip;
 }
 
+// Selected or replied-to text without its leading blank lines and trailing whitespace.
+const cleanQuote = (text) => text.replace(/^(?:[ \t]*\n)+/, "").trimEnd();
+
 function addQuote(text) {
-  const clean = text.replace(/^(?:[ \t]*\n)+/, "").trimEnd();
+  const clean = cleanQuote(text);
   if (clean === "") return;
   const chip = quoteChip(clean);
   // A space after the chip gives the caret somewhere to sit, so typing continues right after it.
@@ -919,18 +947,18 @@ function messageActions(item, mine) {
     tray.append(b);
     return b;
   };
-  if (item.kind === "assistant") {
+  if (item.kind === "assistant" && settings.emoji.length > 0) {
     const open = button("React", "i-smile", () => { state.picking = state.picking === item.id ? null : item.id; renderChat(); });
     open.setAttribute("aria-expanded", String(state.picking === item.id));
     if (state.picking === item.id) {
       const picker = el("div", "picker");
       picker.setAttribute("role", "group");
       picker.setAttribute("aria-label", "Reactions");
-      for (const [emoji, name] of QUICK_REACTIONS) {
+      for (const emoji of settings.emoji) {
         const pick = el("button", "", emoji);
         pick.type = "button";
-        pick.title = name;
-        pick.setAttribute("aria-label", name);
+        pick.title = reactionName(emoji);
+        pick.setAttribute("aria-label", reactionName(emoji));
         pick.setAttribute("aria-pressed", String(mine.get(emoji) === true));
         pick.addEventListener("click", () => react(item.id, emoji, mine.get(emoji) !== true));
         picker.append(pick);
@@ -968,7 +996,7 @@ function bubble(key, text, item, mine) {
   return node;
 }
 
-/* ---------- selections: Add to chat ---------- */
+/* ---------- selections: Add to chat and quick replies ---------- */
 const keyedOf = (node) => (node && (node.nodeType === 1 ? node : node.parentElement))?.closest("[data-key]") || null;
 
 // The owner's selection when it lies inside one message, with its text and box; otherwise null.
@@ -990,23 +1018,53 @@ function quoteSelection() {
   return true;
 }
 
-// The floating Add to chat button sits above the selection once the mouse is up.
+// A quick reply sends the selection quoted, with `reply` (a phrase or an emoji) under it, straight to the open chat.
+// The message box and its draft stay as they are.
+function quickReply(reply) {
+  const picked = selectedQuote();
+  if (!picked) return;
+  document.getSelection().removeAllRanges();
+  sendMessage(blockquote(cleanQuote(picked.text)) + "\n\n" + reply);
+}
+
+// The bar's quick replies from the settings: each phrase, then each emoji.
+function renderQuickReplies() {
+  const quick = $("quick-replies");
+  quick.replaceChildren();
+  const add = (text, className, label) => {
+    const b = el("button", className, text);
+    b.type = "button";
+    b.title = label;
+    b.setAttribute("aria-label", label);
+    b.addEventListener("click", () => quickReply(text));
+    quick.append(b);
+  };
+  if (settings.phrases.length > 0) quick.append(el("span", "sep"));
+  for (const phrase of settings.phrases) add(phrase, "", `Reply "${phrase}" to the selected text`);
+  if (settings.emoji.length > 0) quick.append(el("span", "sep"));
+  for (const emoji of settings.emoji) add(emoji, "emoji", `Reply ${reactionName(emoji)} to the selected text`);
+}
+renderQuickReplies();
+
+// The floating bar sits above the selection once the mouse is up, kept inside the window.
 let selecting = false;
-function placeAddQuote() {
+function placeQuoteBar() {
   const picked = selecting ? null : selectedQuote();
-  const button = $("add-quote");
-  button.hidden = !picked;
+  const bar = $("quote-bar");
+  bar.hidden = !picked;
   if (picked) {
-    button.style.left = picked.rect.left + picked.rect.width / 2 + "px";
-    button.style.top = picked.rect.top + "px";
+    const half = bar.offsetWidth / 2, margin = 8;
+    const center = picked.rect.left + picked.rect.width / 2;
+    bar.style.left = Math.max(half + margin, Math.min(window.innerWidth - half - margin, center)) + "px";
+    bar.style.top = picked.rect.top + "px";
   }
 }
-document.addEventListener("selectionchange", placeAddQuote);
-document.addEventListener("mousedown", (event) => { if (event.target !== $("add-quote")) selecting = true; });
-document.addEventListener("mouseup", () => { selecting = false; placeAddQuote(); });
-$("msgs").addEventListener("scroll", placeAddQuote);
-// Keep the selection when the button is pressed, so its click can read it.
-$("add-quote").addEventListener("mousedown", (event) => event.preventDefault());
+document.addEventListener("selectionchange", placeQuoteBar);
+document.addEventListener("mousedown", (event) => { if (!$("quote-bar").contains(event.target)) selecting = true; });
+document.addEventListener("mouseup", () => { selecting = false; placeQuoteBar(); });
+$("msgs").addEventListener("scroll", placeQuoteBar);
+// Keep the selection when the bar is pressed, so its clicks can read it.
+$("quote-bar").addEventListener("mousedown", (event) => event.preventDefault());
 $("add-quote").addEventListener("click", quoteSelection);
 document.addEventListener("keydown", (event) => {
   if ((event.ctrlKey || event.metaKey) && !event.shiftKey && !event.altKey && event.key.toLowerCase() === "l" && selectedQuote()) {
@@ -1202,7 +1260,7 @@ function renderChat() {
   const running = new Map(state.live.tools.map((tool) => [tool.callId, tool]));
   const reactions = reactionsOf();
   let day = "";
-  const visible = state.items.filter((item) => item.kind !== "tool" && item.kind !== "approval" && item.kind !== "reaction" && (settings.botTalk || item.kind !== "bot"));
+  const visible = state.items.filter((item) => shows(item, results));
   if (visible.length === 0 && !state.live.busy && state.queued.length === 0) {
     const bot = currentBot();
     const empty = el("div", "empty");
@@ -1260,7 +1318,7 @@ function renderChat() {
   }
   if (state.live.busy) {
     const done = new Set(state.items.filter((i) => i.kind === "assistant").flatMap((i) => i.tools.map((t) => t.id)));
-    const pending = state.live.tools.filter((tool) => !done.has(tool.callId));
+    const pending = settings.tools ? state.live.tools.filter((tool) => !done.has(tool.callId)) : [];
     if (state.live.partial || pending.length > 0) {
       // The streaming reply joins the open block, as it will once it lands.
       let live = open && box.lastElementChild === open.node ? open : null;
@@ -1282,7 +1340,20 @@ function renderChat() {
   if (nearBottom) box.scrollTop = box.scrollHeight;
 }
 
-// One assistant entry: tool chips and their results above, relays to other bots, the text bubble with its reaction
+// Whether a chat entry shows anything under the owner's settings. With tool steps off, a reply that only ran tools
+// shows nothing and is left out, so it leaves no gap or lone day label.
+function shows(item, results) {
+  if (item.kind === "tool" || item.kind === "approval" || item.kind === "reaction") return false;
+  if (item.kind === "bot") return settings.botTalk;
+  if (item.kind === "routine") return settings.routineRuns;
+  if (item.kind !== "assistant" || settings.tools || item.text || item.error || item.aborted) return true;
+  return item.tools.some((call) => approvalFor(call.id) || relayed(call, results));
+}
+
+// Whether a reply shows this message_bot call as the message the other bot received.
+const relayed = (call, results) => settings.botTalk && call.name === "message_bot" && typeof call.args.text === "string" && results.has(call.id) && !results.get(call.id).isError;
+
+// One assistant entry: tool chips and their results above (with tool steps on), relays to other bots, the text bubble with its reaction
 // pills, then approval cards, any error, and its time. `mine` is its reactions from reactionsOf(). `into` is an open
 // block ({node, chips, below}) from earlier tool-only replies to add to, or null for a new one. Returns the block,
 // `closed` once this entry showed more than chips.
@@ -1292,7 +1363,7 @@ function renderReply(item, results, running, mine, into) {
   const { node, chips, below } = block;
   const shown = node.childElementCount;
   if (item.tools.length > 0) {
-    for (const call of item.tools) {
+    for (const call of settings.tools ? item.tools : []) {
       const result = results.get(call.id);
       const live = running.get(call.id);
       const approval = approvalFor(call.id);
@@ -1324,7 +1395,7 @@ function renderReply(item, results, running, mine, into) {
     }
     // What this bot told another bot, as the other bot received it.
     for (const call of item.tools) {
-      if (!settings.botTalk || call.name !== "message_bot" || typeof call.args.text !== "string" || !results.has(call.id) || results.get(call.id).isError) continue;
+      if (!relayed(call, results)) continue;
       const to = botNamed(call.args.to) || { id: 0, name: String(call.args.to || "a bot") };
       const relay = el("div", "relay");
       const head = el("div", "to");
@@ -1919,6 +1990,24 @@ $("b-delete").addEventListener("click", async () => {
   finally { $("b-delete").disabled = false; }
 });
 
+// Sends the owner's message to the open bot, showing it queued until it lands in the chat. Resolves to whether it
+// went; a failure shows in the chat's error line.
+async function sendMessage(text) {
+  state.queued.push(text);
+  renderChat();
+  $("msgs").scrollTop = $("msgs").scrollHeight;
+  try {
+    await request("POST", "/api/chat", { text, bot: state.bot });
+    showChatError("");
+    return true;
+  } catch (error) {
+    state.queued.splice(state.queued.indexOf(text), 1);
+    renderChat();
+    showChatError("Your message was not sent: " + error.message);
+    return false;
+  }
+}
+
 $("composer").addEventListener("submit", async (event) => {
   event.preventDefault();
   const input = $("input");
@@ -1926,18 +2015,7 @@ $("composer").addEventListener("submit", async (event) => {
   if (text === "") return;
   const draft = [...input.childNodes];
   input.replaceChildren();
-  state.queued.push(text);
-  renderChat();
-  $("msgs").scrollTop = $("msgs").scrollHeight;
-  try {
-    await request("POST", "/api/chat", { text, bot: state.bot });
-    showChatError("");
-  } catch (error) {
-    state.queued.splice(state.queued.indexOf(text), 1);
-    input.replaceChildren(...draft);
-    renderChat();
-    showChatError("Your message was not sent: " + error.message);
-  }
+  if (!(await sendMessage(text))) input.replaceChildren(...draft);
 });
 $("input").addEventListener("keydown", (event) => {
   if (event.key === "Enter" && !event.shiftKey && !event.isComposing) { event.preventDefault(); $("composer").requestSubmit(); }
@@ -1992,13 +2070,34 @@ document.querySelectorAll(".rail button[data-view]").forEach((button) => button.
 }));
 
 /* ---------- settings ---------- */
-$("set-bot-talk").checked = settings.botTalk;
-$("set-bot-talk").addEventListener("change", () => {
-  settings.botTalk = $("set-bot-talk").checked;
-  localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
-  renderBots();
-  renderChat();
+// Each toggle names its key in `settings` with data-setting.
+document.querySelectorAll("input[data-setting]").forEach((input) => {
+  const key = input.dataset.setting;
+  input.checked = settings[key];
+  input.addEventListener("change", () => {
+    settings[key] = input.checked;
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+    renderBots();
+    renderChat();
+  });
 });
+
+// The quick replies and quick emoji save as the owner types. Leaving a field tidies it to what was kept: one phrase
+// per line, the emoji spaced out with anything that isn't one dropped.
+const quickFields = [
+  { input: $("set-phrases"), key: "phrases", parse: (text) => [...new Set(text.split("\n").map((line) => line.trim()).filter(Boolean))], join: "\n" },
+  { input: $("set-emoji"), key: "emoji", parse: emojiIn, join: " " },
+];
+for (const { input, key, parse, join } of quickFields) {
+  input.value = settings[key].join(join);
+  input.addEventListener("input", () => {
+    settings[key] = parse(input.value);
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+    renderQuickReplies();
+    renderChat();
+  });
+  input.addEventListener("change", () => { input.value = settings[key].join(join); });
+}
 
 /* ---------- memory ---------- */
 function showMemoryError(message) { $("memory-error").textContent = message; $("memory-error").hidden = !message; }
@@ -2089,7 +2188,7 @@ function renderRoutines() {
     const who = el("td"), botcell = el("span", "botcell");
     botcell.append(avatar(state.bots.find((b) => b.id === r.bot) || { id: r.bot, name: r.botName }, true), r.botName);
     who.append(botcell);
-    const when = el("td"); when.append(r.label, el("br"), el("code", "cron", r.cron));
+    const when = el("td", "", r.label); when.title = r.cron;
     const next = el("td", "", relative(r.nextFire)); next.title = shortDate(r.nextFire);
     const last = el("td", "", r.lastFiredAt ? shortDate(r.lastFiredAt) : "Never");
     const acts = el("td", "acts");
