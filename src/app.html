@@ -64,8 +64,15 @@ code, pre, .mono { font-family: "Cascadia Code", Consolas, monospace; }
 .botrow .name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .botrow .busy { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); animation: pulse 1.2s ease-in-out infinite; }
 .botrow .peek { display: block; font-size: 12.5px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.av { width: 36px; height: 36px; border-radius: 50%; display: grid; place-items: center; color: #fff; font: 600 15px "Bahnschrift", sans-serif; flex: none; }
-.av.small { width: 18px; height: 18px; font-size: 10px; }
+/* avatars: a character that blinks now and then and, from 24px up, glances aside; each bot on its own clock */
+.av { width: 36px; height: 36px; flex: none; display: block; }
+.av svg { display: block; width: 100%; height: 100%; overflow: visible; }
+.av .eyes { transform-box: fill-box; transform-origin: center; animation: blink var(--blink) linear var(--blink-at) infinite; }
+.av .look { animation: glance var(--glance) ease-in-out var(--glance-at) infinite; }
+.av.small .look, .av.still .look, .av.still .eyes { animation: none; }
+@keyframes blink { 0%, 96%, 100% { transform: scaleY(1); } 98% { transform: scaleY(.1); } }
+@keyframes glance { 0%, 58%, 83%, 100% { transform: translateX(0); } 61%, 69% { transform: translateX(-1.8px); } 73%, 80% { transform: translateX(1.6px); } }
+#chat-av { margin-right: -4px; }
 
 /* messages between bots */
 .m.peer { align-self: flex-start; }
@@ -220,6 +227,26 @@ dialog textarea { resize: vertical; }
 dialog .hint { color: var(--muted); font-size: 12.5px; margin: 6px 0 0; }
 dialog .hint code { background: var(--bg); padding: 0 4px; border-radius: 3px; }
 #bot-dialog { width: min(820px, 94vw); }
+/* the bot's avatar beside its name, and the picker that drops from it */
+.b-top { position: relative; display: flex; align-items: flex-end; gap: 14px; }
+.b-top .b-field { flex: 1; min-width: 0; }
+.b-top label { margin-top: 0; }
+.b-avatar { position: relative; flex: none; width: 72px; height: 72px; padding: 4px; border: 0; border-radius: 16px; background: transparent; cursor: pointer; margin: 0 0 -4px -4px; }
+.b-avatar:hover, .b-avatar[aria-expanded="true"] { background: var(--bg); }
+.b-avatar .badge { position: absolute; right: 0; bottom: 0; width: 22px; height: 22px; border-radius: 50%; background: #fff; border: 1px solid var(--line); color: var(--muted); display: grid; place-items: center; }
+.b-avatar:hover .badge { color: var(--ink); }
+.b-avatar .badge svg { width: 12px; height: 12px; }
+.av-picker { position: absolute; z-index: 3; top: calc(100% + 10px); left: -4px; background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 8px 12px 12px; box-shadow: 0 14px 36px rgba(27,33,41,.2); }
+.av-head { display: flex; align-items: center; justify-content: space-between; min-height: 28px; margin-bottom: 4px; }
+#av-caption { font: 600 13px "Bahnschrift", sans-serif; letter-spacing: .01em; }
+.av-shapes { display: grid; grid-template-columns: repeat(7, 42px); gap: 4px; }
+.av-shapes button { width: 42px; height: 42px; border: 0; border-radius: 10px; background: transparent; cursor: pointer; display: grid; place-items: center; padding: 0; }
+.av-shapes button:hover { background: var(--bg); }
+.av-shapes button[aria-pressed="true"] { background: var(--bg); box-shadow: inset 0 0 0 2px var(--ink); }
+.av-colors { display: flex; justify-content: space-between; margin-top: 10px; padding-top: 12px; border-top: 1px solid var(--line); }
+.av-colors button { width: 22px; height: 22px; border: 0; border-radius: 50%; cursor: pointer; padding: 0; }
+.av-colors button:hover { transform: scale(1.12); }
+.av-colors button[aria-pressed="true"] { box-shadow: 0 0 0 2px #fff, 0 0 0 4px var(--ink); }
 #b-instructions { font: 13px/1.5 Consolas, "Cascadia Mono", monospace; min-height: 46vh; }
 #preview { font-size: 13px; margin: 6px 0 0; min-height: 20px; }
 #preview.bad, #form-error { color: var(--bad); }
@@ -257,7 +284,7 @@ dialog .row { display: flex; gap: 8px; justify-content: flex-end; margin-top: 18
     <ul id="bot-rows"></ul>
    </nav>
    <div class="chatcol">
-    <div class="bar"><h1 id="chat-h">cua-bot</h1><button type="button" class="edit" id="edit-bot" aria-label="Edit this bot" title="Edit name and agent file"><svg><use href="#i-edit"/></svg></button><span class="state" id="chat-state" aria-live="polite"></span><span class="aside" id="model"></span><button class="btn" id="notify" type="button" hidden>Turn on notifications</button></div>
+    <div class="bar"><span id="chat-av"></span><h1 id="chat-h">cua-bot</h1><button type="button" class="edit" id="edit-bot" aria-label="Edit this bot" title="Edit name and agent file"><svg><use href="#i-edit"/></svg></button><span class="state" id="chat-state" aria-live="polite"></span><span class="aside" id="model"></span><button class="btn" id="notify" type="button" hidden>Turn on notifications</button></div>
     <div class="banner" id="chat-error" role="alert" hidden></div>
     <div class="msgs" id="msgs" aria-live="polite"></div>
     <form class="composer" id="composer">
@@ -327,8 +354,18 @@ dialog .row { display: flex; gap: 8px; justify-content: flex-end; margin-top: 18
 <dialog id="bot-dialog" aria-labelledby="b-h">
  <form id="bot-form" method="dialog">
   <h2 id="b-h">New bot</h2>
-  <label for="b-name">Name</label>
-  <input id="b-name" required maxlength="40" placeholder="Job Search" autocomplete="off">
+  <div class="b-top">
+   <button type="button" class="b-avatar" id="b-avatar" aria-label="Change avatar" title="Change avatar" aria-expanded="false" aria-controls="av-picker"><span class="badge"><svg><use href="#i-edit"/></svg></span></button>
+   <div class="b-field">
+    <label for="b-name">Name</label>
+    <input id="b-name" required maxlength="40" placeholder="Job Search" autocomplete="off">
+   </div>
+   <div class="av-picker" id="av-picker" role="group" aria-label="Avatar" hidden>
+    <div class="av-head"><span id="av-caption"></span><button type="button" class="btn link" id="av-reset">Reset</button></div>
+    <div class="av-shapes" id="av-shapes" role="group" aria-label="Shape"></div>
+    <div class="av-colors" id="av-colors" role="group" aria-label="Color"></div>
+   </div>
+  </div>
   <label for="b-instructions">Agent file</label>
   <textarea id="b-instructions" rows="18" spellcheck="false" placeholder="Track job openings that fit my profile and tell me about new ones each week."></textarea>
   <p class="hint" id="b-file"></p>
@@ -444,12 +481,92 @@ const botNamed = (to) => {
   const key = String(to || "").trim().replace(/^@/, "").toLowerCase();
   return state.bots.find((b) => String(b.id) === key) || state.bots.find((b) => b.name.toLowerCase() === key);
 };
-const AVATAR_COLORS = ["#27507F", "#A96500", "#1E7A55", "#6B4FA0", "#1F6F78", "#A23B72", "#4A5563", "#B42318"];
-function avatar(bot, small) {
-  const node = el("span", "av" + (small ? " small" : ""), (bot && bot.name ? bot.name.trim().charAt(0) : "?").toUpperCase());
-  node.style.background = !bot ? "#4A5563" : bot.main ? "var(--ink)" : AVATAR_COLORS[bot.id % AVATAR_COLORS.length];
-  node.setAttribute("aria-hidden", "true");
+/* ---------- avatars ---------- */
+// Each bot is a character: a solid silhouette with two white pill eyes, drawn in a 40×40 box. The ids are
+// AVATAR_SHAPES and AVATAR_COLORS in src/bots.ts, which checks a bot's pick against them; keep both in step.
+// A shape is its outline `d`, an optional `round` (a same-color round-joined stroke that softens corners),
+// and `eyes`: the x and y of the eyes' midpoint and half the distance between them. Overlapping subpaths
+// fill as one only when they run the same way round (counter-clockwise, like circle() and oval()).
+const circle = (cx, cy, r) => `M${cx - r} ${cy}a${r} ${r} 0 1 0 ${2 * r} 0a${r} ${r} 0 1 0 ${-2 * r} 0z`;
+const oval = (cx, cy, rx, ry) => `M${cx - rx} ${cy}a${rx} ${ry} 0 1 0 ${2 * rx} 0a${rx} ${ry} 0 1 0 ${-2 * rx} 0z`;
+// A polygon through `radii` in turn, evenly spaced around (20, cy), starting straight up.
+function around(count, radii, cy = 20) {
+  const points = Array.from({ length: count }, (_, i) => {
+    const angle = -Math.PI / 2 + (i * 2 * Math.PI) / count, r = radii[i % radii.length];
+    return `${(20 + r * Math.cos(angle)).toFixed(2)} ${(cy + r * Math.sin(angle)).toFixed(2)}`;
+  });
+  return `M${points.join("L")}z`;
+}
+const petals = (count, at, r) => Array.from({ length: count }, (_, i) => circle(+(20 + at * Math.cos((i * 2 * Math.PI) / count)).toFixed(2), +(20 + at * Math.sin((i * 2 * Math.PI) / count)).toFixed(2), r)).join("");
+const AVATAR_SHAPES = {
+  blob: { name: "Blob", d: "M21.5 3.5c8 0 14.5 5.8 14.5 14.2 0 3.6-1.4 5.9-1.4 9 0 6.6-6.3 9.8-14 9.8C11.4 36.5 4 31 4 21.8 4 11.5 12 3.5 21.5 3.5z", eyes: [20.5, 19, 5] },
+  pebble: { name: "Pebble", d: "M3.5 22.5C3.5 14 11 7.5 21 7.5c9.6 0 15.5 5.2 15.5 12.8 0 8.6-7.6 12.7-16.8 12.7C10.4 33 3.5 29.6 3.5 22.5z", eyes: [20.5, 19.5, 5.2] },
+  squircle: { name: "Squircle", d: "M20 3.5c12.4 0 16.5 4.1 16.5 16.5S32.4 36.5 20 36.5 3.5 32.4 3.5 20 7.6 3.5 20 3.5z", eyes: [20, 18.5, 5.5] },
+  tablet: { name: "Tablet", d: "M16.5 2.5h7a7.5 7.5 0 0 1 7.5 7.5v20a7.5 7.5 0 0 1-7.5 7.5h-7A7.5 7.5 0 0 1 9 30V10a7.5 7.5 0 0 1 7.5-7.5z", eyes: [20, 14.5, 4.6] },
+  wedge: { name: "Wedge", d: "M20 7.5L34.5 32H5.5z", round: 7, eyes: [20, 24.5, 4.6] },
+  hex: { name: "Hex", d: around(6, [15]), round: 6, eyes: [20, 19, 5] },
+  cloud: { name: "Cloud", d: circle(12.5, 25, 8.5) + circle(21.5, 19, 11.5) + circle(29.5, 25.5, 8) + "M12.5 25V33.5H29.5V25z", round: 1.5, eyes: [21, 23, 5] },
+  teardrop: { name: "Teardrop", d: "M20 3c3.6 5 14 13.6 14 21a14 14 0 0 1-28 0c0-7.4 10.4-16 14-21z", round: 1.5, eyes: [20, 24.5, 5] },
+  flower: { name: "Flower", d: circle(20, 20, 11) + petals(6, 10.5, 7.5), eyes: [20, 20, 4.6] },
+  star: { name: "Star", d: around(10, [15, 8.5], 21), round: 5, eyes: [20, 21.5, 3.9] },
+  ghost: { name: "Ghost", d: "M6.5 19a13.5 13.5 0 0 1 27 0v15.6c0 1.3-1.4 2.1-2.6 1.4L28 34.2l-3.2 2.2a1.6 1.6 0 0 1-1.8 0L20 34.2l-3 2.2a1.6 1.6 0 0 1-1.8 0L12 34.2l-2.9 1.8c-1.2.7-2.6-.1-2.6-1.4z", eyes: [20, 18.5, 4.8] },
+  gumdrop: { name: "Gumdrop", d: "M4.5 32C4.5 15 11 4.5 20 4.5S35.5 15 35.5 32a3.5 3.5 0 0 1-3.5 3.5H8A3.5 3.5 0 0 1 4.5 32z", eyes: [20, 21, 5] },
+  gem: { name: "Gem", d: "M11.5 7H28.5L35.5 15.5L20 34L4.5 15.5z", round: 5, eyes: [20, 16, 4.6] },
+  pumpkin: { name: "Pumpkin", d: oval(10.5, 24.5, 6.5, 10) + oval(29.5, 24.5, 6.5, 10) + oval(14.5, 23.5, 8, 12) + oval(25.5, 23.5, 8, 12) + oval(20, 23, 8, 13) + "M21.8 11C21.8 8.6 22.2 6.6 23.4 5.2L21 3.8C19.2 5.6 18.6 8 18.6 11z", eyes: [20, 21.5, 5] },
+};
+const AVATAR_COLORS = {
+  black: "#000",
+  brown: "#936439",
+  red: "#FF263C",
+  orange: "#FF6700",
+  yellow: "#FF9800",
+  green: "#00C972",
+  cyan: "#00BCA6",
+  blue: "#1084FE",
+  violet: "#9159FE",
+  magenta: "#FF309B",
+  gray: "#777777",
+};
+const UNKNOWN_AVATAR = { shape: "blob", color: "gray" };
+const colorName = (id) => id.charAt(0).toUpperCase() + id.slice(1);
+
+function svgNode(tag, attributes) {
+  const node = document.createElementNS("http://www.w3.org/2000/svg", tag);
+  for (const [name, value] of Object.entries(attributes)) node.setAttribute(name, String(value));
   return node;
+}
+
+// Draws `choice` ({shape, color} ids) `px` wide. `seed`, the bot's id, sets its own blink and glance rhythm;
+// the phase follows the page clock, so a redrawn avatar carries on mid-rhythm. Under 24px it only blinks;
+// `still` holds it (the picker's grid). Reduced motion stops all of it (the rule at the end of the styles).
+function character(choice, seed, px, still) {
+  const shape = AVATAR_SHAPES[choice.shape] || AVATAR_SHAPES.blob;
+  const color = AVATAR_COLORS[choice.color] || AVATAR_COLORS.gray;
+  const node = el("span", "av" + (px < 24 ? " small" : "") + (still ? " still" : ""));
+  node.style.width = node.style.height = px + "px";
+  node.setAttribute("aria-hidden", "true");
+  const hash = Math.imul(seed + 1, 2654435761) >>> 0;
+  const blink = 4.5 + (hash % 1000) / 400, glance = 10 + ((hash >>> 10) % 8);
+  const now = performance.now() / 1000 + (hash % 997) / 10;
+  node.style.setProperty("--blink", blink + "s");
+  node.style.setProperty("--blink-at", -(now % blink).toFixed(2) + "s");
+  node.style.setProperty("--glance", glance + "s");
+  node.style.setProperty("--glance-at", -(now % glance).toFixed(2) + "s");
+  const svg = svgNode("svg", { viewBox: "0 0 40 40" });
+  const body = svgNode("path", { d: shape.d, fill: color });
+  if (shape.round) for (const [name, value] of Object.entries({ stroke: color, "stroke-width": shape.round, "stroke-linejoin": "round" })) body.setAttribute(name, value);
+  const [x, y, half] = shape.eyes;
+  const look = svgNode("g", { class: "look" }), eyes = svgNode("g", { class: "eyes", fill: "#fff" });
+  for (const cx of [x - half, x + half]) eyes.append(svgNode("rect", { x: cx - 1.8, y: y - 3.5, width: 3.6, height: 7, rx: 1.8 }));
+  look.append(eyes);
+  svg.append(body, look);
+  node.append(svg);
+  return node;
+}
+
+// A bot's avatar: 36px in the bot list, 18px (`small`) beside its name in text. A bot no longer listed is gray.
+function avatar(bot, small, px = small ? 18 : 36) {
+  return character((bot && bot.avatar) || UNKNOWN_AVATAR, (bot && bot.id) || 0, px);
 }
 
 function toolLabel(call) {
@@ -970,6 +1087,7 @@ function renderBots() {
     rows.append(item);
   }
   const bot = currentBot();
+  $("chat-av").replaceChildren(...(bot.avatar ? [avatar(bot, false, 26)] : []));
   $("chat-h").textContent = bot.name;
   $("edit-bot").setAttribute("aria-label", "Edit " + bot.name);
   $("input").placeholder = "Message " + bot.name;
@@ -995,9 +1113,89 @@ async function selectBot(id) {
   $("input").focus();
 }
 
-let editingBot = null;
+// The bot dialog's avatar: `picked` is what it shows and what Save sends; Reset goes back to `pickDefault`,
+// the bot's default (a new bot's is the suggestion it opened with).
+let editingBot = null, picked = UNKNOWN_AVATAR, pickDefault = UNKNOWN_AVATAR;
+const sameAvatar = (a, b) => a.shape === b.shape && a.color === b.color;
+
+// A new bot starts with a shape and a color no bot wears yet, while any are left. Black stays the main bot's.
+function suggestAvatar() {
+  const worn = state.bots.map((b) => b.avatar).filter(Boolean);
+  const shapes = Object.keys(AVATAR_SHAPES), colors = Object.keys(AVATAR_COLORS).filter((c) => c !== "black");
+  return {
+    shape: shapes.find((s) => !worn.some((a) => a.shape === s)) || shapes[state.bots.length % shapes.length],
+    color: colors.find((c) => !worn.some((a) => a.color === c)) || colors[state.bots.length % colors.length],
+  };
+}
+
+function showPicked() {
+  $("b-avatar").replaceChildren(character(picked, editingBot ? editingBot.id : 0, 64), $("b-avatar").querySelector(".badge"));
+  if (!$("av-picker").hidden) renderPicker();
+}
+
+// The caption names the character under the pointer or keyboard focus, else the one picked.
+function caption(choice) {
+  $("av-caption").textContent = colorName(choice.color) + " " + AVATAR_SHAPES[choice.shape].name.toLowerCase();
+}
+
+function renderPicker() {
+  caption(picked);
+  $("av-reset").hidden = sameAvatar(picked, pickDefault);
+  // Picking redraws the grid, so focus moves to the new button for the same choice.
+  const option = (button, label, choice, pressed) => {
+    button.type = "button";
+    button.title = label;
+    button.setAttribute("aria-label", label);
+    button.setAttribute("aria-pressed", String(pressed));
+    button.addEventListener("click", () => {
+      const group = button.parentElement.id;
+      picked = choice;
+      showPicked();
+      $(group).querySelector('[aria-pressed="true"]').focus();
+    });
+    for (const type of ["mouseenter", "focus"]) button.addEventListener(type, () => caption(choice));
+    for (const type of ["mouseleave", "blur"]) button.addEventListener(type, () => caption(picked));
+    return button;
+  };
+  $("av-shapes").replaceChildren(...Object.entries(AVATAR_SHAPES).map(([id, shape]) => {
+    const button = option(el("button"), shape.name, { ...picked, shape: id }, id === picked.shape);
+    button.append(character({ ...picked, shape: id }, 0, 30, true));
+    return button;
+  }));
+  $("av-colors").replaceChildren(...Object.entries(AVATAR_COLORS).map(([id, value]) => {
+    const button = option(el("button"), colorName(id), { ...picked, color: id }, id === picked.color);
+    button.style.background = value;
+    return button;
+  }));
+}
+
+function togglePicker(open) {
+  $("av-picker").hidden = !open;
+  $("b-avatar").setAttribute("aria-expanded", String(open));
+  if (open) { renderPicker(); $("av-shapes").querySelector('[aria-pressed="true"]').focus(); }
+}
+$("b-avatar").addEventListener("click", () => togglePicker($("av-picker").hidden));
+$("av-reset").addEventListener("click", () => { picked = pickDefault; showPicked(); $("av-shapes").querySelector('[aria-pressed="true"]').focus(); });
+$("bot-dialog").addEventListener("pointerdown", (event) => {
+  if (!$("av-picker").hidden && !$("av-picker").contains(event.target) && !$("b-avatar").contains(event.target)) togglePicker(false);
+});
+// Escape closes the picker first, then the dialog. Stopping the keydown keeps the dialog open; Chrome
+// doesn't always let a dialog's cancel event be prevented, so that is only the fallback.
+const closePicker = (event) => {
+  if ($("av-picker").hidden || (event.type === "keydown" && event.key !== "Escape")) return;
+  event.preventDefault();
+  togglePicker(false);
+  $("b-avatar").focus();
+};
+$("bot-dialog").addEventListener("keydown", closePicker);
+$("bot-dialog").addEventListener("cancel", closePicker);
+
 function openBot(bot) {
   editingBot = bot;
+  picked = bot ? bot.avatar : suggestAvatar();
+  pickDefault = bot ? bot.defaultAvatar : picked;
+  togglePicker(false);
+  showPicked();
   $("b-h").textContent = bot ? "Edit " + bot.name : "New bot";
   $("b-save").textContent = bot ? "Save changes" : "Add bot";
   $("b-name").value = bot ? bot.name : "";
@@ -1014,6 +1212,9 @@ $("b-cancel").addEventListener("click", () => $("bot-dialog").close());
 $("bot-form").addEventListener("submit", async (event) => {
   event.preventDefault();
   const payload = { name: $("b-name").value, instructions: $("b-instructions").value };
+  // The avatar goes only when it changed; back at the default it goes as null, so the bot keeps following its default.
+  if (!editingBot) payload.avatar = picked;
+  else if (!sameAvatar(picked, editingBot.avatar)) payload.avatar = sameAvatar(picked, editingBot.defaultAvatar) ? null : picked;
   $("b-save").disabled = true;
   try {
     const bot = editingBot ? await request("PUT", "/api/bots/" + editingBot.id, payload) : await request("POST", "/api/bots", payload);

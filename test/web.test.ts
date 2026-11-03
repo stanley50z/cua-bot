@@ -13,6 +13,7 @@ import { type FauxResponseStep, type Message } from "@earendil-works/pi-ai";
 import { createModels } from "@earendil-works/pi-ai/models";
 import { fauxAssistantMessage, fauxProvider, fauxText } from "@earendil-works/pi-ai/providers/faux";
 import { type Conversation, createRegistry, Harness, MemoryStorage } from "@earendil-works/pi-durable";
+import { AVATAR_COLORS, AVATAR_SHAPES } from "../src/bots.ts";
 import { bindRoutines, createRoutinesExtension, syncRoutines, type RoutineView } from "../src/routines.ts";
 import { createBotServer } from "../src/web.ts";
 
@@ -106,6 +107,7 @@ test("GET / serves the web app with chat, computer pane, and routines", { timeou
 		assert.match(html, /\/api\/routines/);
 		assert.match(html, /id="routine-dir"/);
 		assert.match(html, /id="f-bot"/, "a new routine picks its bot");
+		for (const id of [...AVATAR_SHAPES, ...AVATAR_COLORS]) assert.match(html, new RegExp(`^\\s+${id}: `, "m"), `the page draws the avatar ${id} the server accepts`);
 		assert.doesNotMatch(html, /innerHTML/, "server text is rendered with DOM nodes only");
 	} finally {
 		await close(session);
