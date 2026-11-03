@@ -10,6 +10,7 @@ import type { Message } from "@earendil-works/pi-ai";
 import { createModels } from "@earendil-works/pi-ai/models";
 import { fauxAssistantMessage, fauxProvider, fauxText, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
 import { createRegistry, Harness, MemoryStorage } from "@earendil-works/pi-durable";
+import { createMachines } from "../src/machines.ts";
 import { createPcExtensions, pcEnv } from "../src/pc.ts";
 
 const context = BACKGROUND_CONTEXT;
@@ -42,6 +43,7 @@ test("a codemode script runs bash and read on the PC", { timeout: 60_000 }, asyn
 	]);
 	const registry = createRegistry();
 	for (const extension of createPcExtensions()) registry.install(extension);
+	registry.install(createMachines().extension);
 	const harness = await Harness.open(new MemoryStorage(), { models, registry, env: pcEnv }, context);
 	try {
 		const root = await harness.root(context, { agent: { model: { provider: "faux", modelId: "faux-1" } } });

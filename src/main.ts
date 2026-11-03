@@ -17,6 +17,7 @@ import { createComputerView } from "./computer-view.ts";
 import { type Approvals, createApprovals, describeApproval } from "./approvals.ts";
 import { connectExecutor, createExecutor, createExecutorExtension } from "./executor.ts";
 import { DATA_DIR, log } from "./log.ts";
+import { createMachines } from "./machines.ts";
 import { createMemory, createMemoryExtension } from "./memory.ts";
 import { createPcExtensions, pcEnv } from "./pc.ts";
 import { createPush } from "./push.ts";
@@ -80,8 +81,11 @@ try {
 	log(`cua: \`${cuaCommand} mcp\` failed (${error instanceof Error ? error.message : String(error)}); Cua Spaces tools are off`);
 }
 registry.install(createRoutinesExtension());
-// read, write, edit, bash, and powershell on this PC, and codemode over every tool.
+// codemode over every tool, and the section saying the coding tools act on this PC by default.
 for (const extension of createPcExtensions()) registry.install(extension);
+// read, write, edit, bash, and powershell, on this PC or, given `machine`, on any SSH destination of the owner's.
+const machines = createMachines();
+registry.install(machines.extension);
 // The shared memory every bot sees, and each bot's own in its folder.
 const memory = createMemory({ dir: join(DATA_DIR, "memory") });
 const memories = botMemories();
@@ -170,6 +174,7 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
 		stopWatching();
 		await bots.close();
 		await harness.close(context);
+		machines.close();
 		process.exit(0);
 	});
 }

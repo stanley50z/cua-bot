@@ -20,6 +20,9 @@ importers:
       '@earendil-works/pi-durable':
         specifier: ^1.4.0
         version: 1.4.0(@aws-sdk/credential-provider-node@3.972.88)(@smithy/signature-v4@5.7.4)(ws@8.22.0)
+      '@earendil-works/pi-env':
+        specifier: ~1.4.0
+        version: 1.4.0(@aws-sdk/credential-provider-node@3.972.88)(@smithy/signature-v4@5.7.4)(ws@8.22.0)
       '@earendil-works/pi-mcp':
         specifier: ^1.4.0
         version: 1.4.0
@@ -153,6 +156,10 @@ packages:
 
   '@earendil-works/pi-durable@1.4.0':
     resolution: {integrity: sha512-EtIyXH1MBSXdJSkodmy+CYXuwfve3gPrD4GNCZ0XmuRWLPupwRlNQ7fdaXjRcLoKb6SWkT/yEzK+sMmrqvYK+Q==}
+    engines: {node: '>=22.19.0'}
+
+  '@earendil-works/pi-env@1.4.0':
+    resolution: {integrity: sha512-WOO3ltw36D6YFDRCbByYQMl1+dbR8C2rJAmZ8MxBAX/sTKe4HSNLxPEGYWrQjs4EmNyeh6smrQ+7GGoLbBv/Jg==}
     engines: {node: '>=22.19.0'}
 
   '@earendil-works/pi-mcp@1.4.0':
@@ -939,6 +946,23 @@ snapshots:
       '@silvia-odwyer/photon': 0.3.3
       diff: 8.0.4
       typebox: 1.3.27
+    transitivePeerDependencies:
+      - '@aws-sdk/credential-provider-node'
+      - '@modelcontextprotocol/sdk'
+      - '@smithy/hash-node'
+      - '@smithy/signature-v4'
+      - bufferutil
+      - kerberos
+      - supports-color
+      - undici
+      - utf-8-validate
+      - ws
+      - zod
+
+  '@earendil-works/pi-env@1.4.0(@aws-sdk/credential-provider-node@3.972.88)(@smithy/signature-v4@5.7.4)(ws@8.22.0)':
+    dependencies:
+      '@earendil-works/chord': 1.4.0
+      '@earendil-works/pi-durable': 1.4.0(@aws-sdk/credential-provider-node@3.972.88)(@smithy/signature-v4@5.7.4)(ws@8.22.0)
     transitivePeerDependencies:
       - '@aws-sdk/credential-provider-node'
       - '@modelcontextprotocol/sdk'
