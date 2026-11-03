@@ -28,6 +28,20 @@ const TOOL_TEXT_LIMIT = 4000;
 const COMPUTER_POLL_MS = 1500;
 const SHOT_PATTERN = /shots[\\/]([\w.-]+\.png)/g;
 
+/**
+ * The bots' tool for talking to the owner (src/bots.ts). Its `text` is all the chat shows of a reply; the model's own
+ * text is private notes. Replies from before the tool existed (SENT_SINCE) show their own text as they always did.
+ */
+export const SEND_MESSAGE = "send_message";
+const SENT_SINCE = Date.parse("2026-11-03T04:05:00Z");
+
+/** What a reply sent the owner through send_message, joined; empty when it sent nothing. */
+function sentText(content: readonly { type: string; name?: string; arguments?: Record<string, unknown> }[]): string {
+	return content
+		.flatMap((part) => (part.type === "toolCall" && part.name === SEND_MESSAGE && typeof part.arguments?.text === "string" ? [part.arguments.text] : []))
+		.join("\n\n");
+}
+
 /** Entry kind of a message from another bot (src/bots.ts); its data is a BotMessage. */
 export const BOT_MESSAGE = "cua-bot.bot-message";
 export type BotMessage = { from: number; name: string; text: string };
@@ -57,7 +71,7 @@ export type ChatItem =
 
 export type ChatLive = {
 	busy: boolean;
-	/** Text of the in-flight reply so far. */
+	/** What the in-flight reply has sent the owner so far, as send_message's text streams in. */
 	partial: string;
 	/** `child` is the conversation a running computer_use call drives the Space from. */
 	tools: { callId: string; name: string; status: "pending" | "running" | "done"; output?: string; child?: number }[];
@@ -100,20 +114,25 @@ export function toChatItem(entry: EntryRecord): ChatItem | undefined {
 	if (AssistantEntry.is(entry) && message?.role === "assistant") {
 		const reply = message as AssistantMessage;
 		const tools = reply.content.flatMap((part) =>
-			part.type === "toolCall" ? [{ id: part.id, name: part.name, args: part.arguments as Record<string, unknown> }] : [],
+			part.type === "toolCall" && part.name !== SEND_MESSAGE ? [{ id: part.id, name: part.name, args: part.arguments as Record<string, unknown> }] : [],
 		);
+		const text = reply.timestamp < SENT_SINCE ? textOf(reply.content) : sentText(reply.content);
+		const aborted = reply.stopReason === "aborted";
+		// A reply that only wrote private notes shows nothing.
+		if (text === "" && tools.length === 0 && !aborted && reply.stopReason !== "error") return undefined;
 		return {
 			id,
 			kind: "assistant",
-			text: textOf(reply.content),
+			text,
 			at: reply.timestamp,
 			tools,
-			aborted: reply.stopReason === "aborted",
+			aborted,
 			...(reply.stopReason === "error" ? { error: reply.errorMessage ?? "The model returned an error." } : {}),
 		};
 	}
 	if (ToolResultEntry.is(entry) && message?.role === "toolResult") {
 		const result = message as ToolResultMessage;
+		if (result.toolName === SEND_MESSAGE) return undefined;
 		const full = textOf(result.content);
 		return {
 			id,
@@ -145,8 +164,8 @@ export function toChatLive(live: Readonly<LiveState> | null): ChatLive {
 	const partial = live?.generation?.message;
 	return {
 		busy: live?.run !== undefined,
-		partial: partial === undefined ? "" : textOf(partial.content as readonly { type: string; text?: string }[]),
-		tools: (live?.tools ?? []).map((slot) => {
+		partial: partial === undefined ? "" : sentText(partial.content as readonly { type: string }[]),
+		tools: (live?.tools ?? []).filter((slot) => slot.name !== SEND_MESSAGE).map((slot) => {
 			const details = slot.details;
 			const child =
 				details !== null && typeof details === "object" && !Array.isArray(details) && typeof details.conversationId === "number"

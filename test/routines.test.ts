@@ -239,7 +239,7 @@ test("advancing the clock fires a [routine] turn", { timeout: 20_000 }, async ()
 		assert.match(log, /is due \(every 1m\)/);
 		assert.match(log, /Nobody is waiting/);
 		assert.match(log, new RegExp(PROMPT));
-		assert.match(log, /email the owner only if the outcome is worth it/);
+		assert.match(log, /send_message the owner only if the outcome needs them/);
 		assertNoFaults(session);
 	} finally {
 		await session.harness.close(context);

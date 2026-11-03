@@ -1,6 +1,6 @@
 // Web Push (src/push.ts): keys persist across restarts, one subscription per browser endpoint, a message
 // reaches every subscription, and one the push service reports gone is dropped. Plus the web app's
-// /api/push and /sw.js routes. Run from the repo root:  node --test test/push.test.ts
+// /api/push and /sw.js routes, and a body cut to fit a push. Run from the repo root:  node --test test/push.test.ts
 import assert from "node:assert/strict";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -72,4 +72,15 @@ test("the web app serves the push key and service worker and saves a browser's s
 		} finally {
 			await new Promise<void>((resolve) => server.close(() => resolve()));
 		}
+	}));
+
+test("a long body is cut to fit a push", () =>
+	inTempDir(async (file) => {
+		const sent: { title: string; body?: string }[] = [];
+		const push = createPush({ file, deliver: async (_to, payload) => void sent.push(JSON.parse(payload)) });
+		push.subscribe(subscription("https://fcm.googleapis.com/fcm/send/chrome"));
+
+		await push.send({ title: "Alfred", body: "x".repeat(5000) });
+		assert.equal(sent[0]?.body?.length, 500);
+		assert.ok(sent[0]?.body?.endsWith("…"));
 	}));

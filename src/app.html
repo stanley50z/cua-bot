@@ -1578,8 +1578,8 @@ $("take-control").addEventListener("click", async () => {
 });
 
 /* ---------- notifications ---------- */
-// Web Push (src/push.ts): once the owner allows it, the bot's notify_user calls and new approval cards
-// arrive as browser notifications through /sw.js, even with every cua-bot tab closed.
+// Web Push (src/push.ts): once the owner allows it, every message a bot sends the owner (send_message)
+// and new approval cards arrive as browser notifications through /sw.js, even with every cua-bot tab closed.
 const pushSupported = "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
 function showNotifyState() {
   const button = $("notify"), permission = pushSupported ? Notification.permission : "denied";

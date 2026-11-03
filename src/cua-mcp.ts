@@ -14,6 +14,8 @@ import { createExecutor } from "./executor.ts";
 const PREFIX = "cua_";
 // Creating a Space or starting an agent can take minutes.
 const REQUEST_TIMEOUT_MS = 10 * 60_000;
+// Cua tools the bots don't get, for now. notify_user: bots reach the owner only with send_message (owner's call, 2026-11-02).
+const DISABLED = new Set(["notify_user"]);
 
 /** The Cua Spaces app's bundled CLI on Windows, else `cua` on PATH. CUA_MCP_COMMAND overrides both (see main.ts). */
 export function defaultCuaCommand(): string {
@@ -28,17 +30,14 @@ export const connectCua = (command: string) => async () => {
 	return client;
 };
 
-/**
- * Used by main.ts at startup. Lists the server's tools once; throws when the server can't start or answer.
- * `notified` hears each notify_user that went through, so main.ts can push it to the owner's browser too.
- */
+/** Used by main.ts at startup. Lists the server's tools once; throws when the server can't start or answer. */
 export async function createCuaExtension(
 	connect: () => Promise<McpClient>,
-	options: { pairedSpace?: string; notified?: (note: { title: string; body?: string }) => void } = {},
+	options: { pairedSpace?: string } = {},
 ): Promise<Extension> {
-	const { pairedSpace, notified } = options;
+	const { pairedSpace } = options;
 	const first = await connect();
-	const listed = await first.listTools();
+	const listed = (await first.listTools()).filter((tool) => !DISABLED.has(tool.name));
 	const instructions = first.instructions ?? "";
 	await first.close();
 	const call = createExecutor(connect);
@@ -53,9 +52,6 @@ export async function createCuaExtension(
 			execute: async (args, _api, context) => {
 				const result = await call(tool.name, args, context.abortSignal);
 				const output = toLlmContent(result);
-				if (tool.name === "notify_user" && result.isError !== true && typeof args.title === "string") {
-					notified?.({ title: args.title, ...(typeof args.body === "string" ? { body: args.body } : {}) });
-				}
 				if (output.length === 0) output.push({ type: "text", text: "(no output)" });
 				return { output, isError: result.isError === true };
 			},

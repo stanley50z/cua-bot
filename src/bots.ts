@@ -24,7 +24,7 @@ import {
 	section,
 	type Tx,
 } from "@earendil-works/pi-durable";
-import { BOT_MESSAGE, type BotMessage, type Chat, type ChatItem, createChat } from "./chat.ts";
+import { BOT_MESSAGE, type BotMessage, type Chat, type ChatItem, createChat, SEND_MESSAGE } from "./chat.ts";
 import type { ComputerView } from "./computer-view.ts";
 import { createMemory, type Memory } from "./memory.ts";
 
@@ -251,7 +251,7 @@ export function botSection(bots: Bot[], self: number): string | undefined {
 	}
 	lines.push(
 		"message_bot is asynchronous, like texting: it returns at once, and any reply arrives later as its own message starting with [bot]. Message another bot when it helps the owner's request, never several bots at once unless the owner asked. Pass on what the owner wants, not their private remarks.",
-		"A message starting with [bot] comes from another bot, not the owner, who can already see it in this chat. Act on it if it asks for something. Reply with message_bot only with an answer or a question, never just to acknowledge, and tell the owner only about real results.",
+		"A message starting with [bot] comes from another bot, not the owner, who can already see it in this chat. Act on it if it asks for something. Reply with message_bot only with an answer or a question, never just to acknowledge, and send_message the owner only about real results.",
 	);
 	return lines.join("\n");
 }
@@ -301,6 +301,17 @@ export function createBotsExtension(options: { agent: () => AgentChange; dir?: s
 		},
 	});
 
+	// The chat shows the text (src/chat.ts) and main.ts pushes it, both from the transcript; the call itself only acknowledges.
+	const sendMessage = defineTool({
+		name: SEND_MESSAGE,
+		description:
+			"Send the owner a message. It appears in your chat and pops up in their browser as a notification. This is the only way the owner sees anything you write: your own text is private notes. When nothing needs the owner, send nothing.",
+		parameters: Type.Object({
+			text: Type.String({ description: "The message, in Markdown, complete on its own" }),
+		}),
+		execute: async ({ text }) => (text.trim() === "" ? reply("The message is empty.", true) : reply("Sent.")),
+	});
+
 	const createBotTool = defineTool({
 		name: "create_bot",
 		description:
@@ -322,7 +333,7 @@ export function createBotsExtension(options: { agent: () => AgentChange; dir?: s
 
 	return defineExtension({
 		name: "bots",
-		tools: [messageBot, createBotTool],
+		tools: [sendMessage, messageBot, createBotTool],
 		sections: [
 			section("bots", async (input, context) => botSection(await loadBots(dir, await input.read.snapshot(BotsDoc, context)), Number(input.conversationId)), {
 				tag: false,
@@ -362,6 +373,8 @@ export async function createBots(deps: {
 	renamed?: (id: number) => Promise<unknown>;
 	/** Before a bot is deleted, while its record still names it; main.ts cancels its routines. */
 	removing?: (id: number) => Promise<unknown>;
+	/** Each message a bot sends the owner with send_message, in any bot's chat; main.ts pushes it to the owner's browser. */
+	sent?: (bot: Bot, text: string) => void;
 }) {
 	const { harness, root, context } = deps;
 	const dir = deps.dir ?? DEFAULT_BOTS_DIR;
@@ -409,6 +422,11 @@ export async function createBots(deps: {
 				if (event.type === "items") {
 					const preview = event.items.flatMap((item) => previewOf(item) ?? []).at(-1);
 					if (preview !== undefined) view.preview = preview;
+					for (const item of event.items) {
+						// A reply's text is only what it sent with send_message, so a reply that sent nothing stays silent.
+						if (item.kind !== "assistant" || item.aborted || item.text.trim() === "") continue;
+						deps.sent?.(bots.find((b) => b.id === bot.id) ?? bot, item.text);
+					}
 				}
 				views.set(bot.id, view);
 				publish();

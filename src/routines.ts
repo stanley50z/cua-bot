@@ -89,7 +89,7 @@ function routineTurnText(
 	return [
 		`[routine] "${routine.title}" is due (${cronLabel(routine.cron)}${last}). Nobody is waiting.`,
 		`Your standing instruction: ${routine.prompt}`,
-		"Carry it out; email the owner only if the outcome is worth it.",
+		"Carry it out; send_message the owner only if the outcome needs them.",
 	].join("\n");
 }
 
@@ -691,7 +691,7 @@ export function createRoutinesExtension(): Extension {
 			section(
 				"routines",
 				() =>
-					"Call schedule for later or repeating work: cron is a 5-field cron string, a nickname like @daily, or @every 30m, optionally prefixed CRON_TZ=Area/City. Prefer weekday daytime schedules like '30 7 * * 1-5'; never use bare @hourly. Use run_routine to fire one now. Your routines are your own: schedule, run_routine, and cancel_routine act only on them, and each fires as a turn in your chat. The owner can also add, edit, and remove them in the web UI or your routines.json without you; list_routines always shows the current set. A user message starting with [routine] is a routine firing: nobody is waiting, so carry out the standing instruction and email the owner only if the outcome is worth it.",
+					"Call schedule for later or repeating work: cron is a 5-field cron string, a nickname like @daily, or @every 30m, optionally prefixed CRON_TZ=Area/City. Prefer weekday daytime schedules like '30 7 * * 1-5'; never use bare @hourly. Use run_routine to fire one now. Your routines are your own: schedule, run_routine, and cancel_routine act only on them, and each fires as a turn in your chat. The owner can also add, edit, and remove them in the web UI or your routines.json without you; list_routines always shows the current set. A user message starting with [routine] is a routine firing: nobody is waiting, so carry out the standing instruction and send_message the owner only if the outcome needs them.",
 			),
 		],
 		tasks: [RoutineTask],

@@ -5,9 +5,10 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
-import { AssistantEntry, configure, type ConversationId, createRegistry, defineExtension, Harness, section } from "@earendil-works/pi-durable";
+import { configure, type ConversationId, createRegistry, type Cursor, defineExtension, Harness, section } from "@earendil-works/pi-durable";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { botMemories, createBots, createBotsExtension } from "./bots.ts";
+import { toChatItem } from "./chat.ts";
 import { createComputerExtension, openLiveStream, spaceId, spaceLabel, viewerLink } from "./computer.ts";
 import { createLiveScreen } from "./live-screen.ts";
 import { createBotToolSearchExtension } from "./tool-search.ts";
@@ -53,9 +54,9 @@ registry.install(
 					[
 						"You are a bot in cua-bot, a self-hosted personal agent that runs 24/7 for one owner.",
 						`The owner's email is ${process.env.OWNER_EMAIL || "(unset)"}. Mail to the owner goes through Gmail in Executor like any other mail.`,
-						"To get the owner's attention now, call cua_notify_user (load it with tool_search): it pops up in their browser, even with no cua-bot tab open. Email the owner for what they should keep.",
+						"The owner sees only what you send with send_message; your own text is private notes. Answer the owner's messages with send_message, and send it whenever something needs them, even mid-task; each message pops up in their browser. When nothing needs the owner, send nothing. Never email the owner unless they ask for an email.",
 						"The owner's Mac is yours to use. Run CLI commands there with space_bash. Delegate every on-screen task to computer_use, one at a time.",
-						"For recurring or future work, create a routine with schedule. A message starting with [routine] is a routine firing: do the work, and notify or email the owner only if the outcome is worth it.",
+						"For recurring or future work, create a routine with schedule. A message starting with [routine] is a routine firing: do the work, and send_message the owner only if the outcome needs them.",
 						"Be brief.",
 					].join("\n"),
 				{ tag: false },
@@ -74,7 +75,7 @@ const push = createPush({ file: join(DATA_DIR, "push.json"), log });
 // Every Cua Spaces tool, deferred until tool_search loads it. The rest of the bot works without the cua CLI.
 const cuaCommand = process.env.CUA_MCP_COMMAND?.trim() || defaultCuaCommand();
 try {
-	registry.install(await createCuaExtension(connectCua(cuaCommand), { pairedSpace: spaceId(), notified: (note) => void push.send(note) }));
+	registry.install(await createCuaExtension(connectCua(cuaCommand), { pairedSpace: spaceId() }));
 } catch (error) {
 	log(`cua: \`${cuaCommand} mcp\` failed (${error instanceof Error ? error.message : String(error)}); Cua Spaces tools are off`);
 }
@@ -121,15 +122,23 @@ const stopWatching = startRoutineFileWatch(context, (error) =>
 );
 log(`cua-bot up: model ${MODEL.provider}/${MODEL.modelId}, root ${root.id}`);
 
-// Submits one owner message to the root conversation and returns the answer text.
+// Submits one owner message to the root conversation and returns what the bot sent the owner (send_message) by the end of the turn.
 async function say(text: string): Promise<string> {
+	const before = (await root.entries({ order: "descending" }, 1, undefined, context)).items[0]?.id;
 	const submission = await root.submit({ type: "input", content: text }, context);
 	const settled = await submission.wait(context);
 	if (settled.status !== "done" || settled.type !== "input") return `(unanswered: ${settled.reason ?? "unknown"})`;
-	const entry = await root.commit((tx) => tx.entry(AssistantEntry, settled.answer), context);
-	const message = entry?.model?.[0];
-	if (message?.role !== "assistant") return "";
-	return message.content.flatMap((c) => (c.type === "text" ? [c.text] : [])).join("\n");
+	const sent: string[] = [];
+	let cursor: Cursor | undefined;
+	do {
+		const page = await root.entries({ order: "ascending", ...(before === undefined ? {} : { minEntryId: before }) }, 200, cursor, context);
+		for (const entry of page.items) {
+			const item = entry.id === before ? undefined : toChatItem(entry);
+			if (item?.kind === "assistant" && item.text !== "") sent.push(item.text);
+		}
+		cursor = page.next;
+	} while (cursor !== undefined);
+	return sent.join("\n\n");
 }
 
 const space = spaceLabel();
@@ -141,6 +150,7 @@ const bots = await createBots({
 	// A renamed bot's routine file is renamed on the next sync; a deleted bot's routines go with it.
 	renamed: () => syncRoutines(context),
 	removing: (id) => removeBotRoutines(id, context),
+	sent: (bot, text) => void push.send({ title: bot.name, body: text }),
 	computer: (conversation) =>
 		createComputerView({ harness, storage, conversation, shotsDir: join(DATA_DIR, "shots"), context, ...(space === undefined ? {} : { space }) }),
 });

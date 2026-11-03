@@ -1,6 +1,5 @@
 // Cua's MCP server tools (src/cua-mcp.ts) against a fake server: every tool becomes a deferred cua_<name>,
-// tool_search loads it (by exact name too), calls reach the server under the tool's own name, and a
-// notify_user that went through is reported for the owner's push notification.
+// tool_search loads it (by exact name too), calls reach the server under the tool's own name, and notify_user is off.
 // Run from the repo root:  node --test test/cua-mcp.test.ts
 import assert from "node:assert/strict";
 import { test } from "node:test";
@@ -20,13 +19,12 @@ const TOOLS = [
 	{ name: "notify_user", description: "Tell the user something in the Cua app.", inputSchema: { type: "object" as const, properties: { title: { type: "string" }, body: { type: "string" } } } },
 ];
 
-test("every Cua tool is deferred as cua_<name>, and tool_search loads it for the bot", { timeout: 20_000 }, async () => {
+test("every Cua tool but notify_user is deferred as cua_<name>, and tool_search loads it for the bot", { timeout: 20_000 }, async () => {
 	const fake = fakeExecutor(({ args }) => textResult(`ran ${String(args.command)}`), TOOLS);
-	const notified: unknown[] = [];
-	const extension = await createCuaExtension(fake.connect, { pairedSpace: "direct:mac", notified: (note) => notified.push(note) });
+	const extension = await createCuaExtension(fake.connect, { pairedSpace: "direct:mac" });
 	assert.deepEqual(
 		(extension.tools ?? []).map((tool) => [tool.name, tool.deferred]),
-		[["cua_space_bash", true], ["cua_upload", true], ["cua_notify_user", true]],
+		[["cua_space_bash", true], ["cua_upload", true]],
 	);
 
 	let results: ToolResultMessage[] = [];
@@ -39,9 +37,9 @@ test("every Cua tool is deferred as cua_<name>, and tool_search loads it for the
 	};
 	faux.setResponses([
 		step(fauxAssistantMessage([fauxToolCall("cua_space_bash", { space: "direct:mac", command: "early" }, { id: "early" })], { stopReason: "toolUse" })),
-		step(fauxAssistantMessage([fauxToolCall("tool_search", { query: "cua_space_bash, cua_notify_user to upload a host file", limit: 1 }, { id: "s" })], { stopReason: "toolUse" })),
+		step(fauxAssistantMessage([fauxToolCall("tool_search", { query: "cua_space_bash, cua_upload to upload a host file", limit: 1 }, { id: "s" })], { stopReason: "toolUse" })),
 		step(fauxAssistantMessage([fauxToolCall("cua_space_bash", { space: "direct:mac", command: "uname" }, { id: "b" })], { stopReason: "toolUse" })),
-		step(fauxAssistantMessage([fauxToolCall("cua_notify_user", { title: "Mac checked", body: "Darwin" }, { id: "n" })], { stopReason: "toolUse" })),
+		step(fauxAssistantMessage([fauxToolCall("cua_upload", { space: "direct:mac", path: "C:/notes.txt" }, { id: "n" })], { stopReason: "toolUse" })),
 		step(fauxAssistantMessage([fauxText("done")])),
 	]);
 	const registry = createRegistry();
@@ -59,9 +57,8 @@ test("every Cua tool is deferred as cua_<name>, and tool_search loads it for the
 	assert.equal(results.find((message) => message.toolCallId === "early")?.isError, true, "not callable before tool_search");
 	assert.deepEqual(fake.calls, [
 		{ name: "space_bash", args: { space: "direct:mac", command: "uname" } },
-		{ name: "notify_user", args: { title: "Mac checked", body: "Darwin" } },
+		{ name: "upload", args: { space: "direct:mac", path: "C:/notes.txt" } },
 	]);
-	assert.deepEqual(notified, [{ title: "Mac checked", body: "Darwin" }]);
 	const bash = results.find((message) => message.toolCallId === "b");
 	assert.equal(bash?.content.flatMap((part) => (part.type === "text" ? [part.text] : [])).join(""), "ran uname");
 });

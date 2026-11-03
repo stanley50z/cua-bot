@@ -1,5 +1,6 @@
 // The web chat API: POST /api/chat, the /api/chat/events stream, GET /api/chat history paging,
 // emoji reactions, stop, and /shots/ file serving. Exercised over real HTTP against createBotServer with a faux model.
+// A reply shows only what the bot sent with send_message; its own text stays private.
 // Run from the repo root:  node --test test/chat.test.ts
 import assert from "node:assert/strict";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
@@ -12,8 +13,8 @@ import { Type } from "@earendil-works/pi-ai";
 import { createModels } from "@earendil-works/pi-ai/models";
 import { type FauxResponseStep, fauxAssistantMessage, fauxProvider, fauxText, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
 import { createRegistry, defineExtension, defineTool, Harness, MemoryStorage } from "@earendil-works/pi-durable";
-import { createBots } from "../src/bots.ts";
-import { BOT_MESSAGE, type ChatEvent, type ChatItem, REACTION, reactionText, toChatItem } from "../src/chat.ts";
+import { createBots, createBotsExtension } from "../src/bots.ts";
+import { BOT_MESSAGE, type ChatEvent, type ChatItem, REACTION, reactionText, SEND_MESSAGE, toChatItem } from "../src/chat.ts";
 import { createBotServer } from "../src/web.ts";
 
 const context = BACKGROUND_CONTEXT;
@@ -25,10 +26,17 @@ const lookTool = defineTool({
 	execute: async () => ({ output: [{ type: "text" as const, text: "Saw the desktop. Screenshot: data/shots/2026-10-31T10-00-00.png" }] }),
 });
 
+const MODEL = { provider: "faux", modelId: "faux-1" };
+// The bot tells the owner something, and the turn ends with private notes the chat never shows.
+const send = (text: string) => fauxAssistantMessage([fauxToolCall(SEND_MESSAGE, { text })], { stopReason: "toolUse" });
+const end = fauxAssistantMessage([fauxText("Told the owner.")]);
+
 const SCRIPT: FauxResponseStep[] = [
-	fauxAssistantMessage([fauxText("Hello there.")]),
+	send("Hello there."),
+	end,
 	fauxAssistantMessage([fauxToolCall("look", {}, { id: "call-1" })], { stopReason: "toolUse" }),
-	fauxAssistantMessage([fauxText("Your desktop is tidy.")]),
+	send("Your desktop is tidy."),
+	end,
 ];
 
 async function open(responses = SCRIPT) {
@@ -39,10 +47,11 @@ async function open(responses = SCRIPT) {
 	faux.setResponses(responses);
 	const registry = createRegistry();
 	registry.install(defineExtension({ name: "test", tools: [lookTool] }));
+	registry.install(createBotsExtension({ agent: () => ({ model: MODEL }), dir: join(dir, "bots") }));
 	const harness = await Harness.open(new MemoryStorage(), { models, registry }, context);
-	const root = await harness.root(context, { agent: { model: { provider: "faux", modelId: "faux-1" } } });
+	const root = await harness.root(context, { agent: { model: MODEL } });
 	harness.resume();
-	const bots = await createBots({ harness, root, context, agent: { model: { provider: "faux", modelId: "faux-1" } }, dir: join(dir, "bots") });
+	const bots = await createBots({ harness, root, context, agent: { model: MODEL }, dir: join(dir, "bots") });
 	const server = createBotServer({ say: async (text) => text, bots, context, shotsDir: dir });
 	await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
 	const address = server.address();
@@ -134,7 +143,8 @@ test("a sent message streams back as user and assistant items, then history page
 		assert.deepEqual(result.shots, ["2026-10-31T10-00-00.png"]);
 		assert.equal(final?.kind === "assistant" && final.text, "Your desktop is tidy.");
 
-		const page1 = await (await fetch(`${bot.base}/api/chat?limit=3`)).json();
+		// The newest five entries: hidden notes, send_message's hidden result, the sent reply, look's result, and its call.
+		const page1 = await (await fetch(`${bot.base}/api/chat?limit=5`)).json();
 		assert.deepEqual(
 			page1.items.map((item: ChatItem) => item.kind),
 			["assistant", "tool", "assistant"],
@@ -201,17 +211,31 @@ test("routine firings and context markers are labeled for the chat", () => {
 	assert.deepEqual(message, { id: 4, kind: "bot", from: 7, name: "Job Search", text: "Found 3 roles.", at: 9 });
 });
 
+test("a reply shows only what it sent; one with only private notes is hidden; one from before send_message shows its text", () => {
+	const reply = (timestamp: number, content: unknown[]) =>
+		toChatItem({ conversationId: 0 as never, id: 1 as never, kind: "pi.assistant", model: [{ role: "assistant", content, timestamp, stopReason: "toolUse" } as never] });
+	const notes = { type: "text", text: "Checking the inbox first." };
+	const sent = { type: "toolCall", id: "s", name: SEND_MESSAGE, arguments: { text: "Two mails need you." } };
+	const now = Date.now();
+	assert.deepEqual(reply(now, [notes, sent]), { id: 1, kind: "assistant", text: "Two mails need you.", at: now, tools: [], aborted: false });
+	assert.equal(reply(now, [notes]), undefined);
+	const legacy = reply(Date.parse("2026-11-01T00:00:00Z"), [notes]);
+	assert.equal(legacy?.kind === "assistant" && legacy.text, "Checking the inbox first.");
+});
+
 test("a reaction lands on its reply without a turn, and the bot reads it on the next one", async () => {
 	const BOOKED = "Booked the 9:00 train.\nSeat 14A.";
 	let seen: string[] = [];
 	const bot = await open([
-		fauxAssistantMessage([fauxText(BOOKED)]),
+		send(BOOKED),
+		end,
 		(context) => {
 			seen = context.messages.flatMap((message) =>
 				message.role === "user" ? [typeof message.content === "string" ? message.content : message.content.map((part) => (part.type === "text" ? part.text : "")).join("")] : [],
 			);
-			return fauxAssistantMessage([fauxText("Glad it works.")]);
+			return send("Glad it works.");
 		},
+		end,
 	]);
 	try {
 		const first = await collect(bot.base, settled(["user", "assistant"]), async () => {
@@ -227,7 +251,7 @@ test("a reaction lands on its reply without a turn, and the bot reads it on the 
 		const reaction = items(reacted).find((item) => item.kind === "reaction");
 		assert.deepEqual(reaction && { ...reaction, id: 0, at: 0 }, { id: 0, kind: "reaction", target: reply.id, emoji: "👍", on: true, at: 0 });
 		assert.equal((await post(bot.base, "/api/chat/react", { entryId: reply.id, emoji: "👍", on: false })).status, 202);
-		assert.equal(bot.faux.state.callCount, 1, "reacting starts no model call");
+		assert.equal(bot.faux.state.callCount, 2, "reacting starts no model call");
 
 		const history = (await (await fetch(`${bot.base}/api/chat`)).json()).items as ChatItem[];
 		assert.deepEqual(

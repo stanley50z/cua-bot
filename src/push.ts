@@ -1,14 +1,16 @@
 // Web Push for the web app: a browser that turned notifications on in the app gets them even with every
 // cua-bot tab closed, as long as the browser runs. main.ts builds one with createPush() and calls send()
-// when the bot calls cua_notify_user or files an approval card; web.ts serves the public key and takes
-// subscriptions. The VAPID keys and the subscriptions live in data/push.json, so they survive a restart.
-// A subscription the push service reports gone (404/410) is dropped.
+// for every message a bot sends the owner with send_message (src/bots.ts) and every approval card; web.ts
+// serves the public key and takes subscriptions. The VAPID keys and the subscriptions live in data/push.json,
+// so they survive a restart. A subscription the push service reports gone (404/410) is dropped.
 import { readFileSync, renameSync, writeFileSync } from "node:fs";
 import webpush, { type PushSubscription } from "web-push";
 
 // The contact the push service sees in the VAPID token.
 const SUBJECT = "https://github.com/stanley50z/cua-bot";
 const TTL_SECONDS = 24 * 60 * 60;
+// Push services cap the payload near 4 KB; a notification shows only the first lines anyway.
+const BODY_MAX = 500;
 
 /** What the service worker (src/sw.js) shows. The same tag replaces an earlier notification. */
 export type PushMessage = { title: string; body?: string; tag?: string };
@@ -43,7 +45,8 @@ export function createPush(options: { file: string; deliver?: Deliver; log?: (..
 
 		/** Sends to every subscribed browser. Never throws: a notification that can't go out is logged. */
 		async send(message: PushMessage) {
-			const payload = JSON.stringify(message);
+			const body = message.body !== undefined && message.body.length > BODY_MAX ? `${message.body.slice(0, BODY_MAX - 1)}…` : message.body;
+			const payload = JSON.stringify({ ...message, ...(body === undefined ? {} : { body }) });
 			const gone = new Set<string>();
 			await Promise.all(
 				saved.subscriptions.map(async (subscription) => {

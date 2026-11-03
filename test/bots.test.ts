@@ -14,7 +14,7 @@ import { createModels } from "@earendil-works/pi-ai/models";
 import { fauxAssistantMessage, fauxProvider, fauxText, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
 import { createRegistry, Harness, MemoryStorage } from "@earendil-works/pi-durable";
 import { botMemories, type BotView, createBots, createBotsExtension, defaultAvatar, readBots } from "../src/bots.ts";
-import type { ChatItem } from "../src/chat.ts";
+import { type ChatItem, SEND_MESSAGE } from "../src/chat.ts";
 import { bindRoutines, createRoutinesExtension, deleteRoutine, removeBotRoutines, type RoutineView, syncRoutines } from "../src/routines.ts";
 import { createBotServer } from "../src/web.ts";
 
@@ -26,6 +26,8 @@ const lastUserText = (messages: Message[]) => {
 	return typeof user?.content === "string" ? user.content : (user?.content.flatMap((p) => (p.type === "text" ? [p.text] : [])).join("") ?? "");
 };
 
+const sendOwner = (text: string) => fauxAssistantMessage([fauxToolCall(SEND_MESSAGE, { text })], { stopReason: "toolUse" });
+
 // The faux model answers by what it is asked, since two bots' requests can interleave in any order.
 // Every request's full prompt is kept in `prompts`.
 async function open() {
@@ -33,12 +35,13 @@ async function open() {
 	const models = createModels();
 	models.setProvider(faux.provider);
 	const prompts: string[] = [];
+	const replies: [string, string][] = [];
 	const answer = (context: { messages: Message[] }) => {
 		prompts.push(JSON.stringify(context));
 		const last = context.messages.at(-1);
-		if (last?.role === "toolResult") return fauxAssistantMessage([fauxText("Asked Scout.")]);
+		if (last?.role === "toolResult") return last.toolName === SEND_MESSAGE ? fauxAssistantMessage([fauxText("Done.")]) : sendOwner("Asked Scout.");
 		const text = lastUserText(context.messages);
-		if (text.startsWith("[bot]")) return fauxAssistantMessage([fauxText("On it.")]);
+		if (text.startsWith("[bot]")) return sendOwner("On it.");
 		if (text === "ask scout") return fauxAssistantMessage([fauxToolCall("message_bot", { to: "scout", text: "Find flights to Tokyo." }, { id: "m1" })], { stopReason: "toolUse" });
 		return fauxAssistantMessage([fauxText("Hello.")]);
 	};
@@ -62,6 +65,7 @@ async function open() {
 		dir,
 		renamed: () => syncRoutines(context),
 		removing: (id) => removeBotRoutines(id, context),
+		sent: (bot, text) => replies.push([bot.name, text]),
 	});
 	await syncRoutines(context);
 	const server = createBotServer({ say: async (text) => text, bots, context });
@@ -73,6 +77,7 @@ async function open() {
 		bots,
 		harness,
 		prompts,
+		replies,
 		dir,
 		legacyFile,
 		async close() {
@@ -136,6 +141,13 @@ test("a bot's message lands in the other bot's chat and wakes it", { timeout: 20
 			(view) => view?.preview?.text === "On it." && !view.busy,
 		);
 		assert.equal(preview?.name, "Scout");
+
+		// What each bot sent with send_message is reported for a push; its private "Done." is not.
+		await until(async () => bot.replies.length, (n) => n >= 2);
+		assert.deepEqual(bot.replies.toSorted(), [
+			["Scout", "On it."],
+			["cua-bot", "Asked Scout."],
+		]);
 	} finally {
 		await bot.close();
 	}
