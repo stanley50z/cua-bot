@@ -9,7 +9,7 @@
 // truth and are re-read on every call, so hand edits apply at once.
 import { mkdir, readdir, readFile, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { Type } from "@earendil-works/pi-ai";
+import { Type } from "typebox";
 import type { Context } from "@earendil-works/chord";
 import { type ConversationId, defineExtension, defineTool, type Extension, type Harness, section } from "@earendil-works/pi-durable";
 

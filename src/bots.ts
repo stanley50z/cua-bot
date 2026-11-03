@@ -10,7 +10,7 @@ import { existsSync, watch as watchFiles } from "node:fs";
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 import type { Context } from "@earendil-works/chord";
-import { Type } from "@earendil-works/pi-ai";
+import { Type } from "typebox";
 import {
 	type AgentChange,
 	configure,
@@ -479,8 +479,10 @@ export async function createBots(deps: {
 	const watch = await harness.watchDoc(BotsDoc, context);
 	let pending = refresh(watch?.value ?? (await harness.snapshot(BotsDoc, context)));
 	await pending;
-	watch?.start(async (value) => {
-		pending = pending.then(() => refresh(value));
+	// A failed call is skipped: the next value follows once the doc recovers.
+	watch?.start(async (call) => {
+		if (call.kind !== "value") return;
+		pending = pending.then(() => refresh(call.value));
 		await pending;
 	});
 	const reload = () => (pending = pending.then(async () => refresh(await harness.snapshot(BotsDoc, context))));

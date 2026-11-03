@@ -10,7 +10,7 @@ import { existsSync, mkdirSync, watch } from "node:fs";
 import { mkdir, rename, rm } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import type { Context } from "@earendil-works/chord";
-import { Type } from "@earendil-works/pi-ai";
+import { Type } from "typebox";
 import {
 	defineDoc,
 	defineExtension,

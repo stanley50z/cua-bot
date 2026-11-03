@@ -133,8 +133,8 @@ async function openSession(
 		registry,
 		now: () => clock.now,
 		setTimer,
-		onReport: (error, info) => {
-			reports.push(`${info.type}: ${error instanceof Error ? error.message : String(error)}`);
+		onReport: ({ kind, error }) => {
+			reports.push(`${kind}: ${error instanceof Error ? error.message : String(error)}`);
 		},
 	};
 	const harness = await Harness.open(storage, options, context);

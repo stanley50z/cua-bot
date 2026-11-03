@@ -10,7 +10,6 @@ import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { type TSchema, Type } from "@earendil-works/pi-ai";
 import { RemoteExecutionEnv, sshConnection } from "@earendil-works/pi-env";
 import type { ExecutionEnv } from "@earendil-works/pi-durable/env";
 import { createBashTool, createEditTool, createPowerShellTool, createReadTool, createWriteTool } from "@earendil-works/pi-durable/tools";
@@ -22,11 +21,10 @@ const DESTINATION = /^[^\s-][^\s]*$/;
 /** A machine's environment, built when a call first names the machine. */
 export type Machines = (machine: string) => Promise<ExecutionEnv>;
 
-const MACHINE = Type.Optional(
-	Type.String({
-		description: "Which computer to act on: omit for the one cua-bot runs on, or an SSH destination as `ssh` takes it (a Host alias from the owner's SSH config, or user@host).",
-	}),
-);
+const MACHINE = {
+	type: "string",
+	description: "Which computer to act on: omit for the one cua-bot runs on, or an SSH destination as `ssh` takes it (a Host alias from the owner's SSH config, or user@host).",
+};
 
 /**
  * The tool with an optional `machine` argument: omitted, it runs as is; named, on that machine's environment.
@@ -35,8 +33,9 @@ const MACHINE = Type.Optional(
 export function withMachine(tool: ToolRegistration, machines: Machines): ToolRegistration {
 	return {
 		...tool,
-		// Pi's coding tools all take an object of named arguments.
-		parameters: Type.Object({ ...(tool.parameters as { properties: Record<string, TSchema> }).properties, machine: MACHINE }),
+		// Pi's coding tools all take an object of named arguments. Extending it as plain JSON Schema keeps its `required`
+		// list, so its optional arguments stay optional and `machine` joins them.
+		parameters: { ...tool.parameters, properties: { ...(tool.parameters as { properties: object }).properties, machine: MACHINE } },
 		execute: async (args, api, context) => {
 			const { machine, ...rest } = args as typeof args & { machine?: string };
 			if (machine === undefined) return tool.execute(rest, api, context);

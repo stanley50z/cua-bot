@@ -268,8 +268,10 @@ export function createChat(deps: { harness: Harness; conversation: Conversation;
 		if (watch === undefined) return;
 		live = toChatLive(watch.value);
 		stopWatch = () => watch.stop();
-		watch.start(async (value, _ops, ctx) => {
-			live = toChatLive(value);
+		// A failed call is skipped: the next value follows once the doc recovers.
+		watch.start(async (call, ctx) => {
+			if (call.kind !== "value") return;
+			live = toChatLive(call.value);
 			// Serialize so overlapping callbacks never emit entries twice or out of order.
 			pump = pump.then(async () => {
 				const items = await newEntries(ctx);

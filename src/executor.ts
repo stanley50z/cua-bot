@@ -8,7 +8,7 @@
 // for approval become approval cards instead of running. Executor's `execute` (a JavaScript program over every tool) is left out on
 // purpose: the check below reads a tool path, not a program.
 import type { Context } from "@earendil-works/chord";
-import { Type } from "@earendil-works/pi-ai";
+import { Type } from "typebox";
 import { defineExtension, defineTool, section, type Extension } from "@earendil-works/pi-durable";
 import { type CallToolResult, McpClient, McpSessionExpiredError, StreamableHttpTransport, toLlmContent } from "@earendil-works/pi-mcp";
 import { acceptHolds, type Approvals, PAUSED } from "./approvals.ts";

@@ -6,7 +6,7 @@
 // as Executor (createExecutor), so a crashed `cua mcp` is relaunched on the next call.
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { Type } from "@earendil-works/pi-ai";
+import { Type } from "typebox";
 import { defineExtension, defineTool, section, type Extension } from "@earendil-works/pi-durable";
 import { McpClient, StdioTransport, toLlmContent } from "@earendil-works/pi-mcp";
 import { createExecutor } from "./executor.ts";

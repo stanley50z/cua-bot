@@ -8,7 +8,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { embedded } from "@trycua/cua";
-import { Type } from "@earendil-works/pi-ai";
+import { Type } from "typebox";
 import {
 	AssistantEntry,
 	configure,
