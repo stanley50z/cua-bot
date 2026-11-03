@@ -110,7 +110,7 @@ test("GET / serves the web app with chat, computer pane, and routines", { timeou
 		assert.match(html, /id="routine-dir"/);
 		assert.match(html, /id="f-bot"/, "a new routine picks its bot");
 		assert.match(html, /\/api\/chat\/react/, "reactions are posted");
-		assert.match(html, /id="quotes"/, "quotes wait above the composer");
+		assert.match(html, /class="input" id="input" contenteditable="plaintext-only"/, "quotes sit inline in the message box");
 		for (const id of [...AVATAR_SHAPES, ...AVATAR_COLORS]) assert.match(html, new RegExp(`^\\s+${id}: `, "m"), `the page draws the avatar ${id} the server accepts`);
 		assert.doesNotMatch(html, /innerHTML/, "server text is rendered with DOM nodes only");
 	} finally {

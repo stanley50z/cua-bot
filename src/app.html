@@ -112,7 +112,8 @@ dialog .row .btn.danger { margin-right: auto; }
 .empty b { display: block; color: var(--ink); font: 600 16px "Bahnschrift", sans-serif; margin-bottom: 4px; }
 .m { max-width: 82%; }
 .m.me { position: relative; align-self: flex-end; background: var(--me); border-radius: 12px 12px 3px 12px; padding: 8px 13px; white-space: pre-wrap; overflow-wrap: anywhere; }
-.m.me .quote { border-left: 3px solid #9FB2C8; padding-left: 9px; margin-bottom: 6px; color: var(--muted); display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.m.me .quote { border-left: 3px solid #9FB2C8; padding-left: 9px; color: var(--muted); display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.m.me .part + .part { margin-top: 6px; }
 .m.me.queued { opacity: .65; }
 .m.me .note { display: block; font-size: 11.5px; color: var(--muted); margin-top: 2px; }
 .m.bot { overflow-wrap: anywhere; }
@@ -156,14 +157,16 @@ dialog .row .btn.danger { margin-right: auto; }
 .thumbs a { display: block; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
 .thumbs img { display: block; height: 110px; width: auto; }
 .composer { flex: none; margin: 8px 22px 18px; border: 1px solid var(--line); border-radius: 12px; display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px; padding: 8px 8px 8px 14px; background: #fff; }
-.quotes { flex-basis: 100%; display: flex; flex-direction: column; gap: 6px; padding-top: 2px; }
-.quotes .quote { display: grid; grid-template-columns: minmax(0, 1fr) 24px; gap: 8px; align-items: start; border-left: 3px solid #9FB2C8; padding-left: 9px; font-size: 13px; color: var(--muted); }
-.quotes .quote span { white-space: pre-wrap; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-.quotes .quote button { width: 24px; height: 24px; border: 0; background: transparent; border-radius: 6px; cursor: pointer; color: var(--muted); display: grid; place-items: center; }
-.quotes .quote button:hover { background: var(--bg); color: var(--ink); }
-.quotes svg { width: 13px; height: 13px; }
 .composer:focus-within { border-color: #9FB2C8; }
-.composer textarea { flex: 1; border: 0; resize: none; font: inherit; min-height: 44px; max-height: 200px; outline: none; color: var(--ink); background: transparent; padding: 4px 0; }
+.composer .input { flex: 1; min-width: 0; min-height: 44px; max-height: 200px; overflow-y: auto; outline: none; color: var(--ink); padding: 4px 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.composer .input:empty::before { content: attr(data-placeholder); color: var(--muted); pointer-events: none; }
+/* a quote inside the message box: what the owner types after it is their reply to it */
+.qchip { display: inline-flex; align-items: center; gap: 5px; max-width: min(260px, 100%); vertical-align: bottom; margin: 0 2px; padding: 0 2px 0 7px; border: 1px solid #9FB2C8; border-radius: 6px; background: var(--me); color: var(--muted); font-size: 13px; line-height: 22px; user-select: none; white-space: nowrap; }
+.qchip > span { overflow: hidden; text-overflow: ellipsis; }
+.qchip svg { width: 13px; height: 13px; flex: none; }
+.qchip button { width: 18px; height: 18px; flex: none; border: 0; background: transparent; border-radius: 4px; cursor: pointer; color: var(--muted); display: grid; place-items: center; padding: 0; }
+.qchip button:hover { background: #fff; color: var(--ink); }
+.qchip button svg { width: 11px; height: 11px; }
 .icon { width: 36px; height: 36px; flex: none; border-radius: 9px; border: 1px solid var(--line); background: #fff; cursor: pointer; display: grid; place-items: center; }
 .icon svg { width: 17px; height: 17px; }
 .icon.primary { background: var(--ink); border-color: var(--ink); color: #fff; }
@@ -374,8 +377,7 @@ dialog .row { display: flex; gap: 8px; justify-content: flex-end; margin-top: 18
     <div class="banner" id="chat-error" role="alert" hidden></div>
     <div class="msgs" id="msgs" aria-live="polite"></div>
     <form class="composer" id="composer">
-     <div class="quotes" id="quotes" aria-label="Quoted in your next message" hidden></div>
-     <textarea id="input" rows="1" aria-label="Message cua-bot" placeholder="Message cua-bot"></textarea>
+     <div class="input" id="input" contenteditable="plaintext-only" role="textbox" aria-multiline="true" aria-label="Message cua-bot" data-placeholder="Message cua-bot"></div>
      <button type="button" class="icon" id="stop" aria-label="Stop the current reply" title="Stop the current reply" hidden><svg><use href="#i-stop"/></svg></button>
      <button type="submit" class="icon primary" id="send" aria-label="Send" title="Send (Enter)"><svg><use href="#i-send"/></svg></button>
     </form>
@@ -776,64 +778,99 @@ async function react(target, emoji, on) {
 }
 
 /* ---------- quoted replies ---------- */
-// Quotes for the next message, oldest first. They pile up (the same text once) until sent or removed with their ✕,
-// and stay while the owner switches bots, so a reply from one bot can be quoted to another.
-const quotes = [];
+// A quote lands in the message box as a chip at the owner's caret, so what they type after it is their reply to it;
+// several quotes interleave with their replies. Backspace or the chip's ✕ removes it. The box keeps its chips while
+// the owner switches bots, so a reply from one bot can be quoted to another.
+let caret = null; // the owner's last caret in the message box, kept while they select text in a message
+const inChip = (node) => Boolean((node.nodeType === 1 ? node : node.parentElement)?.closest(".qchip"));
+document.addEventListener("selectionchange", () => {
+  const selection = document.getSelection();
+  const at = selection.rangeCount > 0 ? selection.anchorNode : null;
+  if (at && $("input").contains(at) && !inChip(at)) caret = selection.getRangeAt(0).cloneRange();
+});
+
+const endOfInput = () => { const range = document.createRange(); range.selectNodeContents($("input")); range.collapse(false); return range; };
+const caretInInput = () => (caret && $("input").contains(caret.startContainer) ? caret : endOfInput());
+
+// Focuses the message box with its caret where the owner left it, or at the end.
+function focusInput(range = caretInInput()) {
+  $("input").focus();
+  const selection = document.getSelection();
+  selection.removeAllRanges();
+  selection.addRange(range);
+}
 
 function addQuote(text) {
   const clean = text.replace(/^(?:[ \t]*\n)+/, "").trimEnd();
-  if (clean !== "" && !quotes.includes(clean)) quotes.push(clean);
-  renderQuotes();
-  $("input").focus();
+  if (clean === "") return;
+  const chip = el("span", "qchip");
+  chip.contentEditable = "false";
+  chip.dataset.quote = clean;
+  chip.title = clean;
+  const remove = el("button");
+  remove.type = "button";
+  remove.setAttribute("aria-label", "Remove this quote");
+  remove.title = "Remove";
+  remove.append(icon("i-x"));
+  remove.addEventListener("click", () => { chip.remove(); emptyInput(); focusInput(); });
+  chip.append(icon("i-reply"), el("span", "", clean.replace(/\s+/g, " ")), remove);
+  // A space after the chip gives the caret somewhere to sit, so typing continues right after it.
+  const space = document.createTextNode(" ");
+  const range = caretInInput();
+  range.collapse(false);
+  range.insertNode(space);
+  range.insertNode(chip);
+  const after = document.createRange();
+  after.setStartAfter(space);
+  focusInput(after);
 }
 
-function renderQuotes() {
-  const box = $("quotes");
-  box.textContent = "";
-  box.hidden = quotes.length === 0;
-  quotes.forEach((text, index) => {
-    const row = el("div", "quote");
-    const body = el("span", "", text);
-    body.title = text;
-    const remove = el("button");
-    remove.type = "button";
-    remove.setAttribute("aria-label", "Remove this quote");
-    remove.title = "Remove";
-    remove.append(icon("i-x"));
-    remove.addEventListener("click", () => { quotes.splice(index, 1); renderQuotes(); $("input").focus(); });
-    row.append(body, remove);
-    box.append(row);
-  });
+// Browsers leave a stray <br> in an emptied box, which would hide its placeholder.
+function emptyInput() { if ($("input").textContent === "") $("input").replaceChildren(); }
+$("input").addEventListener("input", emptyInput);
+
+const blockquote = (quote) => quote.split("\n").map((line) => (line === "" ? ">" : "> " + line)).join("\n");
+
+// The text the bot receives: the box's chips as markdown blockquotes and the owner's text between them, in order,
+// each part separated by a blank line.
+function composedText() {
+  const parts = [];
+  let typed = "";
+  const flush = () => { if (typed.trim() !== "") parts.push(typed.trim()); typed = ""; };
+  const walk = (node) => {
+    for (const child of node.childNodes) {
+      if (child.nodeType === Node.TEXT_NODE) typed += child.data;
+      else if (child.classList?.contains("qchip")) { flush(); parts.push(blockquote(child.dataset.quote)); }
+      else if (child.nodeName === "BR") typed += "\n";
+      else { if (child.nodeName === "DIV" && typed !== "") typed += "\n"; walk(child); }
+    }
+  };
+  walk($("input"));
+  flush();
+  return parts.join("\n\n");
 }
 
-// The text the bot receives: each quote as markdown blockquote lines, a blank line, then what the owner typed.
-function withQuotes(typed) {
-  const blocks = quotes.map((quote) => quote.split("\n").map((line) => (line === "" ? ">" : "> " + line)).join("\n"));
-  return [...blocks, ...(typed.trim() === "" ? [] : [typed])].join("\n\n");
-}
-
-// The owner's message split into its leading blockquotes (without their "> ") and the rest, for their bubble.
-function splitQuotes(text) {
-  const lines = text.split("\n"), quoted = [];
-  let i = 0;
-  while (i < lines.length) {
-    if (lines[i].startsWith(">")) {
-      const block = [];
-      while (i < lines.length && lines[i].startsWith(">")) block.push(lines[i++].replace(/^> ?/, ""));
-      quoted.push(block.join("\n"));
-    } else if (quoted.length > 0 && lines[i].trim() === "") i++;
-    else break;
+// The owner's message as its blockquotes (without their "> ") and the text between them, in order.
+function quoteParts(text) {
+  const runs = [];
+  for (const line of text.split("\n")) {
+    const quote = line.startsWith(">"), last = runs.at(-1);
+    const body = quote ? line.replace(/^> ?/, "") : line;
+    if (last && last.quote === quote) last.lines.push(body);
+    else runs.push({ quote, lines: [body] });
   }
-  return { quoted, rest: lines.slice(i).join("\n") };
+  return runs.map(({ quote, lines }) => ({ quote, text: quote ? lines.join("\n") : lines.join("\n").trim() }))
+    .filter((part) => part.quote || part.text !== "");
 }
 
-// The owner's bubble: quote blocks first, then the text. Queued messages use it too.
+// The owner's bubble: each quote as a grey block, with their text in between. Queued messages use it too.
 function ownMessage(text, className) {
   const node = el("div", className);
-  const { quoted, rest } = splitQuotes(text);
-  for (const quote of quoted) { const block = el("div", "quote", quote); block.title = quote; node.append(block); }
-  if (rest !== "") node.append(rest);
-  else if (node.lastElementChild) node.lastElementChild.style.marginBottom = "0";
+  for (const part of quoteParts(text)) {
+    const block = el("div", part.quote ? "part quote" : "part", part.text);
+    if (part.quote) block.title = part.text;
+    node.append(block);
+  }
   return node;
 }
 
@@ -1639,7 +1676,7 @@ function renderBots() {
     if (bot.busy) { const dot = el("span", "busy"); dot.title = "Working"; who.append(dot); }
     const text = el("span");
     const line = settings.botTalk && bot.botPreview && !(bot.preview && bot.preview.at > bot.botPreview.at) ? bot.botPreview : bot.preview;
-    const said = line && (splitQuotes(line.text).rest || line.text);
+    const said = line && (quoteParts(line.text).filter((p) => !p.quote).map((p) => p.text).join(" ") || line.text);
     const peek = said ? said.replace(/\*\*|`/g, "").replace(/\s+/g, " ") : bot.main ? "Your main bot" : "No messages yet";
     text.append(who, el("span", "peek", peek));
     row.append(avatar(bot), text);
@@ -1650,7 +1687,7 @@ function renderBots() {
   $("chat-av").replaceChildren(...(bot.avatar ? [avatar(bot, false, 26)] : []));
   $("chat-h").textContent = bot.name;
   $("edit-bot").setAttribute("aria-label", "Edit " + bot.name);
-  $("input").placeholder = "Message " + bot.name;
+  $("input").dataset.placeholder = "Message " + bot.name;
   $("input").setAttribute("aria-label", "Message " + bot.name);
   document.title = bot.main ? "cua-bot" : bot.name + " · cua-bot";
 }
@@ -1725,7 +1762,7 @@ async function selectBot(id) {
   connect();
   request("GET", "/api/chat/computer?bot=" + id).then((c) => { if (id === state.bot) { state.computer = c; renderComputer(); } }).catch(() => {});
   await loadHistory().catch((error) => showChatError("Could not load the conversation: " + error.message));
-  $("input").focus();
+  focusInput();
 }
 
 // The bot dialog's avatar: `picked` is what it shows and what Save sends; Reset goes back to `pickDefault`,
@@ -1855,13 +1892,10 @@ $("b-delete").addEventListener("click", async () => {
 $("composer").addEventListener("submit", async (event) => {
   event.preventDefault();
   const input = $("input");
-  const typed = input.value;
-  if (typed.trim() === "" && quotes.length === 0) return;
-  const text = withQuotes(typed);
-  const sent = quotes.splice(0);
-  input.value = "";
-  grow();
-  renderQuotes();
+  const text = composedText();
+  if (text === "") return;
+  const draft = [...input.childNodes];
+  input.replaceChildren();
   state.queued.push(text);
   renderChat();
   $("msgs").scrollTop = $("msgs").scrollHeight;
@@ -1870,10 +1904,7 @@ $("composer").addEventListener("submit", async (event) => {
     showChatError("");
   } catch (error) {
     state.queued.splice(state.queued.indexOf(text), 1);
-    input.value = typed;
-    quotes.unshift(...sent);
-    grow();
-    renderQuotes();
+    input.replaceChildren(...draft);
     renderChat();
     showChatError("Your message was not sent: " + error.message);
   }
@@ -1881,8 +1912,6 @@ $("composer").addEventListener("submit", async (event) => {
 $("input").addEventListener("keydown", (event) => {
   if (event.key === "Enter" && !event.shiftKey && !event.isComposing) { event.preventDefault(); $("composer").requestSubmit(); }
 });
-function grow() { const input = $("input"); input.style.height = "auto"; input.style.height = Math.min(input.scrollHeight, 200) + "px"; }
-$("input").addEventListener("input", grow);
 $("stop").addEventListener("click", async () => {
   $("stop").disabled = true;
   try { await request("POST", "/api/chat/stop?bot=" + state.bot); state.queued = []; renderChat(); }
@@ -1929,7 +1958,7 @@ document.querySelectorAll(".rail button[data-view]").forEach((button) => button.
   for (const name of ["chat", "routines", "memory", "settings"]) $("view-" + name).hidden = view !== name;
   if (view === "routines") loadRoutines();
   else if (view === "memory") { memoryBot = state.bot; loadMemory(); }
-  else $("input").focus();
+  else focusInput();
 }));
 
 /* ---------- settings ---------- */
@@ -2114,7 +2143,7 @@ loadApprovals();
 showNotifyState();
 if (pushSupported && Notification.permission === "granted") turnOnPush();
 setInterval(() => { if (!$("view-routines").hidden) loadRoutines(); }, 30000);
-$("input").focus();
+focusInput();
 </script>
 </body>
 </html>
