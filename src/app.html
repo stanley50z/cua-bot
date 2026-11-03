@@ -64,13 +64,14 @@ code, pre, .mono { font-family: "Cascadia Code", Consolas, monospace; }
 .botrow .name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .botrow .busy { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); animation: pulse 1.2s ease-in-out infinite; }
 .botrow .peek { display: block; font-size: 12.5px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-/* pinned bots: avatar tiles above the list, oldest pin first */
-.botlist ul.pins { flex: none; overflow: visible; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); padding-bottom: 6px; border-bottom: 1px solid var(--line); }
-.pintile { position: relative; width: 100%; border: 0; background: transparent; border-radius: 9px; padding: 8px 4px 6px; display: flex; flex-direction: column; align-items: center; gap: 4px; cursor: pointer; }
+/* pinned bots: large avatar tiles above the list, three to a row, each row centered like iMessage's pins; oldest pin first */
+.botlist ul.pins { flex: none; overflow: visible; flex-flow: row wrap; justify-content: center; padding: 10px 8px 8px; border-bottom: 1px solid var(--line); }
+.botlist ul.pins li { flex: 0 0 calc((100% - 4px) / 3); min-width: 0; }
+.pintile { position: relative; width: 100%; border: 0; background: transparent; border-radius: 12px; padding: 8px 0 6px; display: flex; flex-direction: column; align-items: center; gap: 5px; cursor: pointer; }
 .pintile:hover { background: #E9EDF2; }
 .pintile[aria-current="true"] { background: var(--panel); box-shadow: 0 0 0 1px var(--line); }
-.pintile .name { max-width: 100%; font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.pintile .busy { position: absolute; top: 9px; right: calc(50% - 23px); width: 8px; height: 8px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 2px var(--bg); animation: pulse 1.2s ease-in-out infinite; }
+.pintile .name { max-width: calc(100% - 8px); font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pintile .busy { position: absolute; top: 10px; right: calc(50% - 30px); width: 10px; height: 10px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 2px var(--bg); animation: pulse 1.2s ease-in-out infinite; }
 /* the right-click menu on a bot */
 .ctxmenu { position: fixed; z-index: 20; min-width: 140px; padding: 4px; background: #fff; border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 6px 20px rgba(27,33,41,.14); }
 .ctxmenu button { width: 100%; border: 0; background: transparent; border-radius: 7px; padding: 7px 10px; display: flex; align-items: center; gap: 9px; text-align: left; cursor: pointer; }
@@ -1377,7 +1378,7 @@ function renderBots() {
   tiles.replaceChildren(...pins.map((bot) => {
     const tile = botButton(bot, "pintile");
     tile.title = bot.name;
-    tile.append(avatar(bot, false, 40), el("span", "name", bot.name));
+    tile.append(avatar(bot, false, 60), el("span", "name", bot.name));
     if (bot.busy) { const dot = el("span", "busy"); dot.title = "Working"; tile.append(dot); }
     const item = el("li");
     item.append(tile);
