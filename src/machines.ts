@@ -56,7 +56,8 @@ export function sshHosts(config: string): string[] {
 	return [...new Set(hosts.filter((host) => !/[*?!]/.test(host)))];
 }
 
-function ownerHosts(): string[] {
+/** The Host aliases of the owner's ~/.ssh/config, read fresh. Used by the prompt section and src/connections.ts. */
+export function ownerHosts(): string[] {
 	try {
 		return sshHosts(readFileSync(join(homedir(), ".ssh", "config"), "utf8"));
 	} catch {
@@ -64,14 +65,21 @@ function ownerHosts(): string[] {
 	}
 }
 
+/** Where `ssh <machine>` connects, as `ssh -G` resolves it. Used by sshTarget and src/connections.ts. */
+export async function resolveSsh(machine: string): Promise<{ address: string; port: number; user?: string }> {
+	const { stdout } = await promisify(execFile)("ssh", ["-G", machine], { encoding: "utf8", timeout: 10_000, windowsHide: true });
+	const field = (name: string) => new RegExp(`^${name} (\\S+)$`, "m").exec(stdout)?.[1];
+	const user = field("user");
+	return { address: field("hostname") ?? machine, port: Number(field("port") ?? 22), ...(user === undefined ? {} : { user }) };
+}
+
 /**
  * The destination's host keys, already trusted in the owner's ~/.ssh/known_hosts, are stored under the host name
  * `ssh -G` resolves it to; pi-env checks strictly against that file and never writes to it.
  */
 async function sshTarget(machine: string) {
-	const { stdout } = await promisify(execFile)("ssh", ["-G", machine], { encoding: "utf8", timeout: 10_000, windowsHide: true });
-	const hostname = /^hostname (\S+)$/m.exec(stdout)?.[1] ?? machine;
-	return { host: machine, hostKeyAlias: hostname, knownHostsFile: join(homedir(), ".ssh", "known_hosts") };
+	const { address } = await resolveSsh(machine);
+	return { host: machine, hostKeyAlias: address, knownHostsFile: join(homedir(), ".ssh", "known_hosts") };
 }
 
 /** One lazy connection per machine; its environment is built once the daemon reports the home folder. */

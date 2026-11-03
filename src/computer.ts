@@ -313,7 +313,8 @@ export function pairedSpaceText(): string {
 	return `the paired Cua Space${entry?.name === undefined ? "" : ` "${entry.name}"`} (${details})`;
 }
 
-function registrySpaces(): { id: string; name?: string; os?: string }[] {
+/** The Spaces paired in ~/.cua/spaces.json (or $CUA_HOME), read fresh. Also src/connections.ts's fallback list. */
+export function registrySpaces(): { id: string; name?: string; os?: string }[] {
 	const home = process.env.CUA_HOME?.trim() || join(homedir(), ".cua");
 	let parsed: unknown;
 	try {

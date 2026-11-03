@@ -9,7 +9,7 @@ import { join } from "node:path";
 import { Type } from "typebox";
 import { defineExtension, defineTool, section, type Extension } from "@earendil-works/pi-durable";
 import { McpClient, StdioTransport, toLlmContent } from "@earendil-works/pi-mcp";
-import { createExecutor } from "./executor.ts";
+import { createExecutor, type Executor } from "./executor.ts";
 
 const PREFIX = "cua_";
 // Creating a Space or starting an agent can take minutes.
@@ -30,17 +30,19 @@ export const connectCua = (command: string) => async () => {
 	return client;
 };
 
-/** Used by main.ts at startup. Lists the server's tools once; throws when the server can't start or answer. */
+/**
+ * Used by main.ts at startup. Lists the server's tools once; throws when the server can't start or answer. Tool calls
+ * go through `call`, a session main.ts shares with the web app's Connections tab; without it, one of its own.
+ */
 export async function createCuaExtension(
 	connect: () => Promise<McpClient>,
-	options: { pairedSpace?: string } = {},
+	options: { pairedSpace?: string; call?: Executor } = {},
 ): Promise<Extension> {
-	const { pairedSpace } = options;
+	const { pairedSpace, call = createExecutor(connect) } = options;
 	const first = await connect();
 	const listed = (await first.listTools()).filter((tool) => !DISABLED.has(tool.name));
 	const instructions = first.instructions ?? "";
 	await first.close();
-	const call = createExecutor(connect);
 
 	const tools = listed.map((tool) =>
 		defineTool({

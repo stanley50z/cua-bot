@@ -140,14 +140,15 @@ dialog .row .btn.danger { margin-right: auto; }
 .reacts { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
 .reacts button { height: 24px; border: 1px solid #9FB2C8; background: var(--me); border-radius: 999px; padding: 0 9px; font-size: 14px; cursor: pointer; }
 .reacts button:hover { border-color: var(--accent); }
-/* the bar over selected text in a message: Add to chat, then the quick replies and quick emoji */
-.quote-bar { position: fixed; z-index: 10; transform: translate(-50%, calc(-100% - 6px)); display: flex; align-items: center; gap: 2px; background: var(--ink); color: #fff; border-radius: 8px; padding: 3px; font-size: 12.5px; box-shadow: 0 4px 14px rgba(27,33,41,.22); white-space: nowrap; user-select: none; }
+/* the bar over selected text in a message, in three rows: the quick replies, the quick emoji, then Add to chat */
+.quote-bar { position: fixed; z-index: 10; display: flex; flex-direction: column; gap: 4px; max-width: 260px; background: var(--ink); color: #fff; border-radius: 9px; padding: 5px; font-size: 12.5px; box-shadow: 0 4px 14px rgba(27,33,41,.22); user-select: none; }
 .quote-bar[hidden] { display: none; }
-.quote-bar button { height: 26px; border: 0; background: transparent; color: inherit; font: inherit; border-radius: 6px; padding: 0 8px; cursor: pointer; display: flex; align-items: center; gap: 10px; }
+.quote-bar .row { display: flex; flex-wrap: wrap; gap: 4px; }
+.quote-bar .row:empty { display: none; }
+.quote-bar button { height: 26px; border: 0; background: transparent; color: inherit; font: inherit; border-radius: 6px; padding: 0 8px; cursor: pointer; display: flex; align-items: center; gap: 10px; white-space: nowrap; }
 .quote-bar button:hover, .quote-bar button:focus-visible { background: rgba(255,255,255,.14); outline: none; }
-.quote-bar .emoji { padding: 0 4px; font-size: 16px; }
-.quote-bar .quick { display: contents; }
-.quote-bar .sep { width: 1px; height: 16px; margin: 0 3px; background: rgba(255,255,255,.22); }
+.quote-bar .phrase { border: 1px solid rgba(255,255,255,.28); }
+.quote-bar .emoji { width: 30px; height: 30px; padding: 0; justify-content: center; border-radius: 50%; border: 1px solid rgba(255,255,255,.28); font-size: 16px; }
 .quote-bar kbd { font: inherit; font-size: 11.5px; color: #A9B3C0; }
 .routine { align-self: stretch; border-left: 3px solid var(--accent); padding: 3px 0 3px 12px; font-size: 13px; color: var(--muted); }
 .routine b { color: var(--ink); font-weight: 600; }
@@ -442,7 +443,11 @@ dialog .row { display: flex; gap: 8px; justify-content: flex-end; margin-top: 18
  </aside>
 </div>
 
-<div class="quote-bar" id="quote-bar" role="toolbar" aria-label="Selected text" hidden><button type="button" id="add-quote">Add to chat <kbd>Ctrl+L</kbd></button><span class="quick" id="quick-replies"></span></div>
+<div class="quote-bar" id="quote-bar" role="toolbar" aria-label="Selected text" hidden>
+ <div class="row" id="quick-phrases"></div>
+ <div class="row" id="quick-emoji"></div>
+ <div class="row"><button type="button" id="add-quote">Add to chat <kbd>Ctrl+L</kbd></button></div>
+</div>
 
 <dialog id="screen-view" aria-label="Live screen of the computer">
  <button type="button" class="close" id="view-close" aria-label="Close the live screen" title="Close"><svg aria-hidden="true"><use href="#i-x"/></svg></button>
@@ -1027,36 +1032,34 @@ function quickReply(reply) {
   sendMessage(blockquote(cleanQuote(picked.text)) + "\n\n" + reply);
 }
 
-// The bar's quick replies from the settings: each phrase, then each emoji.
+// The bar's quick replies from the settings: the phrases on its first row, the emoji on its second.
 function renderQuickReplies() {
-  const quick = $("quick-replies");
-  quick.replaceChildren();
-  const add = (text, className, label) => {
+  const row = (id, items, className, label) => $(id).replaceChildren(...items.map((text) => {
     const b = el("button", className, text);
     b.type = "button";
-    b.title = label;
-    b.setAttribute("aria-label", label);
+    b.title = label(text);
+    b.setAttribute("aria-label", label(text));
     b.addEventListener("click", () => quickReply(text));
-    quick.append(b);
-  };
-  if (settings.phrases.length > 0) quick.append(el("span", "sep"));
-  for (const phrase of settings.phrases) add(phrase, "", `Reply "${phrase}" to the selected text`);
-  if (settings.emoji.length > 0) quick.append(el("span", "sep"));
-  for (const emoji of settings.emoji) add(emoji, "emoji", `Reply ${reactionName(emoji)} to the selected text`);
+    return b;
+  }));
+  row("quick-phrases", settings.phrases, "phrase", (phrase) => `Reply "${phrase}" to the selected text`);
+  row("quick-emoji", settings.emoji, "emoji", (emoji) => `Reply ${reactionName(emoji)} to the selected text`);
 }
 renderQuickReplies();
 
-// The floating bar sits above the selection once the mouse is up, kept inside the window.
+// The floating bar sits above the selection once the mouse is up, or below it when there is no room above, and
+// stays inside the window.
 let selecting = false;
 function placeQuoteBar() {
   const picked = selecting ? null : selectedQuote();
   const bar = $("quote-bar");
   bar.hidden = !picked;
   if (picked) {
-    const half = bar.offsetWidth / 2, margin = 8;
+    const { offsetWidth: width, offsetHeight: height } = bar, gap = 6, margin = 8;
     const center = picked.rect.left + picked.rect.width / 2;
-    bar.style.left = Math.max(half + margin, Math.min(window.innerWidth - half - margin, center)) + "px";
-    bar.style.top = picked.rect.top + "px";
+    bar.style.left = Math.max(margin, Math.min(window.innerWidth - width - margin, center - width / 2)) + "px";
+    const above = picked.rect.top - height - gap;
+    bar.style.top = (above >= margin ? above : picked.rect.bottom + gap) + "px";
   }
 }
 document.addEventListener("selectionchange", placeQuoteBar);

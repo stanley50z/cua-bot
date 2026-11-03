@@ -1,6 +1,6 @@
 // The bot's HTTP surface on 127.0.0.1: the web app at GET / with its service worker at /sw.js, its JSON
 // API under /api/ (the bot list and its edits, routines CRUD, each bot's chat history/send/react/stop, a server-sent
-// event stream of one bot's live chat state, Web Push subscriptions, and the Mac's live screen with the owner's control of it), screenshots under /shots/, and the original POST /say. Loopback only, no auth, same trust as /say always had.
+// event stream of one bot's live chat state, Web Push subscriptions, the Connections tab's check, and the Mac's live screen with the owner's control of it), screenshots under /shots/, and the original POST /say. Loopback only, no auth, same trust as /say always had.
 // Mutations go through the routines manager and the chat module, so every surface agrees.
 import { readFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
@@ -10,6 +10,7 @@ import type { Cursor } from "@earendil-works/pi-durable";
 import { ApprovalError, type Approvals, type EmailEdit } from "./approvals.ts";
 import { BotError, type BotInput, type Bots } from "./bots.ts";
 import type { Chat } from "./chat.ts";
+import type { Connections } from "./connections.ts";
 import { type Memory, MemoryError } from "./memory.ts";
 import { DATA_DIR } from "./log.ts";
 import type { InputEvent, LiveScreen } from "./live-screen.ts";
@@ -113,6 +114,8 @@ export type BotServerDeps = {
 	control?: ScreenControl;
 	/** Enables GET/POST /api/push: the VAPID public key, and a browser's push subscription. */
 	push?: Push;
+	/** Enables GET /api/connections: this computer, the owner's SSH machines, and the Cua Spaces, checked on each call. */
+	connections?: Connections;
 	log?: (...parts: unknown[]) => void;
 };
 
@@ -377,6 +380,10 @@ async function route(req: IncomingMessage, res: ServerResponse, deps: BotServerD
 	}
 	if (url.pathname.startsWith("/api/computer/")) return routeControl(req, res, deps, url, method);
 	if (url.pathname === "/api/push") return routePush(req, res, deps, method);
+	if (method === "GET" && url.pathname === "/api/connections") {
+		if (deps.connections === undefined) throw new HttpError(404, "not found");
+		return sendJson(res, 200, await deps.connections());
+	}
 	if (url.pathname.startsWith("/api/bots")) return routeBots(req, res, deps, url, method);
 	if (url.pathname.startsWith("/api/chat")) return routeChat(req, res, deps, url, method);
 	if (url.pathname.startsWith("/api/memory")) return routeMemory(req, res, deps, url, method);

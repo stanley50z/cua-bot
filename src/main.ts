@@ -3,13 +3,15 @@
 // POST http://127.0.0.1:43142/say (body: plain text; reply: the bot's answer as plain text).
 // The same server hosts the routines GUI at http://127.0.0.1:43142/ (see src/web.ts).
 import { mkdirSync, writeFileSync } from "node:fs";
+import { hostname, networkInterfaces, release, type, userInfo, version } from "node:os";
 import { join } from "node:path";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { configure, type ConversationId, createRegistry, type Cursor, defineExtension, Harness, section } from "@earendil-works/pi-durable";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { botMemories, createBots, createBotsExtension } from "./bots.ts";
 import { toChatItem } from "./chat.ts";
-import { createComputerExtension, openLiveStream, pairedSpaceText, screenControl, spaceId, spaceLabel } from "./computer.ts";
+import { createComputerExtension, openLiveStream, pairedSpaceText, registrySpaces, screenControl, spaceId, spaceLabel } from "./computer.ts";
+import { createConnections, listCuaSpaces, probeTcp } from "./connections.ts";
 import { createLiveScreen } from "./live-screen.ts";
 import { createBotToolSearchExtension } from "./tool-search.ts";
 import { connectCua, createCuaExtension, defaultCuaCommand } from "./cua-mcp.ts";
@@ -17,7 +19,7 @@ import { createComputerView } from "./computer-view.ts";
 import { type Approvals, createApprovals, describeApproval } from "./approvals.ts";
 import { connectExecutor, createExecutor, createExecutorExtension } from "./executor.ts";
 import { DATA_DIR, log } from "./log.ts";
-import { createMachines } from "./machines.ts";
+import { createMachines, ownerHosts, resolveSsh } from "./machines.ts";
 import { createMemory, createMemoryExtension } from "./memory.ts";
 import { createPcExtensions, pcEnv } from "./pc.ts";
 import { createPush } from "./push.ts";
@@ -75,8 +77,11 @@ registry.install(createBotToolSearchExtension());
 const push = createPush({ file: join(DATA_DIR, "push.json"), log });
 // Every Cua Spaces tool, deferred until tool_search loads it. The rest of the bot works without the cua CLI.
 const cuaCommand = process.env.CUA_MCP_COMMAND?.trim() || defaultCuaCommand();
+const cuaConnect = connectCua(cuaCommand);
+// One `cua mcp` session for the bots' cua_* tools and the web app's Connections tab.
+const cua = createExecutor(cuaConnect);
 try {
-	registry.install(await createCuaExtension(connectCua(cuaCommand), { pairedSpace: spaceId() }));
+	registry.install(await createCuaExtension(cuaConnect, { pairedSpace: spaceId(), call: cua }));
 } catch (error) {
 	log(`cua: \`${cuaCommand} mcp\` failed (${error instanceof Error ? error.message : String(error)}); Cua Spaces tools are off`);
 }
@@ -110,7 +115,8 @@ if (executorUrl && executorKey) {
 	log("executor: EXECUTOR_MCP_URL or EXECUTOR_API_KEY unset; Gmail and Calendar are off");
 }
 
-const storage = await openNodeSqliteStorage(join(DATA_DIR, "cua-bot.sqlite"));
+const DATABASE = join(DATA_DIR, "cua-bot.sqlite");
+const storage = await openNodeSqliteStorage(DATABASE);
 const harness = await Harness.open(storage, { models, registry, env: pcEnv }, context);
 const root = await harness.root(context, { agent: AGENT });
 // root() sets the agent only when it creates the conversation; apply the configured model to an existing one too.
@@ -164,7 +170,26 @@ const botMemory = (id: number) => {
 	const bot = bots.list().find((b) => b.id === id);
 	return bot === undefined ? undefined : memories.of(bot);
 };
-createBotServer({ say, bots, memory, botMemory, model: MODEL.modelId, context, log, control: screenControl, live, push, ...(approvals === undefined ? {} : { approvals }) }).listen(PORT, "127.0.0.1", () =>
+// The Connections tab: this computer, which runs the Harness and every bot, then the owner's SSH machines and the Spaces.
+const paired = spaceId();
+const connections = createConnections({
+	here: {
+		name: hostname(),
+		os: process.platform === "win32" ? `${version()} (${release()})` : `${type()} ${release()}`,
+		user: userInfo().username,
+		addresses: Object.values(networkInterfaces()).flatMap((list) => (list ?? []).map((nic) => nic.address)),
+		pid: process.pid,
+		startedAt: Date.now() - Math.round(process.uptime() * 1000),
+		database: DATABASE,
+	},
+	hosts: ownerHosts,
+	resolve: resolveSsh,
+	probe: probeTcp,
+	spaces: () => listCuaSpaces(cua),
+	fallback: registrySpaces,
+	...(paired === undefined ? {} : { pairedSpace: paired }),
+});
+createBotServer({ say, bots, memory, botMemory, model: MODEL.modelId, context, log, control: screenControl, live, push, connections, ...(approvals === undefined ? {} : { approvals }) }).listen(PORT, "127.0.0.1", () =>
 	log(`listening: web app http://127.0.0.1:${PORT}/ · chat POST http://127.0.0.1:${PORT}/say`),
 );
 
