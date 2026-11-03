@@ -65,7 +65,7 @@ export async function createCuaExtension(
 			section("cua", () =>
 				[
 					`Cua Spaces: every tool of Cua's MCP server is yours as ${PREFIX}<name>. They are loaded on demand: call tool_search with what you need (e.g. "upload a file to a space", "start a coding agent in a space") and the matches are offered from then on.`,
-					pairedSpace === undefined ? "" : `The owner's Mac is the paired Space ${pairedSpace}; pass that id where a tool asks for a space.`,
+					pairedSpace === undefined ? "" : `The paired Space is ${pairedSpace}; pass that id where a tool asks for a space.`,
 					`Available: ${listed.map((tool) => tool.name).join(", ")}.`,
 					instructions,
 				]

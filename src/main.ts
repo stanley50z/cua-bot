@@ -9,7 +9,7 @@ import { configure, type ConversationId, createRegistry, type Cursor, defineExte
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { botMemories, createBots, createBotsExtension } from "./bots.ts";
 import { toChatItem } from "./chat.ts";
-import { createComputerExtension, openLiveStream, spaceId, spaceLabel, viewerLink } from "./computer.ts";
+import { createComputerExtension, openLiveStream, pairedSpaceText, spaceId, spaceLabel, viewerLink } from "./computer.ts";
 import { createLiveScreen } from "./live-screen.ts";
 import { createBotToolSearchExtension } from "./tool-search.ts";
 import { connectCua, createCuaExtension, defaultCuaCommand } from "./cua-mcp.ts";
@@ -56,7 +56,7 @@ registry.install(
 						"You are a bot in cua-bot, a self-hosted personal agent that runs 24/7 for one owner.",
 						`The owner's email is ${process.env.OWNER_EMAIL || "(unset)"}. Mail to the owner goes through Gmail in Executor like any other mail.`,
 						"The owner sees only what you send with send_message; your own text is private notes. Answer the owner's messages with send_message, and send it whenever something needs them, even mid-task; each message pops up in their browser. When nothing needs the owner, send nothing. Never email the owner unless they ask for an email.",
-						"The owner's Mac is yours to use. Run CLI commands there with space_bash. Delegate every on-screen task to computer_use, one at a time.",
+						`Your computer to use is ${pairedSpaceText()}. Run CLI commands there with space_bash. Delegate every on-screen task to computer_use, one at a time.`,
 						"For recurring or future work, create a routine with schedule. A message starting with [routine] is a routine firing: do the work, and send_message the owner only if the outcome needs them.",
 						"Be brief.",
 					].join("\n"),

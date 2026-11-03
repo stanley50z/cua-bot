@@ -1,5 +1,7 @@
-// The paired Mac for every bot: space_bash runs CLI commands there directly, and computer_use runs a
-// foreground child for on-screen work, one task at a time across all bots. The child gets every live driver tool of the Mac. They are deferred on this
+// The paired Cua Space for every bot (the first in ~/.cua/spaces.json, or CUA_SPACE_ID): space_bash runs CLI commands
+// there directly, and computer_use runs a foreground child for on-screen work, one task at a time across all bots. The
+// child gets every live driver tool of the Space. Tool descriptions stay generic; pairedSpaceText() names the Space in
+// the prompt. The driver tools are deferred on this
 // extension, so the main agent is offered them only after loading them with tool_search (src/main.ts installs it).
 import { traceExtension } from "./trace.ts";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -22,7 +24,7 @@ import { botModel } from "./models.ts";
 const SHOT_EDGE = 1200;
 const SHOTS_DIR = join(import.meta.dirname, "..", "data", "shots");
 const CHILD_BRIEF = [
-	"Operate the Mac only with your tools.",
+	"Operate the computer only with your tools.",
 	"Take a screenshot first (get_desktop_state returns one).",
 	"For clicks, pass screenshot pixel coordinates to the driver tool (its x and y). Do not convert points yourself.",
 	"After each action, take another screenshot and verify it.",
@@ -148,9 +150,9 @@ function onScreen<T>(work: () => Promise<T>): Promise<T> {
 const computerUse = defineTool({
 	name: "computer_use",
 	description:
-		"Delegate one on-screen task to the computer-use agent on the owner's Mac. It returns a short summary and the path of the last screenshot.",
+		"Delegate one on-screen task to the computer-use agent on the paired Cua Space. It returns a short summary and the path of the last screenshot.",
 	parameters: Type.Object({
-		task: Type.String({ description: "What to do on the Mac, as a self-contained instruction" }),
+		task: Type.String({ description: "What to do on the Space's computer, as a self-contained instruction" }),
 	}),
 	replay: "safe",
 	executionMode: "sequential",
@@ -190,7 +192,7 @@ const computerUse = defineTool({
 const spaceBash = defineTool({
 	name: "space_bash",
 	description:
-		"Run a shell command on the owner's Mac (/bin/sh -c) and return its output. Use it for CLI tools, files, and inspection; use computer_use for anything on screen.",
+		"Run a shell command on the paired Cua Space (/bin/sh -c; cmd.exe /C on Windows) and return its output. Use it for CLI tools, files, and inspection; use computer_use for anything on screen.",
 	parameters: Type.Object({
 		command: Type.String({ description: "Shell command" }),
 	}),
@@ -277,7 +279,7 @@ export const openLiveStream: OpenLiveStream = async (sink) => {
 				// The SDK may reuse the buffer after onFrame returns, so each frame is copied out.
 				onFrame: (frame) => sink.frame({ keyframe: frame.keyframe, data: new Uint8Array(frame.data.slice(0)) }),
 				onEvent: (event) => {
-					if (event.kind === "closed") sink.closed(`the Mac closed the live stream: ${event.json}`);
+					if (event.kind === "closed") sink.closed(`the Space closed the live stream: ${event.json}`);
 				},
 			},
 			undefined,
@@ -295,7 +297,19 @@ export const openLiveStream: OpenLiveStream = async (sink) => {
 	};
 };
 
-function registrySpaces(): { id: string; name?: string }[] {
+/**
+ * Used by the prompt sections (main.ts, pc.ts). The paired Space as the model should know it, from
+ * ~/.cua/spaces.json on each call: its name, system, and id. Tool descriptions stay generic.
+ */
+export function pairedSpaceText(): string {
+	const id = spaceId();
+	if (id === undefined) return "no Cua Space (none is paired)";
+	const entry = registrySpaces().find((space) => space.id === id);
+	const details = [entry?.os, `id ${id}`].filter((part) => part !== undefined).join(", ");
+	return `the paired Cua Space${entry?.name === undefined ? "" : ` "${entry.name}"`} (${details})`;
+}
+
+function registrySpaces(): { id: string; name?: string; os?: string }[] {
 	const home = process.env.CUA_HOME?.trim() || join(homedir(), ".cua");
 	let parsed: unknown;
 	try {
@@ -306,8 +320,13 @@ function registrySpaces(): { id: string; name?: string }[] {
 	if (!Array.isArray(parsed)) return [];
 	return parsed.flatMap((space: unknown) => {
 		if (space === null || typeof space !== "object" || !("id" in space) || typeof space.id !== "string" || space.id === "") return [];
-		const name = "name" in space && typeof space.name === "string" && space.name !== "" ? space.name : undefined;
-		return [{ id: space.id, ...(name === undefined ? {} : { name }) }];
+		const text = (key: string) => {
+			const value: unknown = (space as Record<string, unknown>)[key];
+			return typeof value === "string" && value !== "" ? value : undefined;
+		};
+		const name = text("name");
+		const os = text("osPrettyName") ?? text("os");
+		return [{ id: space.id, ...(name === undefined ? {} : { name }), ...(os === undefined ? {} : { os }) }];
 	});
 }
 
