@@ -70,8 +70,8 @@ export function defaultAvatar(id: number, main: boolean): Avatar {
 }
 
 // Instructions live in the bot's agent file; records from before agent files still carry an ignored `instructions`.
-// `avatar` is absent until the owner picks one.
-type BotRecord = { name: string; createdAt: number; avatar?: Avatar };
+// `avatar` is absent until the owner picks one; `pinnedAt` until the owner pins the bot to the top of the list.
+type BotRecord = { name: string; createdAt: number; avatar?: Avatar; pinnedAt?: number };
 type BotsState = { main?: number; bots: { [conversationId: string]: BotRecord } };
 
 const BotsDoc = defineDoc<BotsState>({
@@ -82,8 +82,11 @@ const BotsDoc = defineDoc<BotsState>({
 	checkpointWhen: () => false,
 });
 
-/** `avatar` is the one to draw: the owner's pick, else `defaultAvatar`, which the web app's Reset goes back to. */
-type BotEntry = { id: number; name: string; main: boolean; createdAt: number; avatar: Avatar; defaultAvatar: Avatar };
+/**
+ * `avatar` is the one to draw: the owner's pick, else `defaultAvatar`, which the web app's Reset goes back to.
+ * `pinnedAt` is set while the bot is pinned; the web app shows pinned bots at the top, oldest pin first.
+ */
+type BotEntry = { id: number; name: string; main: boolean; createdAt: number; avatar: Avatar; defaultAvatar: Avatar; pinnedAt?: number };
 /** `folder` is the bot's folder and `file` its agent file, as paths from the project root, for the web app. */
 export type Bot = BotEntry & { instructions: string; folder: string; file: string };
 /** `avatar` is ids to validate; an edit without one keeps the bot's avatar, and null goes back to the default. */
@@ -91,7 +94,15 @@ export type BotInput = { name: string; instructions: string; avatar?: { shape: s
 
 const entryOf = (id: number, record: BotRecord, main: boolean): BotEntry => {
 	const fallback = defaultAvatar(id, main);
-	return { id, name: record.name, createdAt: record.createdAt, main, avatar: record.avatar ?? fallback, defaultAvatar: fallback };
+	return {
+		id,
+		name: record.name,
+		createdAt: record.createdAt,
+		main,
+		avatar: record.avatar ?? fallback,
+		defaultAvatar: fallback,
+		...(record.pinnedAt === undefined ? {} : { pinnedAt: record.pinnedAt }),
+	};
 };
 
 export class BotError extends Error {
@@ -510,6 +521,18 @@ export async function createBots(deps: {
 			await reload();
 			if (bot.name !== before.name) await deps.renamed?.(id);
 			return { ...bot, ...pathsOf(dir, bot) };
+		},
+		/** Pins the bot to the top of the web app's list, after the bots already pinned, or unpins it. Pinning a pinned bot keeps its place. */
+		async pin(id: number, pinned: boolean): Promise<void> {
+			await harness.commit(async (tx) => {
+				const doc = await tx.doc(BotsDoc);
+				const record = doc.bots[String(id)];
+				if (record === undefined) throw new BotError(404, "No such bot.");
+				if (!pinned) delete record.pinnedAt;
+				// Strictly after every other pin, so two pins in the same millisecond still keep their order.
+				else record.pinnedAt ??= Math.max(Date.now(), ...Object.values(doc.bots).map((b) => (b.pinnedAt ?? 0) + 1));
+			}, context);
+			await reload();
 		},
 		/** Stops the bot, ends its routines, deletes its folder (agent file and memory), and drops it from the list. Its transcript stays in the database. The main bot can't go. */
 		async remove(id: number): Promise<void> {

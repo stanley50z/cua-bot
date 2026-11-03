@@ -64,6 +64,18 @@ code, pre, .mono { font-family: "Cascadia Code", Consolas, monospace; }
 .botrow .name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .botrow .busy { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); animation: pulse 1.2s ease-in-out infinite; }
 .botrow .peek { display: block; font-size: 12.5px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* pinned bots: avatar tiles above the list, oldest pin first */
+.botlist ul.pins { flex: none; overflow: visible; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); padding-bottom: 6px; border-bottom: 1px solid var(--line); }
+.pintile { position: relative; width: 100%; border: 0; background: transparent; border-radius: 9px; padding: 8px 4px 6px; display: flex; flex-direction: column; align-items: center; gap: 4px; cursor: pointer; }
+.pintile:hover { background: #E9EDF2; }
+.pintile[aria-current="true"] { background: var(--panel); box-shadow: 0 0 0 1px var(--line); }
+.pintile .name { max-width: 100%; font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pintile .busy { position: absolute; top: 9px; right: calc(50% - 23px); width: 8px; height: 8px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 2px var(--bg); animation: pulse 1.2s ease-in-out infinite; }
+/* the right-click menu on a bot */
+.ctxmenu { position: fixed; z-index: 20; min-width: 140px; padding: 4px; background: #fff; border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 6px 20px rgba(27,33,41,.14); }
+.ctxmenu button { width: 100%; border: 0; background: transparent; border-radius: 7px; padding: 7px 10px; display: flex; align-items: center; gap: 9px; text-align: left; cursor: pointer; }
+.ctxmenu button:hover, .ctxmenu button:focus-visible { background: var(--bg); }
+.ctxmenu svg { width: 15px; height: 15px; color: var(--muted); }
 /* avatars: a character that blinks now and then and, from 24px up, glances aside; each bot on its own clock */
 .av { width: 36px; height: 36px; flex: none; display: block; }
 .av svg { display: block; width: 100%; height: 100%; overflow: visible; }
@@ -293,6 +305,7 @@ dialog .row { display: flex; gap: 8px; justify-content: flex-end; margin-top: 18
  <symbol id="i-plus" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></symbol>
  <symbol id="i-smile" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="8.5"/><path d="M8.5 14.2a4.2 4.2 0 0 0 7 0"/><path d="M9.2 9.6v.1M14.8 9.6v.1" stroke-width="2.4"/></symbol>
  <symbol id="i-reply" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M10 6.5L4.5 12l5.5 5.5"/><path d="M4.5 12H14a5.5 5.5 0 0 1 5.5 5.5v1"/></symbol>
+ <symbol id="i-pin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4h6l-1 6 4 4H6l4-4z"/><path d="M12 14v6"/></symbol>
  <symbol id="i-edit"viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13 7l4 4"/></symbol>
 </svg>
 
@@ -308,6 +321,7 @@ dialog .row { display: flex; gap: 8px; justify-content: flex-end; margin-top: 18
   <section class="view" id="view-chat" aria-labelledby="chat-h">
    <nav class="botlist" aria-labelledby="bots-h">
     <div class="bar"><h2 id="bots-h">Bots</h2><button type="button" class="icon" id="new-bot" aria-label="New bot" title="New bot"><svg><use href="#i-plus"/></svg></button></div>
+    <ul class="pins" id="bot-pins" aria-label="Pinned bots" hidden></ul>
     <ul id="bot-rows"></ul>
    </nav>
    <div class="chatcol">
@@ -1355,14 +1369,25 @@ async function loadBots() {
   catch (error) { showChatError("Could not load your bots: " + error.message); }
 }
 
+// Pinned bots are avatar tiles above the list, oldest pin first; the rest are rows. Right-click either to pin or unpin.
 function renderBots() {
+  const pins = state.bots.filter((b) => b.pinnedAt !== undefined).sort((a, b) => a.pinnedAt - b.pinnedAt);
+  const tiles = $("bot-pins");
+  tiles.hidden = pins.length === 0;
+  tiles.replaceChildren(...pins.map((bot) => {
+    const tile = botButton(bot, "pintile");
+    tile.title = bot.name;
+    tile.append(avatar(bot, false, 40), el("span", "name", bot.name));
+    if (bot.busy) { const dot = el("span", "busy"); dot.title = "Working"; tile.append(dot); }
+    const item = el("li");
+    item.append(tile);
+    return item;
+  }));
   const rows = $("bot-rows");
   rows.textContent = "";
-  for (const bot of state.bots) {
+  for (const bot of state.bots.filter((b) => b.pinnedAt === undefined)) {
     const item = el("li");
-    const row = el("button", "botrow");
-    row.type = "button";
-    row.setAttribute("aria-current", String(bot.id === state.bot));
+    const row = botButton(bot, "botrow");
     const who = el("span", "who");
     who.append(el("span", "name", bot.name));
     if (bot.busy) { const dot = el("span", "busy"); dot.title = "Working"; who.append(dot); }
@@ -1371,7 +1396,6 @@ function renderBots() {
     const peek = said ? said.replace(/\*\*|`/g, "").replace(/\s+/g, " ") : bot.main ? "Your main bot" : "No messages yet";
     text.append(who, el("span", "peek", peek));
     row.append(avatar(bot), text);
-    row.addEventListener("click", () => selectBot(bot.id));
     item.append(row);
     rows.append(item);
   }
@@ -1383,6 +1407,61 @@ function renderBots() {
   $("input").setAttribute("aria-label", "Message " + bot.name);
   document.title = bot.main ? "cua-bot" : bot.name + " · cua-bot";
 }
+
+// A bot's row or tile: a click opens its chat, a right-click (or the keyboard's menu key) its menu.
+function botButton(bot, className) {
+  const button = el("button", className);
+  button.type = "button";
+  button.setAttribute("aria-current", String(bot.id === state.bot));
+  button.setAttribute("aria-haspopup", "menu");
+  button.addEventListener("click", () => selectBot(bot.id));
+  button.addEventListener("contextmenu", (event) => {
+    event.preventDefault();
+    openBotMenu(bot, event, button);
+  });
+  return button;
+}
+
+// The bot menu sits at the pointer, or under the button when the keyboard opened it. It closes on a pick, Escape,
+// a click elsewhere, scrolling, or resizing; the list redraws often, so it remembers the bot by id.
+let botMenu = null;
+function closeBotMenu(refocus) {
+  if (!botMenu) return;
+  botMenu.menu.remove();
+  if (refocus) botMenu.from.focus();
+  botMenu = null;
+}
+function openBotMenu(bot, event, from) {
+  closeBotMenu(false);
+  const menu = el("div", "ctxmenu");
+  menu.setAttribute("role", "menu");
+  menu.setAttribute("aria-label", bot.name);
+  const pinned = bot.pinnedAt !== undefined;
+  const pin = el("button");
+  pin.type = "button";
+  pin.setAttribute("role", "menuitem");
+  pin.append(icon("i-pin"), pinned ? "Unpin" : "Pin");
+  pin.addEventListener("click", async () => {
+    closeBotMenu(false);
+    try {
+      await request("PUT", "/api/bots/" + bot.id + "/pin", { pinned: !pinned });
+      await loadBots();
+    } catch (error) { showChatError("Could not " + (pinned ? "unpin " : "pin ") + bot.name + ": " + error.message); }
+  });
+  menu.addEventListener("keydown", (e) => { if (e.key === "Escape" || e.key === "Tab") { e.preventDefault(); closeBotMenu(true); } });
+  menu.append(pin);
+  document.body.append(menu);
+  const box = from.getBoundingClientRect();
+  const keyboard = event.clientX === 0 && event.clientY === 0;
+  const x = keyboard ? box.left + 8 : event.clientX, y = keyboard ? box.bottom + 4 : event.clientY;
+  menu.style.left = Math.min(x, innerWidth - menu.offsetWidth - 8) + "px";
+  menu.style.top = Math.min(y, innerHeight - menu.offsetHeight - 8) + "px";
+  botMenu = { menu, from };
+  pin.focus();
+}
+document.addEventListener("pointerdown", (event) => { if (botMenu && !botMenu.menu.contains(event.target)) closeBotMenu(false); });
+for (const type of ["resize", "blur"]) window.addEventListener(type, () => closeBotMenu(false));
+document.addEventListener("scroll", () => closeBotMenu(false), true);
 
 // Opens a bot's chat: its history, its computer pane, and a fresh event stream. The choice is kept in the URL.
 async function selectBot(id) {

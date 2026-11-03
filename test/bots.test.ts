@@ -314,3 +314,27 @@ test("each bot has an avatar: a default from its id until the owner picks one, v
 		await bot.close();
 	}
 });
+
+test("the owner pins and unpins bots, the main bot too; a pin survives a rename", { timeout: 20_000 }, async () => {
+	const bot = await open();
+	try {
+		const pinned = () => bot.bots.list().filter((b) => b.pinnedAt !== undefined).sort((a, b) => (a.pinnedAt ?? 0) - (b.pinnedAt ?? 0)).map((b) => b.name);
+		const scout = (await (await send(bot.base, "POST", "/api/bots", { name: "Scout" })).json()) as BotView;
+		assert.deepEqual(pinned(), [], "bots start unpinned");
+		assert.equal((await send(bot.base, "PUT", `/api/bots/${scout.id}/pin`, { pinned: true })).status, 204);
+		assert.equal((await send(bot.base, "PUT", `/api/bots/${bot.bots.main()}/pin`, { pinned: true })).status, 204);
+		assert.deepEqual(pinned(), ["Scout", "cua-bot"], "pins keep the order they were made in");
+		assert.equal((await send(bot.base, "PUT", `/api/bots/${scout.id}/pin`, { pinned: true })).status, 204);
+		assert.deepEqual(pinned(), ["Scout", "cua-bot"], "pinning again keeps the place");
+
+		await send(bot.base, "PUT", `/api/bots/${scout.id}`, { name: "Travel" });
+		assert.deepEqual(pinned(), ["Travel", "cua-bot"]);
+
+		assert.equal((await send(bot.base, "PUT", `/api/bots/${scout.id}/pin`, { pinned: false })).status, 204);
+		assert.deepEqual(pinned(), ["cua-bot"]);
+		assert.equal((await send(bot.base, "PUT", `/api/bots/${scout.id}/pin`, { pinned: "yes" })).status, 400);
+		assert.equal((await send(bot.base, "PUT", "/api/bots/9999/pin", { pinned: true })).status, 404);
+	} finally {
+		await bot.close();
+	}
+});

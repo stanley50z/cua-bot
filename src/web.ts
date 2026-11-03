@@ -201,7 +201,7 @@ function botInput(body: unknown): BotInput {
 	return { name: record.name, instructions, avatar: { shape, color } };
 }
 
-// The bot list: every bot with its newest message, and adding, editing, or deleting one.
+// The bot list: every bot with its newest message, and adding, editing, pinning, or deleting one.
 async function routeBots(req: IncomingMessage, res: ServerResponse, deps: BotServerDeps, url: URL, method: string) {
 	const bots = deps.bots;
 	if (bots === undefined) throw new HttpError(404, "not found");
@@ -220,6 +220,14 @@ async function routeBots(req: IncomingMessage, res: ServerResponse, deps: BotSer
 	if (Number.isInteger(id) && method === "DELETE") {
 		await bots.remove(id);
 		deps.log?.(`owner (web): deleted bot ${id}`);
+		return void res.writeHead(204).end();
+	}
+	const pin = Number(url.pathname.match(/^\/api\/bots\/(\d+)\/pin$/)?.[1]);
+	if (Number.isInteger(pin) && method === "PUT") {
+		const { pinned } = ((await readJson(req)) ?? {}) as { pinned?: unknown };
+		if (typeof pinned !== "boolean") throw new HttpError(400, "pinned must be true or false");
+		await bots.pin(pin, pinned);
+		deps.log?.(`owner (web): ${pinned ? "pinned" : "unpinned"} bot ${pin}`);
 		return void res.writeHead(204).end();
 	}
 	throw new HttpError(404, "not found");
