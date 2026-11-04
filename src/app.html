@@ -482,8 +482,8 @@ dialog .row { display: flex; gap: 8px; justify-content: flex-end; margin-top: 18
      <label class="setting"><span><b>Show messages between bots</b><small>What one bot sends another, in both bots' chats and the bot list.</small></span><input type="checkbox" data-setting="botTalk"></label>
      <label class="setting"><span><b>Show tool steps</b><small>A chip for each tool a bot runs, like space bash or Remembered, that opens its output, plus its screenshots.</small></span><input type="checkbox" data-setting="tools"></label>
      <label class="setting"><span><b>Show routine runs</b><small>A line in the bot's chat each time one of its routines starts.</small></span><input type="checkbox" data-setting="routineRuns"></label>
-     <label class="setting field"><span><b>Quick replies</b><small>One per line. They show on the bar over text you select in a message; clicking one sends that text quoted, with the reply under it.</small></span><textarea id="set-phrases" rows="4" spellcheck="false"></textarea></label>
-     <label class="setting field"><span><b>Quick emoji</b><small>The reactions under a reply's smiley, and emoji replies on the bar over selected text, which send that text quoted with the emoji under it.</small></span><input type="text" id="set-emoji" spellcheck="false" autocomplete="off"></label>
+     <label class="setting field"><span><b>Quick replies</b><small>One per line. They show on the bar over text you select in a message; clicking one adds that text to the message box as a quote, with the reply after it.</small></span><textarea id="set-phrases" rows="4" spellcheck="false"></textarea></label>
+     <label class="setting field"><span><b>Quick emoji</b><small>The reactions under a reply's smiley, and emoji replies on the bar over selected text, which add that text to the message box as a quote with the emoji after it.</small></span><input type="text" id="set-emoji" spellcheck="false" autocomplete="off"></label>
     </div>
    </div>
    <div class="pane" id="tab-connections" hidden>
@@ -908,12 +908,13 @@ function quoteChip(clean) {
 // Selected or replied-to text without its leading blank lines and trailing whitespace.
 const cleanQuote = (text) => text.replace(/^(?:[ \t]*\n)+/, "").trimEnd();
 
-function addQuote(text) {
+function addQuote(text, reply = "") {
   const clean = cleanQuote(text);
   if (clean === "") return;
   const chip = quoteChip(clean);
-  // A space after the chip gives the caret somewhere to sit, so typing continues right after it.
-  const space = document.createTextNode(" ");
+  // A space after the chip (and after `reply`, a quick reply typed for the owner) gives the caret somewhere to sit,
+  // so typing continues right after it.
+  const space = document.createTextNode(reply === "" ? " " : ` ${reply} `);
   const range = caretInInput();
   range.collapse(false);
   range.insertNode(space);
@@ -1091,21 +1092,14 @@ function selectedQuote() {
   return { root, text, rect: selection.getRangeAt(0).getBoundingClientRect() };
 }
 
-function quoteSelection() {
+// Add to chat, and the bar's quick replies: puts the selection in the message box as a quote chip at the caret,
+// followed by `reply` (a phrase or an emoji) when given, for the owner to edit or send.
+function quoteSelection(reply = "") {
   const picked = selectedQuote();
   if (!picked) return false;
   document.getSelection().removeAllRanges();
-  addQuote(picked.text);
+  addQuote(picked.text, reply);
   return true;
-}
-
-// A quick reply sends the selection quoted, with `reply` (a phrase or an emoji) under it, straight to the open chat.
-// The message box and its draft stay as they are.
-function quickReply(reply) {
-  const picked = selectedQuote();
-  if (!picked) return;
-  document.getSelection().removeAllRanges();
-  sendMessage(blockquote(cleanQuote(picked.text)) + "\n\n" + reply);
 }
 
 // The bar's quick replies from the settings: the phrases on its first row, the emoji on its second.
@@ -1115,7 +1109,7 @@ function renderQuickReplies() {
     b.type = "button";
     b.title = label(text);
     b.setAttribute("aria-label", label(text));
-    b.addEventListener("click", () => quickReply(text));
+    b.addEventListener("click", () => quoteSelection(text));
     return b;
   }));
   row("quick-phrases", settings.phrases, "phrase", (phrase) => `Reply "${phrase}" to the selected text`);
@@ -1144,7 +1138,7 @@ document.addEventListener("mouseup", () => { selecting = false; placeQuoteBar();
 $("msgs").addEventListener("scroll", placeQuoteBar);
 // Keep the selection when the bar is pressed, so its clicks can read it.
 $("quote-bar").addEventListener("mousedown", (event) => event.preventDefault());
-$("add-quote").addEventListener("click", quoteSelection);
+$("add-quote").addEventListener("click", () => quoteSelection());
 document.addEventListener("keydown", (event) => {
   if ((event.ctrlKey || event.metaKey) && !event.shiftKey && !event.altKey && event.key.toLowerCase() === "l" && selectedQuote()) {
     event.preventDefault();
