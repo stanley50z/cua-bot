@@ -2223,7 +2223,9 @@ function spaceList(spaces) {
       head.append(paired);
     }
     // A `direct:<host>:<port>` id carries the machine's address.
-    row.append(icon("i-screen"), head, space.id.startsWith("direct:") ? secret(space.id, "code", "id") : el("code", "id", space.id));
+    let id = el("code", "id", space.id);
+    if (space.id.startsWith("direct:")) { id = el("span", "id", "IP: "); id.append(secret(space.id, "code")); }
+    row.append(icon("i-screen"), head, id);
     const facts = [space.os, space.phase && capital(space.phase), space.version && "spacesd " + space.version].filter(Boolean);
     if (facts.length > 0) row.append(el("span", "about", facts.join(" · ")));
     list.append(row);
@@ -2261,10 +2263,10 @@ function connRow(kind, name, status, statusTitle, lines, spaces) {
 function renderConnections(data) {
   const { here } = data;
   const hereLines = [
-    [here.os + " · ", secret(here.user)],
+    [here.os + " · User: ", secret(here.user)],
     ...(here.aliases.length > 0 ? ["SSH as " + here.aliases.join(", ")] : []),
     "Running since " + shortDate(here.startedAt) + " · pid " + here.pid,
-    [secret(here.database)],
+    ["Database: ", secret(here.database)],
   ];
   const computers = [connRow("here", here.name, "Runs cua-bot", "The Harness, every bot, and their routines run here; the coding tools act here unless a call names a machine", hereLines, here.spaces)];
   // Online machines first, each group in the SSH config's order.
@@ -2272,7 +2274,7 @@ function renderConnections(data) {
     const where = m.address + (m.port === 22 ? "" : ":" + m.port);
     computers.push(connRow(m.online ? "on" : "off", m.aliases.join(", "), m.online ? "Online" : "Not answering",
       m.online ? `SSH port ${m.port} accepted a connection` : `SSH port ${m.port} didn't accept a connection within 3 seconds`,
-      [[secret((m.user ? m.user + "@" : "") + where)]], m.spaces));
+      [["IP: ", secret((m.user ? m.user + "@" : "") + where)]], m.spaces));
   }
   const hint = (text) => el("p", "hint", text);
   const parts = [
