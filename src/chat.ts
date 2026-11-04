@@ -1,6 +1,6 @@
 // Owner chat over one bot's conversation, for the web app in src/web.ts.
 // src/bots.ts calls createChat({ harness, conversation, context, computer }) once per bot. The server uses history() for
-// pages of past messages, send()/stop() for input, react() for the owner's emoji reactions (REACTION entries),
+// pages of past messages, send()/stop() for input (send() also takes pasted images, which image() reads back), react() for the owner's emoji reactions (REACTION entries),
 // computer() for the computer pane, and subscribe()
 // for live updates: the streaming partial reply, running tool calls, every new transcript entry, and
 // computer pane snapshots while computer_use runs. Entries are normalized to ChatItem so the browser
@@ -21,6 +21,7 @@ import {
 	ResetEntry,
 	ToolResultEntry,
 	UserEntry,
+	type UserInput,
 } from "@earendil-works/pi-durable";
 import type { ComputerSnapshot, ComputerView } from "./computer-view.ts";
 
@@ -55,6 +56,8 @@ export type Reaction = { target: number; emoji: string; on: boolean };
 const QUOTE_MAX = 80;
 
 export type ChatTool = { id: string; name: string; args: Record<string, unknown> };
+/** An image in an owner message: base64 data in a format the model takes. */
+export type ChatImage = { data: string; mimeType: string };
 
 export type ChatItem =
 	| { id: number; kind: "user"; text: string; at: number; images: number }
@@ -290,10 +293,25 @@ export function createChat(deps: { harness: Harness; conversation: Conversation;
 			const items = page.items.flatMap((entry) => toChatItem(entry) ?? []).reverse();
 			return { items, before: page.next ?? null };
 		},
-		/** Queue an owner message. It runs after the current turn when the bot is busy. Does not wait for the answer. */
-		async send(text: string) {
-			const submission = await conversation.submit({ type: "input", content: text, whenBusy: "followUp" }, context);
+		/**
+		 * Queue an owner message, with any pasted images after its text. It runs after the current turn when the bot is
+		 * busy. Does not wait for the answer.
+		 */
+		async send(text: string, images: readonly ChatImage[] = []) {
+			const content: UserInput =
+				images.length === 0
+					? text
+					: [...(text === "" ? [] : [{ type: "text" as const, text }]), ...images.map((image) => ({ type: "image" as const, ...image }))];
+			const submission = await conversation.submit({ type: "input", content, whenBusy: "followUp" }, context);
 			return { submissionId: submission.id as number };
+		},
+		/** Image `index` of the owner's message `entryId`, or undefined when there is no such image. */
+		async image(entryId: number, index: number): Promise<ChatImage | undefined> {
+			const id = entryId as EntryId;
+			const message = (await conversation.entries({ order: "ascending", minEntryId: id, maxEntryId: id }, 1, undefined, context)).items[0]?.model?.[0];
+			if (message?.role !== "user" || typeof message.content === "string") return undefined;
+			const image = message.content.filter((part) => part.type === "image")[index];
+			return image === undefined ? undefined : { data: image.data, mimeType: image.mimeType };
 		},
 		/**
 		 * Record the owner's reaction to the reply entry `target`, or take it back with `on: false`. A passive write: it

@@ -1,5 +1,5 @@
 // The bot's HTTP surface on 127.0.0.1: the web app at GET / with its service worker at /sw.js, its JSON
-// API under /api/ (the bot list and its edits, routines CRUD, each bot's chat history/send/react/stop, a server-sent
+// API under /api/ (the bot list and its edits, routines CRUD, each bot's chat history/send/react/stop and the owner's pasted images, a server-sent
 // event stream of one bot's live chat state, Web Push subscriptions, the Connections tab's check, and the Mac's live screen with the owner's control of it), screenshots under /shots/, and the original POST /say. Loopback only, no auth, same trust as /say always had.
 // Mutations go through the routines manager and the chat module, so every surface agrees.
 import { readFile } from "node:fs/promises";
@@ -7,9 +7,10 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { basename, join } from "node:path";
 import type { Context } from "@earendil-works/chord";
 import type { Cursor } from "@earendil-works/pi-durable";
+import { DEFAULT_IMAGE_LIMITS, type ImageProcessor } from "@earendil-works/pi-durable/tools";
 import { ApprovalError, type Approvals, type EmailEdit } from "./approvals.ts";
 import { BotError, type BotInput, type Bots } from "./bots.ts";
-import type { Chat } from "./chat.ts";
+import type { Chat, ChatImage } from "./chat.ts";
 import type { Connections } from "./connections.ts";
 import { type Memory, MemoryError } from "./memory.ts";
 import { DATA_DIR } from "./log.ts";
@@ -31,6 +32,10 @@ import {
 import { PAGE, SERVICE_WORKER } from "./web-page.ts";
 
 const MAX_BODY_BYTES = 64 * 1024;
+// POST /api/chat carries pasted images as base64, so it takes far more than the other JSON bodies.
+const CHAT_BODY_BYTES = 64 * 1024 * 1024;
+// What the model takes inline without a processor to convert other formats.
+const INLINE_IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
 
 class HttpError extends Error {
 	readonly status: number;
@@ -61,18 +66,18 @@ function sendError(res: ServerResponse, error: unknown): void {
 	sendJson(res, statusFor(error), { error: messageOf(error) });
 }
 
-async function readBody(req: IncomingMessage): Promise<string> {
+async function readBody(req: IncomingMessage, limit = MAX_BODY_BYTES): Promise<string> {
 	req.setEncoding("utf8");
 	let body = "";
 	for await (const chunk of req) {
 		body += chunk;
-		if (body.length > MAX_BODY_BYTES) throw new HttpError(413, "request body is too large");
+		if (body.length > limit) throw new HttpError(413, "request body is too large");
 	}
 	return body;
 }
 
-async function readJson(req: IncomingMessage): Promise<unknown> {
-	const body = await readBody(req);
+async function readJson(req: IncomingMessage, limit = MAX_BODY_BYTES): Promise<unknown> {
+	const body = await readBody(req, limit);
 	if (body.trim() === "") return undefined;
 	try {
 		return JSON.parse(body) as unknown;
@@ -105,6 +110,8 @@ export type BotServerDeps = {
 	botMemories?: () => { id: number; memory: Memory }[];
 	/** Enables /api/approvals* and approval events on the chat stream. Absent when Executor is not configured. */
 	approvals?: Approvals;
+	/** Fits pasted chat images to the model's limits, converting formats it does not take. Without it, images pass as they are. */
+	images?: ImageProcessor;
 	/** Shown in the chat header, e.g. "grok-4.7". */
 	model?: string;
 	shotsDir?: string;
@@ -135,10 +142,37 @@ function decodeCursor(text: string | null): Cursor | undefined {
 	}
 }
 
-function chatText(body: unknown): string {
-	const text = body !== null && typeof body === "object" && "text" in body ? body.text : undefined;
-	if (typeof text !== "string" || text.trim() === "") throw new HttpError(400, "text must be a non-empty string");
-	return text;
+// POST /api/chat's body: { text, images? }, where each image is { data (base64), mimeType }; it needs text or an image.
+function chatInput(body: unknown): { text: string; images: ChatImage[] } {
+	const record = body !== null && typeof body === "object" && !Array.isArray(body) ? (body as Record<string, unknown>) : {};
+	const { text = "", images = [] } = record;
+	if (typeof text !== "string") throw new HttpError(400, "text must be a string");
+	if (!Array.isArray(images)) throw new HttpError(400, "images must be a list");
+	const parsed = images.map((image: unknown) => {
+		const { data, mimeType } = (image ?? {}) as Record<string, unknown>;
+		if (typeof data !== "string" || data === "" || typeof mimeType !== "string" || !mimeType.startsWith("image/")) {
+			throw new HttpError(400, "each image must be { data, mimeType } with base64 data and an image/* type");
+		}
+		return { data, mimeType };
+	});
+	if (text.trim() === "" && parsed.length === 0) throw new HttpError(400, "text must be a non-empty string, or send an image");
+	return { text: text.trim() === "" ? "" : text, images: parsed };
+}
+
+// Each pasted image as the model can take it: through the processor when there is one, else only formats taken inline.
+async function prepareImages(images: ChatImage[], processor: ImageProcessor | undefined): Promise<ChatImage[]> {
+	return Promise.all(
+		images.map(async ({ data, mimeType }) => {
+			if (processor === undefined) {
+				if (!INLINE_IMAGE_TYPES.has(mimeType)) throw new HttpError(400, `${mimeType} images are not supported; paste a PNG, JPEG, GIF, or WebP`);
+				return { data, mimeType };
+			}
+			// A plain Uint8Array: a Buffer can sit in Node's shared pool, which the processor's worker cannot be handed.
+			const prepared = await processor.prepare(new Uint8Array(Buffer.from(data, "base64")), mimeType, DEFAULT_IMAGE_LIMITS);
+			if (prepared === undefined) throw new HttpError(400, "An image could not be read or made small enough for the model.");
+			return { data: prepared.data, mimeType: prepared.mimeType };
+		}),
+	);
 }
 
 // One emoji (with any skin tone, variation selector, or joined parts), as the app's reaction picker sends it.
@@ -468,12 +502,27 @@ async function routeChat(req: IncomingMessage, res: ServerResponse, deps: BotSer
 		return;
 	}
 	if (method === "POST" && url.pathname === "/api/chat") {
-		const body = await readJson(req);
-		const text = chatText(body);
+		const body = await readJson(req, CHAT_BODY_BYTES);
+		const input = chatInput(body);
 		const which = (body as { bot?: unknown }).bot ?? bot;
 		const chat = await chatFor(bots, which);
-		deps.log?.(`owner (web${which === null || which === undefined ? "" : `, bot ${String(which)}`}):`, text);
-		sendJson(res, 202, await chat.send(text));
+		const images = await prepareImages(input.images, deps.images);
+		deps.log?.(
+			`owner (web${which === null || which === undefined ? "" : `, bot ${String(which)}`}):`,
+			input.text,
+			...(images.length === 0 ? [] : [`[${images.length} image${images.length === 1 ? "" : "s"}]`]),
+		);
+		sendJson(res, 202, await chat.send(input.text, images));
+		return;
+	}
+	// An image the owner pasted: ?entry=<user item id>&index=<n>. Entries never change, so it caches for good.
+	if (method === "GET" && url.pathname === "/api/chat/image") {
+		const entry = Number(url.searchParams.get("entry"));
+		const index = Number(url.searchParams.get("index") ?? 0);
+		if (!Number.isInteger(entry) || !Number.isInteger(index) || index < 0) throw new HttpError(400, "entry and index must be integers");
+		const image = await (await chatFor(bots, bot)).image(entry, index);
+		if (image === undefined) throw new HttpError(404, "not found");
+		res.writeHead(200, { "content-type": image.mimeType, "cache-control": "max-age=31536000, immutable" }).end(Buffer.from(image.data, "base64"));
 		return;
 	}
 	if (method === "POST" && url.pathname === "/api/chat/react") {

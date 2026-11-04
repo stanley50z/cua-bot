@@ -115,6 +115,9 @@ dialog .row .btn.danger { margin-right: auto; }
 .m.me .quote { border-left: 3px solid #9FB2C8; padding-left: 9px; color: var(--muted); display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 .m.me .part + .part { margin-top: 6px; }
 .m.me.queued { opacity: .65; }
+.m.me .pics { display: flex; flex-wrap: wrap; gap: 6px; }
+.m.me .pics img { display: block; max-height: 220px; max-width: 100%; border-radius: 8px; }
+.m.me .pics a { display: block; }
 .m.me .note { display: block; font-size: 11.5px; color: var(--muted); margin-top: 2px; }
 .m.bot { overflow-wrap: anywhere; }
 .m.bot .text > :first-child { margin-top: 0; } .m.bot .text > :last-child { margin-bottom: 0; }
@@ -168,6 +171,14 @@ dialog .row .btn.danger { margin-right: auto; }
 .composer:focus-within { border-color: #9FB2C8; }
 .composer .input { flex: 1; min-width: 0; min-height: 44px; max-height: 200px; overflow-y: auto; outline: none; color: var(--ink); padding: 4px 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 .composer .input:empty::before { content: attr(data-placeholder); color: var(--muted); pointer-events: none; }
+/* images pasted into the message box, sent with it */
+.attachments { flex: 1 0 100%; display: flex; flex-wrap: wrap; gap: 8px; padding-top: 2px; }
+.attachments[hidden] { display: none; }
+.attachments .pic { position: relative; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: var(--bg); }
+.attachments img { display: block; height: 64px; width: auto; max-width: 160px; object-fit: cover; }
+.attachments button { position: absolute; top: 3px; right: 3px; width: 20px; height: 20px; border: 0; border-radius: 50%; background: rgba(23,32,43,.72); color: #fff; cursor: pointer; display: grid; place-items: center; padding: 0; }
+.attachments button:hover { background: var(--ink); }
+.attachments button svg { width: 11px; height: 11px; }
 /* a quote inside the message box: what the owner types after it is their reply to it */
 .qchip { display: inline-flex; align-items: center; gap: 5px; max-width: min(260px, 100%); vertical-align: bottom; margin: 0 2px; padding: 0 2px 0 7px; border: 1px solid #9FB2C8; border-radius: 6px; background: var(--me); color: var(--muted); font-size: 13px; line-height: 22px; user-select: none; white-space: nowrap; }
 .qchip > span { overflow: hidden; text-overflow: ellipsis; }
@@ -428,6 +439,7 @@ dialog .row { display: flex; gap: 8px; justify-content: flex-end; margin-top: 18
     <div class="banner" id="chat-error" role="alert" hidden></div>
     <div class="msgs" id="msgs" aria-live="polite"></div>
     <form class="composer" id="composer">
+     <div class="attachments" id="attachments" aria-label="Images to send" hidden></div>
      <div class="input" id="input" contenteditable="plaintext-only" role="textbox" aria-multiline="true" aria-label="Message cua-bot" data-placeholder="Message cua-bot"></div>
      <button type="button" class="icon" id="stop" aria-label="Stop the current reply" title="Stop the current reply" hidden><svg><use href="#i-stop"/></svg></button>
      <button type="submit" class="icon primary" id="send" aria-label="Send" title="Send (Enter)"><svg><use href="#i-send"/></svg></button>
@@ -651,7 +663,7 @@ function markdown(text) {
 /* ---------- chat state ---------- */
 // `bot` is the id of the bot whose chat is open; `bots` is the list from /api/bots. `picking` is the reply whose
 // reaction picker is open; `reacting` holds reactions sent but not yet back as items, by "<reply id>:<emoji>".
-const state = { bot: null, bots: [], items: [], ids: new Set(), before: null, live: { busy: false, partial: "", tools: [] }, queued: [], open: new Set(), computer: { steps: [] }, approvals: [], picking: null, reacting: new Map() };
+const state = { bot: null, bots: [], items: [], ids: new Set(), before: null, live: { busy: false, partial: "", tools: [] }, queued: [], open: new Set(), computer: { steps: [] }, approvals: [], picking: null, reacting: new Map(), attachments: [] };
 // The expanded live screen (see "expanded live screen" below): whether the owner has control of the Mac, the
 // keys they hold down there, and their input on its way.
 const view = { owner: false, held: new Map(), queue: [], sending: null, lastMove: 0 };
@@ -804,7 +816,7 @@ function addItems(items) {
     state.ids.add(item.id);
     state.items.push(item);
     if (item.kind === "user") {
-      const at = state.queued.findIndex((text) => text.trim() === item.text.trim());
+      const at = state.queued.findIndex((queued) => queued.text.trim() === item.text.trim() && queued.images.length === item.images);
       if (at >= 0) state.queued.splice(at, 1);
     }
     if (item.kind === "reaction") {
@@ -973,9 +985,26 @@ function quoteParts(text) {
     .filter((part) => part.quote || part.text !== "");
 }
 
-// The owner's bubble: each quote as a grey block, with their text in between. Queued messages use it too.
-function ownMessage(text, className) {
+// The owner's bubble: its images (`pics` as { src, href }, where `href` opens the full image), then each quote as a
+// grey block, with their text in between. Queued messages use it too.
+function ownMessage(text, className, pics = []) {
   const node = el("div", className);
+  if (pics.length > 0) {
+    const row = el("div", "part pics");
+    for (const { src, href } of pics) {
+      const img = el("img");
+      img.src = src;
+      img.alt = "Image you sent";
+      if (!href) { row.append(img); continue; }
+      const link = el("a");
+      link.href = href;
+      link.target = "_blank";
+      link.rel = "noopener";
+      link.append(img);
+      row.append(link);
+    }
+    node.append(row);
+  }
   for (const part of quoteParts(text)) {
     const block = el("div", part.quote ? "part quote" : "part", part.text);
     if (part.quote) block.title = part.text;
@@ -1018,7 +1047,7 @@ function messageActions(item, mine) {
       acts.append(picker);
     }
   }
-  button("Reply", "i-reply", () => addQuote(item.text));
+  if (item.text.trim() !== "") button("Reply", "i-reply", () => addQuote(item.text));
   acts.prepend(tray);
   return acts;
 }
@@ -1329,7 +1358,11 @@ function renderChat() {
       if (label !== day) { day = label; box.append(el("div", "day", label)); }
     }
     if (item.kind === "user") {
-      const node = ownMessage(item.text, "m me");
+      const pics = Array.from({ length: item.images }, (_, index) => {
+        const src = `/api/chat/image?bot=${state.bot}&entry=${item.id}&index=${index}`;
+        return { src, href: src };
+      });
+      const node = ownMessage(item.text, "m me", pics);
       node.dataset.key = String(item.id);
       node.append(messageActions(item));
       box.append(node, stamp(item.at, "stamp me"));
@@ -1361,8 +1394,8 @@ function renderChat() {
       box.append(holder);
     }
   }
-  for (const text of state.queued) {
-    const node = ownMessage(text, "m me queued");
+  for (const queued of state.queued) {
+    const node = ownMessage(queued.text, "m me queued", queued.images.map((image) => ({ src: imageUrl(image) })));
     node.append(el("span", "note", state.live.busy ? "Queued until the current reply finishes" : "Sending…"));
     box.append(node);
   }
@@ -2041,32 +2074,87 @@ $("b-delete").addEventListener("click", async () => {
   finally { $("b-delete").disabled = false; }
 });
 
-// Sends the owner's message to the open bot, showing it queued until it lands in the chat. Resolves to whether it
-// went; a failure shows in the chat's error line.
-async function sendMessage(text) {
-  state.queued.push(text);
+// Sends the owner's message to the open bot with any pasted `images` ({ data, mimeType }), showing it queued until it
+// lands in the chat. Resolves to whether it went; a failure shows in the chat's error line.
+async function sendMessage(text, images = []) {
+  const queued = { text, images };
+  state.queued.push(queued);
   renderChat();
   $("msgs").scrollTop = $("msgs").scrollHeight;
   try {
-    await request("POST", "/api/chat", { text, bot: state.bot });
+    await request("POST", "/api/chat", { text, images, bot: state.bot });
     showChatError("");
     return true;
   } catch (error) {
-    state.queued.splice(state.queued.indexOf(text), 1);
+    state.queued.splice(state.queued.indexOf(queued), 1);
     renderChat();
     showChatError("Your message was not sent: " + error.message);
     return false;
   }
 }
 
+/* ---------- pasted images ---------- */
+// Images pasted into the message box wait in state.attachments as { data (base64), mimeType } and go with the next
+// send. Like the draft text, they are shared across bots; unlike it, a reload drops them.
+const imageUrl = (image) => `data:${image.mimeType};base64,${image.data}`;
+function renderAttachments() {
+  const row = $("attachments");
+  row.hidden = state.attachments.length === 0;
+  row.replaceChildren(...state.attachments.map((image) => {
+    const pic = el("div", "pic");
+    const img = el("img");
+    img.src = imageUrl(image);
+    img.alt = "Pasted image";
+    const remove = el("button");
+    remove.type = "button";
+    remove.setAttribute("aria-label", "Remove this image");
+    remove.title = "Remove";
+    remove.append(icon("i-x"));
+    remove.addEventListener("click", () => {
+      state.attachments.splice(state.attachments.indexOf(image), 1);
+      renderAttachments();
+      $("input").focus();
+    });
+    pic.append(img, remove);
+    return pic;
+  }));
+}
+const readImage = (file) => new Promise((resolve, reject) => {
+  const reader = new FileReader();
+  reader.onload = () => {
+    const url = String(reader.result);
+    resolve({ data: url.slice(url.indexOf(",") + 1), mimeType: file.type });
+  };
+  reader.onerror = () => reject(reader.error);
+  reader.readAsDataURL(file);
+});
+// A paste with images and no plain text (a screenshot, a copied image) attaches the images. A paste with text, such
+// as cells from a spreadsheet that also carry a picture of themselves, pastes the text as usual.
+$("input").addEventListener("paste", async (event) => {
+  const files = [...(event.clipboardData?.files ?? [])].filter((file) => file.type.startsWith("image/"));
+  if (files.length === 0 || event.clipboardData.getData("text/plain") !== "") return;
+  event.preventDefault();
+  try {
+    state.attachments.push(...(await Promise.all(files.map(readImage))));
+    renderAttachments();
+  } catch (error) { showChatError("Could not read the pasted image: " + error.message); }
+});
+
 $("composer").addEventListener("submit", async (event) => {
   event.preventDefault();
   const input = $("input");
   const text = composedText();
-  if (text === "") return;
+  const images = state.attachments;
+  if (text === "" && images.length === 0) return;
   const draft = [...input.childNodes];
   input.replaceChildren();
-  if (!(await sendMessage(text))) input.replaceChildren(...draft);
+  state.attachments = [];
+  renderAttachments();
+  if (!(await sendMessage(text, images))) {
+    input.replaceChildren(...draft);
+    state.attachments = [...images, ...state.attachments];
+    renderAttachments();
+  }
 });
 $("input").addEventListener("keydown", (event) => {
   if (event.key === "Enter" && !event.shiftKey && !event.isComposing) { event.preventDefault(); $("composer").requestSubmit(); }

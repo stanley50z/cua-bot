@@ -1,4 +1,4 @@
-// The web chat API: POST /api/chat, the /api/chat/events stream, GET /api/chat history paging,
+// The web chat API: POST /api/chat (with pasted images, served back by /api/chat/image), the /api/chat/events stream, GET /api/chat history paging,
 // emoji reactions, stop, and /shots/ file serving. Exercised over real HTTP against createBotServer with a faux model.
 // A reply shows only what the bot sent with send_message; its own text stays private.
 // Run from the repo root:  node --test test/chat.test.ts
@@ -13,6 +13,8 @@ import { Type } from "typebox";
 import { createModels } from "@earendil-works/pi-ai/models";
 import { type FauxResponseStep, fauxAssistantMessage, fauxProvider, fauxText, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
 import { createRegistry, defineExtension, defineTool, Harness, MemoryStorage } from "@earendil-works/pi-durable";
+import { createNodePhotonImages } from "@earendil-works/pi-durable/images/node";
+import type { ImageProcessor } from "@earendil-works/pi-durable/tools";
 import { createBots, createBotsExtension } from "../src/bots.ts";
 import { BOT_MESSAGE, type ChatEvent, type ChatItem, REACTION, reactionText, SEND_MESSAGE, toChatItem } from "../src/chat.ts";
 import { createBotServer } from "../src/web.ts";
@@ -39,7 +41,7 @@ const SCRIPT: FauxResponseStep[] = [
 	end,
 ];
 
-async function open(responses = SCRIPT) {
+async function open(responses = SCRIPT, images?: ImageProcessor) {
 	const dir = await mkdtemp(join(tmpdir(), "cua-bot-chat-"));
 	const faux = fauxProvider();
 	const models = createModels();
@@ -52,7 +54,7 @@ async function open(responses = SCRIPT) {
 	const root = await harness.root(context, { agent: { model: MODEL } });
 	harness.resume();
 	const bots = await createBots({ harness, root, context, agent: { model: MODEL }, dir: join(dir, "bots") });
-	const server = createBotServer({ say: async (text) => text, bots, context, shotsDir: dir });
+	const server = createBotServer({ say: async (text) => text, bots, context, shotsDir: dir, ...(images === undefined ? {} : { images }) });
 	await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
 	const address = server.address();
 	assert.ok(address !== null && typeof address === "object");
@@ -294,4 +296,103 @@ test("reaction entries become reaction items, and a long reply is quoted short",
 	assert.deepEqual(item, { id: 12, kind: "reaction", target: 10, emoji: "🎉", on: false, at: 7 });
 	const note = reactionText("😂", true, "word ".repeat(40));
 	assert.match(note, /: "(word ){15}word…"\. You don't need to reply/);
+});
+
+// A 1x1 PNG, as the browser sends a pasted screenshot: base64 without the data: URL prefix.
+const PIXEL = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+
+test("a pasted image reaches the bot after the text, shows as a count, and is served back", async () => {
+	let seen: unknown;
+	const bot = await open([
+		(context) => {
+			seen = context.messages.at(-1);
+			return send("Nice chart.");
+		},
+		end,
+		send("Got it."),
+		end,
+	]);
+	try {
+		const events = await collect(bot.base, settled(["user", "assistant"]), async () => {
+			const response = await post(bot.base, "/api/chat", { text: "what is this?", images: [{ data: PIXEL, mimeType: "image/png" }] });
+			assert.equal(response.status, 202);
+		});
+		const [user] = items(events);
+		assert.ok(user?.kind === "user");
+		assert.equal(user.text, "what is this?");
+		assert.equal(user.images, 1);
+		assert.deepEqual((seen as { content: unknown }).content, [
+			{ type: "text", text: "what is this?" },
+			{ type: "image", data: PIXEL, mimeType: "image/png" },
+		]);
+
+		const image = await fetch(`${bot.base}/api/chat/image?entry=${user.id}&index=0`);
+		assert.equal(image.status, 200);
+		assert.equal(image.headers.get("content-type"), "image/png");
+		assert.deepEqual(Buffer.from(await image.arrayBuffer()), Buffer.from(PIXEL, "base64"));
+		assert.equal((await fetch(`${bot.base}/api/chat/image?entry=${user.id}&index=1`)).status, 404);
+		assert.equal((await fetch(`${bot.base}/api/chat/image?entry=nope`)).status, 400);
+
+		// An image alone is a message too: no empty text part goes to the model.
+		const alone = await collect(bot.base, settled(["user", "assistant"]), async () => {
+			await post(bot.base, "/api/chat", { text: "", images: [{ data: PIXEL, mimeType: "image/png" }] });
+		});
+		const [only] = items(alone);
+		assert.ok(only?.kind === "user");
+		assert.deepEqual([only.text, only.images], ["", 1]);
+	} finally {
+		await bot.close();
+	}
+});
+
+test("bad image input is rejected without reaching the bot", async () => {
+	const bot = await open();
+	try {
+		assert.equal((await post(bot.base, "/api/chat", { text: "", images: [] })).status, 400);
+		assert.equal((await post(bot.base, "/api/chat", { text: "hi", images: [{ data: PIXEL, mimeType: "text/plain" }] })).status, 400);
+		assert.equal((await post(bot.base, "/api/chat", { text: "hi", images: [{ data: "", mimeType: "image/png" }] })).status, 400);
+		assert.equal((await post(bot.base, "/api/chat", { text: "hi", images: "nope" })).status, 400);
+		assert.equal((await post(bot.base, "/api/chat", { images: [{ data: PIXEL, mimeType: "image/bmp" }] })).status, 400, "no processor to convert BMP");
+		assert.deepEqual((await (await fetch(`${bot.base}/api/chat`)).json()).items, []);
+	} finally {
+		await bot.close();
+	}
+});
+
+test("with an image processor, pasted images are stored as it prepared them", async () => {
+	const prepared: string[] = [];
+	const images: ImageProcessor = {
+		prepare: async (bytes, mimeType) => {
+			prepared.push(`${mimeType}:${bytes.length}`);
+			return mimeType === "image/bmp" ? { data: PIXEL, mimeType: "image/png", convertedFrom: "image/bmp" } : undefined;
+		},
+	};
+	const bot = await open(SCRIPT, images);
+	try {
+		const events = await collect(bot.base, settled(["user", "assistant"]), async () => {
+			assert.equal((await post(bot.base, "/api/chat", { images: [{ data: "Qk0=", mimeType: "image/bmp" }] })).status, 202);
+		});
+		const [user] = items(events);
+		assert.ok(user?.kind === "user");
+		assert.equal((await fetch(`${bot.base}/api/chat/image?entry=${user.id}&index=0`)).headers.get("content-type"), "image/png");
+		assert.equal((await post(bot.base, "/api/chat", { images: [{ data: PIXEL, mimeType: "image/tiff" }] })).status, 400, "unreadable image");
+		assert.deepEqual(prepared, ["image/bmp:2", `image/tiff:${Buffer.from(PIXEL, "base64").length}`]);
+	} finally {
+		await bot.close();
+	}
+});
+
+// main.ts uses Photon in a worker thread, which needs the image bytes in a buffer of their own.
+test("the Photon processor main.ts uses takes a pasted image", async () => {
+	const bot = await open(SCRIPT, await createNodePhotonImages({ idleMs: 50 }));
+	try {
+		const events = await collect(bot.base, settled(["user", "assistant"]), async () => {
+			const response = await post(bot.base, "/api/chat", { images: [{ data: PIXEL, mimeType: "image/png" }] });
+			assert.equal(response.status, 202, await response.clone().text());
+		});
+		const [user] = items(events);
+		assert.ok(user?.kind === "user" && user.images === 1);
+	} finally {
+		await bot.close();
+	}
 });

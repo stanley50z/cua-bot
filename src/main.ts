@@ -7,6 +7,7 @@ import { hostname, networkInterfaces, release, type, userInfo, version } from "n
 import { join } from "node:path";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { configure, type ConversationId, createRegistry, type Cursor, defineExtension, Harness, section } from "@earendil-works/pi-durable";
+import { createNodePhotonImages } from "@earendil-works/pi-durable/images/node";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { botMemories, createBots, createBotsExtension } from "./bots.ts";
 import { toChatItem } from "./chat.ts";
@@ -186,7 +187,9 @@ const connections = createConnections({
 	fallback: registrySpaces,
 	...(paired === undefined ? {} : { pairedSpace: paired }),
 });
-createBotServer({ say, bots, memory, botMemories: ownMemories, model: MODEL.modelId, context, log, control: screenControl, live, push, connections, ...(approvals === undefined ? {} : { approvals }) }).listen(PORT, "127.0.0.1", () =>
+// Fits images the owner pastes in the chat to the model's limits, in a worker thread.
+const images = await createNodePhotonImages();
+createBotServer({ say, bots, memory, botMemories: ownMemories, images, model: MODEL.modelId, context, log, control: screenControl, live, push, connections, ...(approvals === undefined ? {} : { approvals }) }).listen(PORT, "127.0.0.1", () =>
 	log(`listening: web app http://127.0.0.1:${PORT}/ · chat POST http://127.0.0.1:${PORT}/say`),
 );
 
