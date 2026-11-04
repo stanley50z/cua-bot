@@ -1716,6 +1716,12 @@ $("screen").addEventListener("click", openScreenView);
 $("take-control").addEventListener("click", () => { openScreenView(); if (!view.owner) setControl(true); });
 $("view-control").addEventListener("click", () => setControl(!view.owner));
 $("view-close").addEventListener("click", () => $("screen-view").close());
+// A click on the empty space around the screen closes the view too. It must also start there, so a drag
+// that begins on the screen and ends in the padding never closes it.
+const isPadding = (target) => target === $("screen-view") || target === $("stage");
+let pressedPadding = false;
+$("screen-view").addEventListener("pointerdown", (event) => { pressedPadding = isPadding(event.target); });
+$("screen-view").addEventListener("click", (event) => { if (pressedPadding && isPadding(event.target)) $("screen-view").close(); });
 // Escape belongs to the Mac while the owner drives; the keydown handler below stops it closing the view.
 $("screen-view").addEventListener("cancel", (event) => { if (view.owner) event.preventDefault(); });
 $("screen-view").addEventListener("close", () => {
