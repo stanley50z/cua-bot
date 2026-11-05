@@ -480,7 +480,7 @@ dialog .row { display: flex; gap: 8px; justify-content: flex-end; margin-top: 18
     <div class="bar"><h1>Chat</h1><span class="aside">Saved in this browser.</span></div>
     <div class="settings">
      <label class="setting"><span><b>Show messages between bots</b><small>What one bot sends another, in both bots' chats and the bot list.</small></span><input type="checkbox" data-setting="botTalk"></label>
-     <label class="setting"><span><b>Show tool steps</b><small>A chip for each tool a bot runs, like space bash or Remembered, that opens its output, plus its screenshots.</small></span><input type="checkbox" data-setting="tools"></label>
+     <label class="setting"><span><b>Show tool steps</b><small>A chip for each tool a bot runs, like space bash or Remembered, that opens its output, plus its screenshots. Repeats share one chip, like space bash ×3.</small></span><input type="checkbox" data-setting="tools"></label>
      <label class="setting"><span><b>Show routine runs</b><small>A line in the bot's chat each time one of its routines starts.</small></span><input type="checkbox" data-setting="routineRuns"></label>
      <label class="setting field"><span><b>Quick replies</b><small>One per line. They show on the bar over text you select in a message; clicking one adds that text to the message box as a quote, with the reply after it.</small></span><textarea id="set-phrases" rows="4" spellcheck="false"></textarea></label>
      <label class="setting field"><span><b>Quick emoji</b><small>The reactions under a reply's smiley, and emoji replies on the bar over selected text, which add that text to the message box as a quote with the emoji after it.</small></span><input type="text" id="set-emoji" spellcheck="false" autocomplete="off"></label>
@@ -1400,11 +1400,11 @@ function renderChat() {
       // The streaming reply joins the open block, as it will once it lands.
       let live = open && box.lastElementChild === open.node ? open : null;
       if (!live) {
-        live = { node: el("div", "m bot"), chips: el("div", "chips") };
+        live = { node: el("div", "m bot"), chips: el("div", "chips"), groups: new Map() };
         live.node.append(live.chips);
         box.append(live.node);
       }
-      for (const tool of pending) live.chips.append(el("span", "chip run", toolLabel({ name: tool.name, args: {} })));
+      for (const tool of pending) addChip(live, toolLabel({ name: tool.name, args: {} }), "run", null);
       // The same bubble the finished reply gets, so it keeps its shape when it lands.
       if (state.live.partial) live.node.append(bubble("live", state.live.partial));
     }
@@ -1432,12 +1432,12 @@ const relayed = (call, results) => settings.botTalk && call.name === "message_bo
 
 // One assistant entry: tool chips and their results above (with tool steps on), relays to other bots, the text bubble with its reaction
 // pills, then approval cards, any error, and its time. `mine` is its reactions from reactionsOf(). `into` is an open
-// block ({node, chips, below}) from earlier tool-only replies to add to, or null for a new one. Returns the block,
-// `closed` once this entry showed more than chips.
+// block ({node, chips, groups, below}) from earlier tool-only replies to add to, or null for a new one. Returns the
+// block, `closed` once this entry showed more than chips.
 function renderReply(item, results, running, mine, into) {
-  const block = into || { node: el("div", "m bot"), chips: el("div", "chips"), below: el("div") };
+  const block = into || { node: el("div", "m bot"), chips: el("div", "chips"), groups: new Map(), below: el("div") };
   if (!into) block.node.append(block.chips, block.below);
-  const { node, chips, below } = block;
+  const { node, below } = block;
   const shown = node.childElementCount;
   if (item.tools.length > 0) {
     for (const call of settings.tools ? item.tools : []) {
@@ -1449,14 +1449,9 @@ function renderReply(item, results, running, mine, into) {
       // A delivered bot message shows as its own block below while bot talk is on; otherwise it gets a chip.
       if (call.name === "message_bot" && status === "done" && settings.botTalk) continue;
       const label = approval ? `${approval.title}: ${approvalWord(approval)}` : toolLabel(call);
-      const chip = el("button", "chip " + status, label);
-      chip.type = "button";
-      chip.title = label;
-      if (status === "run" || !result) { chip.disabled = true; chips.append(chip); continue; }
+      if (status === "run" || !result) { addChip(block, label, status, null); continue; }
       const key = item.id + ":" + call.id;
-      chip.setAttribute("aria-expanded", String(state.open.has(key)));
-      chip.addEventListener("click", () => { state.open.has(key) ? state.open.delete(key) : state.open.add(key); renderChat(); });
-      chips.append(chip);
+      addChip(block, label, status, key);
       if (state.open.has(key)) below.append(el("pre", "result", result.text || "(no output)"));
       if (result.shots.length > 0) {
         // Screenshots run on in one row too, until an expanded result comes between them.
@@ -1495,6 +1490,33 @@ function renderReply(item, results, running, mine, into) {
   const closed = node.childElementCount > shown;
   if (closed) node.append(stamp(item.at));
   return { ...block, closed };
+}
+
+// Adds a tool chip to a reply block's row, or counts it on the chip already there with the same label and status,
+// so a repeated tool reads "space bash ×3" wherever its calls fell in the row. `key` is the call's open-state key,
+// or null for a call with nothing to open yet. Clicking the chip opens or closes every result it counts.
+function addChip(block, label, status, key) {
+  const id = status + "\n" + label;
+  let group = block.groups.get(id);
+  if (!group) {
+    const chip = el("button", "chip " + status, label);
+    chip.type = "button";
+    chip.title = label;
+    group = { chip, keys: [], count: 0 };
+    chip.addEventListener("click", () => {
+      const open = group.keys.some((k) => state.open.has(k));
+      for (const k of group.keys) open ? state.open.delete(k) : state.open.add(k);
+      renderChat();
+    });
+    block.groups.set(id, group);
+    block.chips.append(chip);
+  }
+  group.count += 1;
+  if (key) group.keys.push(key);
+  const { chip, keys, count } = group;
+  chip.textContent = count > 1 ? `${label} ×${count}` : label;
+  chip.disabled = keys.length === 0;
+  if (keys.length > 0) chip.setAttribute("aria-expanded", String(keys.some((k) => state.open.has(k))));
 }
 
 function renderLive() {
