@@ -1,0 +1,126 @@
+# Web app
+
+[Back to README](../README.md)
+
+Open `http://127.0.0.1:43142/`. The page is served on loopback only and has no login, the same trust as `/say`.
+
+The layout is three columns: bots on the left, the chat in the middle, the Mac's screen on the right. A rail on the far left switches to Routines (clock icon), Memory (page icon) and Settings (gear).
+
+## Links and history
+
+The URL hash keeps your place, so a reload, Back, or a copied link lands in the same spot.
+
+| Key | Values | When absent |
+| --- | --- | --- |
+| `view` | `routines`, `memory`, `settings` | The chat |
+| `tab` | `connections` | Settings' Chat tab |
+| `bot` | A bot id | The main bot |
+
+For example `#view=settings&tab=connections` or `#view=memory&bot=3`. Each new view or tab is a history entry; switching bots replaces the entry. Old links of the form `#bot=<id>` still open that bot's chat.
+
+## Bots
+
+Each bot has a row with its newest message, and a pulsing dot while it works. Click a row to open that bot's chat. The + button adds a bot.
+
+The pencil next to the chat title opens the bot's settings: its agent file (with its path) to read or edit, its name, its avatar, and Delete.
+
+**Avatars.** Each bot shows as a small character that blinks every few seconds and, at the larger sizes, now and then glances aside. Each bot keeps its own rhythm, and the motion stops when the system asks for reduced motion. Click the big avatar in the dialog to pick a shape (hover one for its name) and a color; Reset goes back to the bot's default. The pick applies when you save. A new bot gets a shape and a color no other bot wears yet, while any are left.
+
+**Messages between bots** are hidden unless you turn on Show messages between bots in Settings. With it on, a message shows in the sender's reply as "Message to <name>" and in the recipient's chat as "Message from <name>", and a bot's row can show the newest one. With it off and Show tool steps on, a `message_bot` call shows as a "Messaged <name>" chip.
+
+## Chat
+
+A bot talks to you only through its `send_message` tool ([src/bots.ts](../src/bots.ts)). Its text between tool calls is private working notes and never shows. Replies from before 2026-11-03 04:05 UTC, when that tool arrived, still show their text.
+
+- Messages stream in as the bot writes them, in a grey bubble.
+- Each message shows its time under it. Hover for the full date.
+- While a reply runs, the chat title says Working or Using the computer.
+- Enter sends, Shift+Enter adds a line, the stop button ends the current reply.
+- A message sent while the bot is busy waits its turn.
+
+**Tool steps.** With Show tool steps on, each tool the bot used shows as a chip above its reply. Chips from consecutive steps that sent nothing run on in one wrapping row, up to the next message. Click a finished chip for the tool's result; screenshots appear as thumbnails. A turn where nothing needs you shows only its chips. With the setting off (the default), that turn shows nothing.
+
+**Routine runs.** With Show routine runs on, each firing shows as a line in the conversation.
+
+**Approval cards.** When the bot wants to email anyone but you, or delete something, a card appears under its reply. Edit the email if you like, then send or discard it. Nothing goes out until you click. See [How it works](architecture.md#approval-cards).
+
+## Pasted images
+
+Paste an image (a screenshot, or Copy image in a browser) into the message box and it waits there as a thumbnail; its ✕ removes it. Send with or without text, and the bot gets the images after your text.
+
+A paste that also carries plain text, such as spreadsheet cells, pastes the text instead. Your bubble shows the images; click one to open it full size. The box keeps them when you switch bots, but a reload drops them.
+
+## Quotes, quick replies and reactions
+
+Hover a message for its toolbar. Reply quotes the whole message. To quote part of one, select the text and click Add to chat, or press Ctrl+L.
+
+A quote lands in the message box as a chip at your caret, so you can alternate: quote, reply, quote, reply. Backspace or the chip's ✕ removes it, and the box keeps its chips when you switch bots. The bot gets the message in the same order, each quote as markdown `> ` lines with your text between them, separated by blank lines. Your bubble shows the quotes as grey blocks in place.
+
+The bar over selected text has three rows: quick replies (Yes, No, Explain), the quick emoji, then Add to chat. It opens below the selection when there's no room above. A quick reply or emoji works like Add to chat and also types that reply after the quote, so you can edit it before sending.
+
+On a bot reply, the smiley opens the quick emoji (👍 👎 ❤️ 😂 🎉 😮 unless you change them in Settings). Your reactions show as pills under the reply; click one to take it back. A reaction is a `cua-bot.reaction` entry in the bot's transcript (taking it back is another), so it survives a reload and shows in every open tab. It doesn't start a turn. The bot reads it on its next turn as `[The owner reacted 👍 to your message: "…"]`, or at its next step if it is working.
+
+## Computer pane
+
+The right column shows the paired Space's screen live, plus each click and keystroke of the most recent computer-use task. The frame turns amber while the bot is driving.
+
+All open panes share one media session: about 15 fps at the display's native resolution, roughly 100 KB/s on a quiet screen and more when it changes a lot, decoded with WebCodecs. A pane streams only while its tab is visible, unless you have control. The session closes when the last pane closes. If the stream is down, or the browser lacks WebCodecs, the pane stays black. The caption says Connecting… while it retries, or that the browser can't play the live screen.
+
+### Expanded screen and Take control
+
+Click the live screen (it shows an Expand badge) to fill the window with it. A bar under it shows what the bot is doing, with a Take control button. The Take control button in the pane's header opens the view already in control.
+
+While you have control, your mouse, wheel and keyboard drive the Mac, and the bot's on-screen steps wait until you click I'm done. A running computer task then carries on from where you left the screen. Closing the view with ✕ also hands the Mac back, as does closing every cua-bot tab. Escape goes to the Mac while you drive, so close with ✕.
+
+## Routines
+
+Lists every bot's routines with the bot, the schedule in words (hover for the cron spec), next run and last run. Add, edit, run now and delete from here, with a live preview of the next runs while you type a cron schedule.
+
+A new routine goes to the bot whose chat you had open unless you pick another; an edited routine stays with its bot. Everything saved here lands in that bot's `routines.json`. File rules are in [How it works](architecture.md#routines).
+
+## Memory
+
+The sidebar lists Every bot (the shared memory), then each bot's own memory with its fact count. Picking a bot opens its chat too.
+
+The open memory shows its lasting facts, then its dated ones, newest first. Each section ends in an add line, so where you type decides who sees the fact and its kind. Forget a fact with its ✕. The search box finds facts in every memory at once and labels each with whose it is.
+
+## Settings
+
+Settings has two tabs in its own sidebar.
+
+### Chat
+
+Saved in this browser's `localStorage` (`cua-bot.settings`), so each browser keeps its own.
+
+| Setting | Default | Effect |
+| --- | --- | --- |
+| Show messages between bots | off | See [Bots](#bots) |
+| Show tool steps | off | See [Chat](#chat) |
+| Show routine runs | off | See [Chat](#chat) |
+| Quick replies | Yes, No, Explain | One phrase per line |
+| Quick emoji | 👍 👎 ❤️ 😂 🎉 😮 | Typed or pasted in any spacing; anything that isn't an emoji is dropped when you leave the field. Clearing it hides the smiley. |
+
+### Connections
+
+Lists the computers the bot can reach ([src/connections.ts](../src/connections.ts)). Each visit and Check again runs a fresh check (`GET /api/connections`), which takes up to about 3 seconds.
+
+**This computer** comes first. The Harness, every bot and their routines live there. Its row shows the OS, user, process id, start time and database, plus any SSH alias that points at it.
+
+**SSH hosts** come next, one per host in your `~/.ssh/config`, resolved with `ssh -G`. Aliases that reach the same user, address and port share a row. A host shows Online when its SSH port accepts a TCP connection within 3 seconds. That says the machine is up, not that the login works. Online hosts sort first.
+
+**Cua Spaces** sit under the computer that provides them, with OS, phase, spacesd version and id:
+
+- a `direct:<address>:<port>` Space under the host with that address,
+- a `local:` Space under this computer,
+- a relay Space under the host its `host_name` names,
+- anything else, like cloud Spaces, under Other Spaces.
+
+The Bots' computer label marks the paired Space, the one `computer_use`, `space_bash` and the live screen use. The list is Cua's live one (`list_spaces`, through the same `cua mcp` session as the bots' `cua_*` tools). If Cua doesn't answer, the tab shows `~/.cua/spaces.json` without status and says why.
+
+The tab blurs users, SSH addresses, `direct:` Space ids and the database path, so a screenshot doesn't leak them. Click one (or focus it and press Enter) to reveal it until the next check.
+
+## Notifications
+
+Click Turn on notifications in the chat header once and allow them. From then on a browser notification pops up for every `send_message` (titled with the bot's name, first 500 characters of the message) and every approval card. It pops up even with every cua-bot tab closed, as long as the browser runs, and even while you look at that chat. Clicking one brings the app to the front.
+
+This is Web Push through the browser's push service (FCM for Chrome), so the bot needs internet access. Cua's own `notify_user` tool is turned off for the bots for now (`DISABLED` in [src/cua-mcp.ts](../src/cua-mcp.ts)).
