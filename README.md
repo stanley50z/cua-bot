@@ -4,7 +4,7 @@
 
 # cua-bot
 
-**A self-hostable Grok bot built on top of [Pi Durable](https://www.npmjs.com/package/@earendil-works/pi-durable) and [Cua Spaces](https://github.com/trycua/cua).**
+**A self-hostable Grok Bot alternative built on top of [Pi Durable](https://www.npmjs.com/package/@earendil-works/pi-durable) and [Cua Spaces](https://github.com/trycua/cua).**
 
 [Quick start](#quick-start) · [Web app](docs/web-app.md) · [How it works](docs/architecture.md) · [HTTP API](docs/http-api.md) · [Configuration](docs/configuration.md)
 
@@ -44,7 +44,7 @@ node --env-file-if-exists=.env src/preflight.ts
 python start.py
 ```
 
-Open **http://127.0.0.1:43142/** and say hello. Gmail and Calendar stay off until you connect Executor; see [Configuration](docs/configuration.md#gmail-and-calendar).
+`start.py` prints the web app's address when it's up. Open it and say hello. Gmail and Calendar stay off until you connect Executor; see [Configuration](docs/configuration.md#gmail-and-calendar).
 
 Stop it with `python stop.py`.
 
@@ -88,7 +88,3 @@ python say.py "Every weekday at 9:00, email me a short agenda."
 | [How it works](docs/architecture.md) | Bots, tools, machines, code mode, memory, routines, approvals, email |
 | [HTTP API](docs/http-api.md) | Every route the server exposes |
 | [Troubleshooting](docs/troubleshooting.md) | Log, crash, and data file locations |
-
-## Security
-
-The server listens on `127.0.0.1` only and has no login. Anyone who can reach that port can talk to the bot, so don't expose it.
