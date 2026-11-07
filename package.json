@@ -2,6 +2,7 @@
   "name": "cua-bot",
   "version": "0.1.0",
   "private": true,
+  "license": "MIT",
   "type": "module",
   "description": "Self-hosted personal agent: Pi Durable service, Cua Spaces computer use, Gmail and Calendar through Executor",
   "scripts": {

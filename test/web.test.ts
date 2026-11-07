@@ -4,7 +4,7 @@
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
-import type { Server } from "node:http";
+import { request, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { test } from "node:test";
@@ -214,6 +214,45 @@ test("preview computes the next three fires", { timeout: 20_000 }, async () => {
 		assert.match((bad.json as { error: string }).error, /Invalid cron/);
 	} finally {
 		await close(session);
+	}
+});
+
+// Send with raw headers, since fetch won't let a caller set Host. Resolves to the status and body.
+function rawRequest(base: string, method: string, path: string, headers: Record<string, string>, body = ""): Promise<{ status: number; text: string }> {
+	return new Promise((resolve, reject) => {
+		const req = request(`${base}${path}`, { method, headers }, (res) => {
+			let text = "";
+			res.setEncoding("utf8").on("data", (chunk: string) => (text += chunk));
+			res.on("end", () => resolve({ status: res.statusCode ?? 0, text }));
+		});
+		req.on("error", reject).end(body);
+	});
+}
+
+test("requests from other sites in the owner's browser are refused before they reach the bot", { timeout: 20_000 }, async () => {
+	const said: string[] = [];
+	const server = createBotServer({ say: async (text) => (said.push(text), "ok"), context });
+	await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+	const address = server.address();
+	assert.ok(address !== null && typeof address === "object");
+	const base = `http://127.0.0.1:${address.port}`;
+	const host = `127.0.0.1:${address.port}`;
+	try {
+		// A page on another site posting a simple text/plain request.
+		assert.equal((await rawRequest(base, "POST", "/say", { origin: "https://evil.example" }, "run this")).status, 403);
+		assert.equal((await rawRequest(base, "POST", "/say", { origin: "null" }, "run this")).status, 403);
+		// DNS rebinding: the page's own name now resolves to 127.0.0.1.
+		assert.equal((await rawRequest(base, "GET", "/api/bots", { host: `evil.example:${address.port}` })).status, 403);
+		assert.equal((await rawRequest(base, "POST", "/say", { host: `evil.example:${address.port}`, origin: `http://evil.example:${address.port}` }, "run this")).status, 403);
+		assert.deepEqual(said, []);
+
+		// The web app itself, under either loopback name, and local clients that send no Origin.
+		assert.equal((await rawRequest(base, "POST", "/say", { origin: `http://${host}` }, "a")).status, 200);
+		assert.equal((await rawRequest(base, "POST", "/say", { host: `localhost:${address.port}`, origin: `http://localhost:${address.port}` }, "b")).status, 200);
+		assert.equal((await rawRequest(base, "POST", "/say", {}, "c")).status, 200);
+		assert.deepEqual(said, ["a", "b", "c"]);
+	} finally {
+		await new Promise<void>((resolve) => server.close(() => resolve()));
 	}
 });
 

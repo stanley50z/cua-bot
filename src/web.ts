@@ -1,6 +1,7 @@
 // The bot's HTTP surface on 127.0.0.1: the web app at GET / with its service worker at /sw.js, its JSON
 // API under /api/ (the bot list and its edits, routines CRUD, each bot's chat history/send/react/stop and the owner's pasted images, a server-sent
-// event stream of one bot's live chat state, Web Push subscriptions, the Connections tab's check, and the Mac's live screen with the owner's control of it), screenshots under /shots/, and the original POST /say. Loopback only, no auth, same trust as /say always had.
+// event stream of one bot's live chat state, Web Push subscriptions, the Connections tab's check, and the Mac's live screen with the owner's control of it), screenshots under /shots/, and the original POST /say. Loopback only, no auth; isOwnRequest refuses
+// requests other sites make through the owner's browser.
 // Mutations go through the routines manager and the chat module, so every surface agrees.
 import { readFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
@@ -363,10 +364,25 @@ async function routeApprovals(req: IncomingMessage, res: ServerResponse, deps: B
 	throw new HttpError(404, "not found");
 }
 
+const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "[::1]"]);
+
+/**
+ * Whether a request came from the web app or a local client such as say.py, rather than from another site
+ * open in the owner's browser. Any page can send a simple POST to 127.0.0.1, and DNS rebinding can point a
+ * page's own name there, so a non-loopback Host or a foreign Origin is refused. Browsers set both headers,
+ * and pages cannot forge them.
+ */
+function isOwnRequest(req: IncomingMessage): boolean {
+	if (req.headers.host === undefined || !URL.canParse(`http://${req.headers.host}`)) return false;
+	const host = new URL(`http://${req.headers.host}`);
+	return LOOPBACK_HOSTS.has(host.hostname) && (req.headers.origin === undefined || req.headers.origin === host.origin);
+}
+
 /** Build the bot's HTTP server. The caller listens on 127.0.0.1 and owns shutdown. */
 export function createBotServer(deps: BotServerDeps): Server {
 	return createServer(async (req, res) => {
 		try {
+			if (!isOwnRequest(req)) throw new HttpError(403, "cross-site request refused");
 			await route(req, res, deps);
 		} catch (error) {
 			sendError(res, error);

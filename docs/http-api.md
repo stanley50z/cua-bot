@@ -4,6 +4,8 @@
 
 One server on `127.0.0.1:43142` (`CUABOT_PORT` changes the port), loopback only, no login. Routes live in [src/web.ts](../src/web.ts).
 
+Every route answers 403 when the `Host` header isn't `127.0.0.1`, `localhost` or `[::1]`, or when an `Origin` header names any other origin. This stops other sites open in your browser from calling the API. Local clients such as `say.py` and `curl` send no `Origin` and pass.
+
 ## Plain text
 
 | Route | Does |

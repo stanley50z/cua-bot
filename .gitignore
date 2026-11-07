@@ -5,7 +5,7 @@ routines.json
 routines.json.tmp
 docs/mocks/
 
-# Early design notes, kept locally only.
-docs/brainstorm-*.html
+# Design notes and agent handoffs, kept locally only.
+docs/brainstorm/
 models.json
 bots/

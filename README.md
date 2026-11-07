@@ -88,3 +88,7 @@ python say.py "Every weekday at 9:00, email me a short agenda."
 | [How it works](docs/architecture.md) | Bots, tools, machines, code mode, memory, routines, approvals, email |
 | [HTTP API](docs/http-api.md) | Every route the server exposes |
 | [Troubleshooting](docs/troubleshooting.md) | Log, crash, and data file locations |
+
+## License
+
+[MIT](LICENSE). cua-bot is an independent project. It is not affiliated with or endorsed by Grok, Pi, or Cua.
