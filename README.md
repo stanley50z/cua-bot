@@ -10,15 +10,15 @@
 
 <br>
 
-<img src="assets/screenshot.png" width="900" alt="The cua-bot web app: bots on the left, a chat where the bot booked a dinner and is waiting for approval to send an email, and the Mac's live screen with the steps it took">
+<img src="assets/screenshot.png" width="900" alt="The cua-bot web app: bots on the left, a chat where the bot booked a dinner and is waiting for approval to send an email, and the Space's live screen with the steps it took">
 
 </div>
 
-cua-bot runs on your PC as an always-on service for one owner. It drives a Mac through a Cua Space when a task needs a screen, reads your Gmail and Calendar through [Executor](https://github.com/UsefulSoftwareCo/executor), and messages you only when something needs you. Work survives restarts: a routine scheduled for 9:00 still fires at 9:00 if you rebooted at 8:59.
+cua-bot runs on your own computer as an always-on service for one owner. When a task needs a screen, it drives the computer in a Cua Space. It reads your Gmail and Calendar through [Executor](https://github.com/UsefulSoftwareCo/executor), and messages you only when something needs you. Work survives restarts: a routine scheduled for 9:00 still fires at 9:00 if you rebooted at 8:59.
 
 ## What it does
 
-- **Uses a real computer.** `computer_use` clicks and types on the paired Mac, and you watch it live in the browser. Click Take control to drive the Mac yourself; the bot waits until you hand it back.
+- **Uses a real computer.** `computer_use` clicks and types on the paired Space's computer, and you watch it live in the browser. Click Take control to drive it yourself; the bot waits until you hand it back.
 - **Runs several bots.** Each bot has its own chat, instructions (`agent.md`), routines and memory, and the bots can message each other.
 - **Runs routines.** Cron schedules (`30 7 * * 1-5`, `@daily`, `@every 30m`) stored as durable tasks, editable in the app or in `routines.json`.
 - **Remembers.** Plain markdown memory you can read and edit by hand, shared between bots or private to one.
@@ -50,7 +50,7 @@ Stop it with `python stop.py`.
 
 ## Usage
 
-**In the browser.** The web app has the bots, the chat, and the Mac's live screen side by side, plus Routines, Memory and Settings views. See the [web app guide](docs/web-app.md).
+**In the browser.** The web app has the bots, the chat, and the Space's live screen side by side, plus Routines, Memory and Settings views. See the [web app guide](docs/web-app.md).
 
 **From the command line.**
 
@@ -75,7 +75,7 @@ python say.py "Every weekday at 9:00, email me a short agenda."
 
 ## Try the durability demo
 
-1. `python say.py "Schedule a routine for one minute from now. Screenshot Notes on the Mac and email it to me."`
+1. `python say.py "Schedule a routine for one minute from now. Take a screenshot of the Space's screen and email it to me."`
 2. While it sleeps, run `python stop.py`, then `python start.py`.
 3. The draft still lands in Gmail on time, with the screenshot's path to attach.
 

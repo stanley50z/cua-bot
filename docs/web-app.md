@@ -4,7 +4,7 @@
 
 Open `http://127.0.0.1:43142/`. The page is served on loopback only and has no login, the same trust as `/say`.
 
-The layout is three columns: bots on the left, the chat in the middle, the Mac's screen on the right. A rail on the far left switches to Routines (clock icon), Memory (page icon) and Settings (gear).
+The layout is three columns: bots on the left, the chat in the middle, the Space's screen on the right. A rail on the far left switches to Routines (clock icon), Memory (page icon) and Settings (gear).
 
 ## Links and history
 
@@ -70,7 +70,7 @@ All open panes share one media session: about 15 fps at the display's native res
 
 Click the live screen (it shows an Expand badge) to fill the window with it. A bar under it shows what the bot is doing, with a Take control button. The Take control button in the pane's header opens the view already in control.
 
-While you have control, your mouse, wheel and keyboard drive the Mac, and the bot's on-screen steps wait until you click I'm done. A running computer task then carries on from where you left the screen. Closing the view with ✕ also hands the Mac back, as does closing every cua-bot tab. Escape goes to the Mac while you drive, so close with ✕.
+While you have control, your mouse, wheel and keyboard drive the Space's computer, and the bot's on-screen steps wait until you click I'm done. A running computer task then carries on from where you left the screen. Closing the view with ✕ also hands the screen back, as does closing every cua-bot tab. Escape goes to the Space while you drive, so close with ✕.
 
 ## Routines
 

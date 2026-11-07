@@ -7,7 +7,7 @@ flowchart LR
   browser[Web app] <--> server
   say[say.py] --> server
   server["HTTP server<br/>127.0.0.1:43142"] <--> harness["Pi Durable Harness<br/>data/cua-bot.sqlite"]
-  harness --> mac["Mac in a Cua Space<br/>computer_use, space_bash, live screen"]
+  harness --> space["Cua Space<br/>computer_use, space_bash, live screen"]
   harness --> ssh["SSH hosts<br/>read, write, edit, bash"]
   harness --> cua["cua mcp<br/>~156 cua_* tools"]
   harness --> executor["Executor Cloud<br/>Gmail, Calendar"]
@@ -23,7 +23,7 @@ Code: [src/bots.ts](../src/bots.ts).
 The owner can run several bots. Each has a name, its own chat, and its own folder.
 
 - **The main bot** (named `cua-bot` until you rename it) is the root conversation. `/say`, and the routines and approval cards from before multi-bot support, belong to it. It can't be deleted.
-- **Every other bot** is an ownerless conversation with the same tools, shared memory, accounts and Mac.
+- **Every other bot** is an ownerless conversation with the same tools, shared memory, accounts and Space.
 
 The bot list (names, conversation ids, avatars) lives in a session-wide Durable doc, `cua-bot.bots` in `data/cua-bot.sqlite`.
 
@@ -60,14 +60,14 @@ An avatar is a shape and a color, stored as ids (`avatar: {shape, color}`). The 
 - Each bot may send at most 20 messages per rolling hour, so two bots can't keep each other awake.
 - `create_bot` makes a new bot when the owner asks for one in chat.
 
-An approval card remembers which bot filed it, so it shows in that bot's chat and the outcome goes back to that bot. `computer_use` runs one task at a time across all bots, because they share the one Mac.
+An approval card remembers which bot filed it, so it shows in that bot's chat and the outcome goes back to that bot. `computer_use` runs one task at a time across all bots, because they share the one Space.
 
 ## Tools
 
 ### Computer use
 
-- **`computer_use`** runs in the foreground as a subagent on the bot's model, with every driver tool the paired Mac lists (59 on cua-driver as of 2026-11-01, including the typed `browser_*` tools, `run_steps` and `run_script`). On-screen work goes here, one task at a time. The main agent can also load any of those driver tools itself with `tool_search`.
-- **`space_bash`** runs a shell command on the paired Mac through the Space. The bot calls it directly for CLI tools, files and inspection; `computer_use` has it too.
+- **`computer_use`** runs in the foreground as a subagent on the bot's model, with every driver tool the paired Space lists (59 on cua-driver as of 2026-11-01, including the typed `browser_*` tools, `run_steps` and `run_script`). On-screen work goes here, one task at a time. The main agent can also load any of those driver tools itself with `tool_search`.
+- **`space_bash`** runs a shell command on the paired Space (`/bin/sh -c`, or `cmd.exe /C` on a Windows Space). The bot calls it directly for CLI tools, files and inspection; `computer_use` has it too.
 
 ### Coding tools on every machine
 
@@ -78,7 +78,7 @@ Pi Durable's `read`, `write`, `edit` and `bash` (Git Bash on Windows), plus `pow
 Each takes an optional `machine` argument:
 
 - **Without it**, the call acts on the computer cua-bot runs on, starting in the owner's home folder (`pcEnv` gives the call a `NodeExecutionEnv`).
-- **With it**, `machine` is an SSH destination, resolved by your own `ssh` and `~/.ssh/config` exactly as `ssh <machine>` would (a `Host` alias, or `user@host`). The call runs there through [`@earendil-works/pi-env`](https://www.npmjs.com/package/@earendil-works/pi-env), which deploys its small daemon over SSH on the first call. Paths start in that machine's home folder, and commands run in a login shell, so a Mac's Homebrew is on `PATH`.
+- **With it**, `machine` is an SSH destination, resolved by your own `ssh` and `~/.ssh/config` exactly as `ssh <machine>` would (a `Host` alias, or `user@host`). The call runs there through [`@earendil-works/pi-env`](https://www.npmjs.com/package/@earendil-works/pi-env), which deploys its small daemon over SSH on the first call. Paths start in that machine's home folder, and commands run in a login shell, so, for example, Homebrew is on `PATH` on a Mac.
 
 cua-bot stores no machine names. The prompt lists the `Host` aliases of your `~/.ssh/config` (patterns skipped, `Include` files not followed), re-read on every request, and the tool schemas are the same for everyone.
 
@@ -87,9 +87,9 @@ Safety and failure behavior:
 - A `machine` value that starts with `-` or has whitespace is refused, so it can never reach `ssh` as an option.
 - Host keys must already be in `~/.ssh/known_hosts` (connect once with `ssh <machine>`). pi-env checks strictly against that file and never writes to it.
 - Nothing connects at startup. A machine that is asleep fails only its own calls (an `ssh` connect timeout, about 40 s), and the next call tries again.
-- The bot can't drive the PC's apps; on-screen work stays on the Mac.
+- These tools have no screen. On-screen work goes through `computer_use` on the Space.
 
-One Pi Durable process on the PC owns the session; these tools only reach out to the other machines.
+One Pi Durable process on the computer cua-bot runs on owns the session; these tools only reach out to the other machines.
 
 ### Code mode
 

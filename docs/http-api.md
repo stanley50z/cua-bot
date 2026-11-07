@@ -23,7 +23,7 @@ Every `/api/chat*` route takes `?bot=<id>`, or a `bot` field in the POST body. W
 | `GET /api/chat/image?entry=<id>&index=<n>` | Serves back one of the owner's images. |
 | `POST /api/chat/react` | `{"entryId", "emoji", "on"}` turns the owner's reaction to a reply on or off. |
 | `POST /api/chat/stop` | Stops the current turn. |
-| `GET /api/chat/events` | Server-sent events: the live reply, running tools, new messages, the bot list whenever it changes, and a `control` event when control of the Mac changes. |
+| `GET /api/chat/events` | Server-sent events: the live reply, running tools, new messages, the bot list whenever it changes, and a `control` event when control of the Space's screen changes. |
 | `GET /api/chat/computer` | The computer pane: Space name, newest screenshot, steps of the latest computer-use run ([src/computer-view.ts](../src/computer-view.ts)). |
 
 `images` are the owner's pasted images as `[{"data": <base64>, "mimeType"}]`. pi-durable's Photon processor fits them to the model's limits.
@@ -56,9 +56,9 @@ It also says whether the bot is working.
 | Route | Does |
 | --- | --- |
 | `GET /shots/<name>.png` | Serves a computer-use screenshot. |
-| `GET /api/computer/live` | Streams the Mac's screen as H.264 ([src/live-screen.ts](../src/live-screen.ts)). |
-| `POST /api/computer/control` | `{"owner": true}` gives the owner control of the Mac; `{"owner": false}` hands it back ([src/screen-control.ts](../src/screen-control.ts)). |
-| `POST /api/computer/input` | `{"events"}` performs the owner's mouse and keyboard on the Mac over the live stream's media session, in cua-spacesd's `interactive_input` format. Only while the owner has control. |
+| `GET /api/computer/live` | Streams the Space's screen as H.264 ([src/live-screen.ts](../src/live-screen.ts)). |
+| `POST /api/computer/control` | `{"owner": true}` gives the owner control of the Space's screen; `{"owner": false}` hands it back ([src/screen-control.ts](../src/screen-control.ts)). |
+| `POST /api/computer/input` | `{"events"}` performs the owner's mouse and keyboard on the Space over the live stream's media session, in cua-spacesd's `interactive_input` format. Only while the owner has control. |
 
 ## Approvals
 
