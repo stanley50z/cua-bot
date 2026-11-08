@@ -27,7 +27,7 @@ function deps(overrides: Partial<ConnectionsDeps> = {}): ConnectionsDeps {
 			{ id: "cloud:box", name: "Cloud box" },
 		],
 		fallback: () => [],
-		pairedSpace: "direct:100.2.2.2:43141",
+		defaultSpace: "direct:100.2.2.2:43141",
 		now: () => 7,
 		...overrides,
 	};
@@ -39,7 +39,7 @@ test("machines merge by target, this computer keeps its aliases, and Spaces sit 
 	assert.equal("addresses" in snapshot.here, false);
 	assert.deepEqual(snapshot.here.spaces.map((s) => s.id), ["local:sandbox"]);
 	assert.deepEqual(
-		snapshot.machines.map((m) => [m.aliases, m.online, m.spaces.map((s) => [s.id, s.paired])]),
+		snapshot.machines.map((m) => [m.aliases, m.online, m.spaces.map((s) => [s.id, s.isDefault])]),
 		[
 			[["mac"], true, [["direct:100.2.2.2:43141", true]]],
 			[["razor", "overpricedrazor"], true, [["relay:abc", false]]],

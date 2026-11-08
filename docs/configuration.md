@@ -6,7 +6,7 @@
 
 - Node.js 22.19 or newer. The project is set up for Node 24.
 - pnpm.
-- A paired Cua Space, listed in `~/.cua/spaces.json`. With `CUA_SPACE_ID` blank, the bot uses the first space in that file.
+- At least one Cua Space, signed in with `cua auth login`. The bots see every Space your Cua account lists: ones you added (`~/.cua/spaces.json`) and computers the Cua Spaces app shares, such as the one cua-bot runs on. The default Space is `CUA_SPACE_ID`, or the first in `~/.cua/spaces.json` when that's blank.
 
 ## Models (`models.json`)
 
@@ -50,7 +50,7 @@ Copy `.env.example` to `.env`.
 | `XAI_API_KEY` | no | For `xai/<model>`, instead of `node src/login.ts`. |
 | `EXECUTOR_MCP_URL` | no | The URL on Executor's Connect card, e.g. `https://executor.sh/<org>/mcp`. |
 | `EXECUTOR_API_KEY` | no | A key from Executor's API keys page. |
-| `CUA_SPACE_ID` | no | The Space to pair. Defaults to the first in `~/.cua/spaces.json`. |
+| `CUA_SPACE_ID` | no | The default Space's id: the one `computer_use` and `space_bash` use when the bot names no Space, and the one the live screen shows. Defaults to the first in `~/.cua/spaces.json`. |
 | `CUA_MCP_COMMAND` | no | The `cua` CLI to run `cua mcp` with. Defaults to the Cua Spaces app's bundled `cua.exe` on Windows, else `cua` on PATH. |
 | `CUABOT_MODEL` | no | `"provider/model"`, overriding `default` in `models.json`. |
 | `CUABOT_PORT` | no | HTTP port. Defaults to `43142`. The server listens on `127.0.0.1` only. |
@@ -81,10 +81,12 @@ The coding tools reach any `Host` alias in your `~/.ssh/config`. cua-bot stores 
 
 `python start.py` starts the service in the background without opening a terminal window. In order, it:
 
-1. Refuses to start if `data/cua-bot.pid.json` points at a live process.
+1. Refuses to start if `data/cua-bot.pid.json` points at a live process that answers on the recorded port. A live pid with nothing on the port is taken as reused after a reboot, and the start goes on.
 2. Runs `pnpm update "@earendil-works/*"`. This moves the Pi packages to their newest release within `package.json`'s ranges, once that release is a day old (pnpm's minimum release age), and records it in the lockfile. Every other dependency stays pinned. It prints any version that changed; the full pnpm output goes to `data/logs/stdout.log`. If the update fails, for example offline, it says so and starts with the installed versions.
 3. Waits for the port to accept connections, then prints the `/say` URL and the web app URL.
 
 Every Pi package shares the same `^` range in `package.json` because each `pi-env` release requires the exact `pi-durable` of the same version. The update moves them together.
+
+It passes `CUABOT_PYTHON` (its own interpreter, or `pythonw.exe` beside it on Windows) to the service, which Settings > Startup uses for the sign-in entry. Run without a console, as at sign-in, `start.py` writes what it would print to `data/logs/stdout.log`.
 
 `python stop.py` signals only the pid in `data/cua-bot.pid.json`. It stops that process and its children, checks that the process exited and the port is free, then removes the pid file.

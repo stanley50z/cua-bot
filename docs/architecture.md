@@ -60,14 +60,24 @@ An avatar is a shape and a color, stored as ids (`avatar: {shape, color}`). The 
 - Each bot may send at most 20 messages per rolling hour, so two bots can't keep each other awake.
 - `create_bot` makes a new bot when the owner asks for one in chat.
 
-An approval card remembers which bot filed it, so it shows in that bot's chat and the outcome goes back to that bot. `computer_use` runs one task at a time across all bots, because they share the one Space.
+An approval card remembers which bot filed it, so it shows in that bot's chat and the outcome goes back to that bot. `computer_use` runs one task at a time on each Space across all bots, because bots on the same Space share its screen.
 
 ## Tools
 
 ### Computer use
 
-- **`computer_use`** runs in the foreground as a subagent on the bot's model, with every driver tool the paired Space lists (59 on cua-driver as of 2026-11-01, including the typed `browser_*` tools, `run_steps` and `run_script`). On-screen work goes here, one task at a time. The main agent can also load any of those driver tools itself with `tool_search`.
-- **`space_bash`** runs a shell command on the paired Space (`/bin/sh -c`, or `cmd.exe /C` on a Windows Space). The bot calls it directly for CLI tools, files and inspection; `computer_use` has it too.
+Code: [src/computer.ts](../src/computer.ts).
+
+The bots work on every Space your Cua account lists, the way `cua mcp`'s `list_spaces` shows them: Spaces you added, and computers the Cua Spaces app shares over the relay, such as the one cua-bot runs on. The SDK runtime signs in with your `cua auth login` session to open the relay ones. A relay Space on the same network still connects directly; the relay only finds it. The prompt lists each Space's name, system and id on every request, and marks the default (`CUA_SPACE_ID`, else the first in `~/.cua/spaces.json`).
+
+- **`computer_use`** runs in the foreground as a subagent on the bot's model, with every driver tool the chosen Space lists (60 on the Mac's cua-driver and 61 on Windows as of 2026-11-07, including the typed `browser_*` tools, `run_steps` and `run_script`). On-screen work goes here, one task at a time on each Space.
+- **`space_bash`** runs a shell command on a Space (`/bin/sh -c`, or `cmd.exe /C` on a Windows Space). The bot calls it directly for CLI tools, files and inspection; `computer_use` has it too.
+
+Both take `space`, a Space's name (any case) or its id. Without it they use the default; inside `computer_use`, `space_bash` uses the task's Space. A bot can switch Spaces between calls in one job.
+
+Each Space's driver tools sit in their own extension, `space:<id>`, installed by that Space's first `computer_use` call, because a Mac and a Windows PC both have a `click` with different schemas. Only that Space's child selects the extension. The main agent never gets driver tools: `tool_search` skips them and code mode can't call them. To call one driver tool directly, a bot uses `cua_call_tool` with the Space's id.
+
+The live screen and Take control stay on the default Space. Owner control pauses only that Space's driver calls.
 
 ### Coding tools on every machine
 

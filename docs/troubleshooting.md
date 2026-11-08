@@ -9,7 +9,7 @@ Start with `node --env-file-if-exists=.env src/preflight.ts` while the bot is st
 | Path | Contents |
 | --- | --- |
 | `data/logs/cua-bot.log` | Service log, one line per event. Lists the bots on start (`bots: ...`), web edits to them, and failed pushes as `push:` lines. |
-| `data/logs/stdout.log` | stdout and stderr of the process `start.py` launched, including the full `pnpm update` output. |
+| `data/logs/stdout.log` | stdout and stderr of the process `start.py` launched, including the full `pnpm update` output. A `start.py` run at sign-in logs here too, under a `--- start.py at` line. |
 | `data/crash/` | Crash reports. Each file is named by the time and holds the stack trace. |
 
 ## Data files
@@ -36,4 +36,6 @@ Start with `node --env-file-if-exists=.env src/preflight.ts` while the bot is st
 
 **The computer pane stays black.** If the caption says Connecting…, the live stream is down and the pane retries with backoff. Otherwise the browser lacks WebCodecs; use a current Chrome or Edge.
 
-**`start.py` refuses to start.** `data/cua-bot.pid.json` points at a live process. Run `python stop.py` first.
+**`start.py` refuses to start.** `data/cua-bot.pid.json` points at a live process that answers on the bot's port. Run `python stop.py` first.
+
+**The bot didn't come back after a restart.** Turn on Settings > Startup > Start when I sign in. It starts the bot when you sign in, not at boot, so a machine that sits at the sign-in screen stays off. If it's on and the bot still didn't start, look for the `--- start.py at` line in `data/logs/stdout.log`.

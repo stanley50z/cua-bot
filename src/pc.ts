@@ -6,7 +6,6 @@ import { CodemodeSandbox } from "@earendil-works/pi-codemode";
 import { createCodemodeExtension } from "@earendil-works/pi-durable/codemode";
 import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
 import { defineExtension, type EnvTarget, section } from "@earendil-works/pi-durable";
-import { pairedSpaceText } from "./computer.ts";
 
 /** Every tool call that names no machine works on this PC, starting in the owner's home folder. */
 export const pcEnv = ({ cwd }: Pick<EnvTarget, "cwd">) => new NodeExecutionEnv({ cwd: cwd ?? homedir() });
@@ -17,7 +16,7 @@ const pcSection = defineExtension({
 		section(
 			"pc",
 			() =>
-				`Without \`machine\`, read, write, edit, and bash${process.platform === "win32" ? " (Git Bash), and powershell," : ""} act on the owner's PC, where cua-bot runs; paths start in ${homedir()}. space_bash and computer_use act on ${pairedSpaceText()}. Use codemode for many tool calls, loops, or work across machines.`,
+				`Without \`machine\`, read, write, edit, and bash${process.platform === "win32" ? " (Git Bash), and powershell," : ""} act on the owner's PC, where cua-bot runs; paths start in ${homedir()}. space_bash and computer_use act on a Cua Space instead. Use codemode for many tool calls, loops, or work across machines.`,
 			{ tag: false },
 		),
 	],

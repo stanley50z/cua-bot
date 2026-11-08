@@ -1,4 +1,4 @@
-// The computer pane's live view of the paired Mac. src/main.ts builds one with createLiveScreen(openLiveStream)
+// The computer pane's live view of the default Space. src/main.ts builds one with createLiveScreen(openLiveStream)
 // and src/web.ts streams it to each open pane at GET /api/computer/live. Every pane shares one H.264 media
 // session: the first viewer opens it, the last one to leave closes it, and a viewer that joins late, or falls
 // behind, skips frames until the next keyframe so its decoder never sees a broken GOP. The same session carries
@@ -35,10 +35,10 @@ export type InputEvent =
 
 export type InputModifier = "command" | "shift" | "option" | "control";
 
-/** What createLiveScreen needs from the Mac: frames into `sink` until `close()` or `sink.closed`. */
+/** What createLiveScreen needs from the Space: frames into `sink` until `close()` or `sink.closed`. */
 export type OpenLiveStream = (sink: { frame(frame: LiveFrame): void; closed(reason: string): void }) => Promise<{
 	requestKeyframe(): void;
-	/** Performs the events on the Mac, in order. */
+	/** Performs the events on the Space, in order. */
 	input(events: InputEvent[]): void;
 	close(): Promise<void>;
 }>;

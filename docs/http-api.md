@@ -72,7 +72,7 @@ Code: [src/approvals.ts](../src/approvals.ts).
 | `POST /api/approvals/<id>/approve` | Runs the call. Optional JSON `{to, subject, body}` edits an email first. |
 | `POST /api/approvals/<id>/discard` | Drops it. |
 
-## Memory, connections, push
+## Memory, connections, push, startup
 
 | Route | Does |
 | --- | --- |
@@ -81,3 +81,5 @@ Code: [src/approvals.ts](../src/approvals.ts).
 | `GET /api/push` | The Web Push public key ([src/push.ts](../src/push.ts)). |
 | `POST /api/push` | Saves a browser's `PushSubscription`. |
 | `GET /sw.js` | The service worker that shows the pushes ([src/sw.js](../src/sw.js)). |
+| `GET /api/autostart` | `{supported, enabled, where}`: whether `start.py` runs when the owner signs in, and where that is saved ([src/autostart.ts](../src/autostart.ts)). |
+| `PUT /api/autostart` | `{"enabled": true}` or `false` adds or removes the sign-in entry and returns the new state. |

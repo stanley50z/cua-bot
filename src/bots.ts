@@ -1,5 +1,5 @@
 // The owner's bots. The main bot is the root conversation; every other bot is an ownerless conversation
-// of its own. All of them run the same tools, shared memory, and Mac; each has a name, its own chat, and
+// of its own. All of them run the same tools, shared memory, and Cua Spaces; each has a name, its own chat, and
 // its own folder bots/<name>/ holding agent.md (its standing instructions, re-read every turn, so hand
 // edits apply at once), routines.json (src/routines.ts), and memory/ (src/memory.ts). The folder follows
 // a rename and goes with a delete. Bots message each other with message_bot: the text lands in the other bot's chat as
@@ -246,7 +246,7 @@ export function botSection(bots: Bot[], self: number): string | undefined {
 	if (me === undefined) return undefined;
 	const others = bots.filter((bot) => bot.id !== self);
 	const lines = [
-		`Your name is ${me.name}. You are one of the owner's bots; each has its own chat with the owner, and all of you share the shared memory, the owner's accounts, and the paired Cua Space.`,
+		`Your name is ${me.name}. You are one of the owner's bots; each has its own chat with the owner, and all of you share the shared memory, the owner's accounts, and the Cua Spaces.`,
 	];
 	if (me.instructions !== "") lines.push(`The owner's standing instructions for you, from your agent file ${me.file}:\n${me.instructions}`);
 	lines.push(

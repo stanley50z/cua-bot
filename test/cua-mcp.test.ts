@@ -21,7 +21,7 @@ const TOOLS = [
 
 test("every Cua tool but notify_user is deferred as cua_<name>, and tool_search loads it for the bot", { timeout: 20_000 }, async () => {
 	const fake = fakeExecutor(({ args }) => textResult(`ran ${String(args.command)}`), TOOLS);
-	const extension = await createCuaExtension(fake.connect, { pairedSpace: "direct:mac" });
+	const extension = await createCuaExtension(fake.connect, { defaultSpace: "direct:mac" });
 	assert.deepEqual(
 		(extension.tools ?? []).map((tool) => [tool.name, tool.deferred]),
 		[["cua_space_bash", true], ["cua_upload", true]],

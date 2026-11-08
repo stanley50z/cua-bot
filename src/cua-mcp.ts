@@ -36,9 +36,9 @@ export const connectCua = (command: string) => async () => {
  */
 export async function createCuaExtension(
 	connect: () => Promise<McpClient>,
-	options: { pairedSpace?: string; call?: Executor } = {},
+	options: { defaultSpace?: string; call?: Executor } = {},
 ): Promise<Extension> {
-	const { pairedSpace, call = createExecutor(connect) } = options;
+	const { defaultSpace, call = createExecutor(connect) } = options;
 	const first = await connect();
 	const listed = (await first.listTools()).filter((tool) => !DISABLED.has(tool.name));
 	const instructions = first.instructions ?? "";
@@ -67,7 +67,7 @@ export async function createCuaExtension(
 			section("cua", () =>
 				[
 					`Cua Spaces: every tool of Cua's MCP server is yours as ${PREFIX}<name>. They are loaded on demand: call tool_search with what you need (e.g. "upload a file to a space", "start a coding agent in a space") and the matches are offered from then on.`,
-					pairedSpace === undefined ? "" : `The paired Space is ${pairedSpace}; pass that id where a tool asks for a space.`,
+					defaultSpace === undefined ? "" : `Where a tool asks for a space, pass the id of the Space the work is on; the default Space is ${defaultSpace}.`,
 					`Available: ${listed.map((tool) => tool.name).join(", ")}.`,
 					instructions,
 				]

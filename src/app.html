@@ -8,7 +8,7 @@
  The cua-bot web app (Workbench layout), served by src/web.ts at GET /. One self-contained document:
  inline CSS and JS, no dependencies, works offline. Talks to /api/bots (the bot list and its edits),
  /api/chat?bot=<id> (one bot's history, send, react, stop),
- /api/chat/events (server-sent live state), /api/chat/computer, /api/computer/control, /api/push, /api/routines, /api/connections,
+ /api/chat/events (server-sent live state), /api/chat/computer, /api/computer/control, /api/push, /api/routines, /api/connections, /api/autostart,
  and /shots/. Registers /sw.js for Web Push once the owner turns notifications on.
  Every server string is rendered with textContent or built DOM nodes, never parsed as HTML.
 -->
@@ -354,7 +354,7 @@ dialog .row .btn.danger { margin-right: auto; }
 .space .head { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 8px; min-width: 0; }
 .space .about { grid-column: 2 / -1; color: var(--muted); font-size: 12.5px; }
 .space .id { font-size: 12px; color: var(--muted); overflow-wrap: anywhere; text-align: right; }
-.space .paired { font: 600 11.5px "Bahnschrift", sans-serif; letter-spacing: .01em; padding: 1px 7px; border-radius: 5px; background: var(--me); color: var(--accent); }
+.space .default { font: 600 11.5px "Bahnschrift", sans-serif; letter-spacing: .01em; padding: 1px 7px; border-radius: 5px; background: var(--me); color: var(--accent); }
 
 dialog { border: 1px solid var(--line); border-radius: 12px; padding: 22px 24px; width: min(560px, 92vw); color: var(--ink); box-shadow: 0 18px 50px rgba(27,33,41,.22); }
 dialog::backdrop { background: rgba(27,33,41,.35); }
@@ -415,6 +415,7 @@ dialog .row { display: flex; gap: 8px; justify-content: flex-end; margin-top: 18
  <symbol id="i-eye" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="3"/></symbol>
  <symbol id="i-pointer" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M6 3.5l12.5 7.2-5.6 1.4 3.3 5.9-2.6 1.5-3.3-5.9-4.3 3.9z"/></symbol>
  <symbol id="i-screen" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4.5" width="18" height="12" rx="1.5"/><path d="M9 20h6M12 16.5V20"/></symbol>
+ <symbol id="i-power" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 3.5v8"/><path d="M7.2 6.4a7.5 7.5 0 1 0 9.6 0"/></symbol>
  <symbol id="i-edit"viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13 7l4 4"/></symbol>
 </svg>
 
@@ -474,6 +475,7 @@ dialog .row { display: flex; gap: 8px; justify-content: flex-end; margin-top: 18
     <ul id="settings-tabs">
      <li><button type="button" class="navrow" data-tab="chat" aria-current="page"><svg aria-hidden="true"><use href="#i-chat"/></svg>Chat</button></li>
      <li><button type="button" class="navrow" data-tab="connections" aria-current="false"><svg aria-hidden="true"><use href="#i-screen"/></svg>Connections</button></li>
+     <li><button type="button" class="navrow" data-tab="startup" aria-current="false"><svg aria-hidden="true"><use href="#i-power"/></svg>Startup</button></li>
     </ul>
    </nav>
    <div class="pane" id="tab-chat">
@@ -490,6 +492,13 @@ dialog .row { display: flex; gap: 8px; justify-content: flex-end; margin-top: 18
     <div class="bar"><h1>Connections</h1><span class="aside" id="conn-checked"></span><button type="button" class="btn" id="conn-refresh">Check again</button></div>
     <div class="banner" id="conn-error" role="alert" hidden></div>
     <div class="conns" id="connections" aria-live="polite"></div>
+   </div>
+   <div class="pane" id="tab-startup" hidden>
+    <div class="bar"><h1>Startup</h1><span class="aside">Saved on this computer.</span></div>
+    <div class="banner" id="startup-error" role="alert" hidden></div>
+    <div class="settings">
+     <label class="setting"><span><b>Start when I sign in</b><small id="autostart-hint">Runs start.py each time you sign in to this computer, so a restart doesn't leave the bots off until someone starts them.</small></span><input type="checkbox" id="set-autostart" disabled></label>
+    </div>
    </div>
   </section>
  </main>
@@ -664,7 +673,7 @@ function markdown(text) {
 // `bot` is the id of the bot whose chat is open; `bots` is the list from /api/bots. `picking` is the reply whose
 // reaction picker is open; `reacting` holds reactions sent but not yet back as items, by "<reply id>:<emoji>".
 const state = { bot: null, bots: [], items: [], ids: new Set(), before: null, live: { busy: false, partial: "", tools: [] }, queued: [], open: new Set(), computer: { steps: [] }, approvals: [], picking: null, reacting: new Map(), attachments: [] };
-// The expanded live screen (see "expanded live screen" below): whether the owner has control of the Mac, the
+// The expanded live screen (see "expanded live screen" below): whether the owner has control of the Space, the
 // keys they hold down there, and their input on its way.
 const view = { owner: false, held: new Map(), queue: [], sending: null, lastMove: 0 };
 // The owner's display choices, kept in this browser. `botTalk` shows the messages bots send each other, `tools` the
@@ -1547,7 +1556,8 @@ function renderComputer() {
   captionScreen();
   const list = $("steps");
   list.textContent = "";
-  $("steps-h").textContent = c.steps.length > 0 ? "Steps of the last computer task" : "Steps";
+  $("steps-h").textContent = c.steps.length === 0 ? "Steps"
+    : c.taskSpace && c.taskSpace !== c.space ? `Steps of the last computer task, on ${c.taskSpace}` : "Steps of the last computer task";
   if (c.steps.length === 0) list.append(el("li", "none", "The bot's clicks and keystrokes appear here while it works."));
   c.steps.forEach((step, index) => {
     const row = el("li", step.status);
@@ -1567,7 +1577,7 @@ function captionScreen() {
 }
 
 /* ---------- live screen ---------- */
-// GET /api/computer/live (src/live-screen.ts) streams the Mac's screen as H.264 access units, each a
+// GET /api/computer/live (src/live-screen.ts) streams the default Space's screen as H.264 access units, each a
 // 1-byte flag (1 = keyframe), a 4-byte big-endian length, then Annex-B bytes. WebCodecs decodes them onto
 // the pane's canvas. The pane streams only while this tab is visible, and reconnects with backoff after a
 // failure. Without WebCodecs, or while the stream is down, the pane stays black.
@@ -1654,7 +1664,7 @@ document.addEventListener("visibilitychange", () => {
 /* ---------- expanded live screen ---------- */
 // Clicking the pane's live screen moves its canvas into a full-window view. There the owner can take control
 // (POST /api/computer/control): the bots' on-screen steps wait while the owner's mouse and keyboard reach the
-// Mac over the live session (POST /api/computer/input). "I'm done", or closing the view, hands it back.
+// Space over the live session (POST /api/computer/input). "I'm done", or closing the view, hands it back.
 // Keys map as in cua-spacesd's own viewer: text comes from a focused, hidden textarea, so keyboard layouts,
 // dead keys and IMEs work, and other keys and shortcuts go as key events named after the physical key.
 const NAMED_KEYS = new Set(["Enter", "Tab", "Backspace", "Delete", "Escape", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight",
@@ -1670,7 +1680,7 @@ function openScreenView() {
   $("screen-view").showModal();
 }
 
-// Takes control or hands it back. Keys still held go up first, while the Mac still takes the owner's input.
+// Takes control or hands it back. Keys still held go up first, while the Space still takes the owner's input.
 async function setControl(owner) {
   $("view-control").disabled = true;
   if (!owner) { releaseKeys(); await view.sending; }
@@ -1738,7 +1748,7 @@ const isPadding = (target) => target === $("screen-view") || target === $("stage
 let pressedPadding = false;
 $("screen-view").addEventListener("pointerdown", (event) => { pressedPadding = isPadding(event.target); });
 $("screen-view").addEventListener("click", (event) => { if (pressedPadding && isPadding(event.target)) $("screen-view").close(); });
-// Escape belongs to the Mac while the owner drives; the keydown handler below stops it closing the view.
+// Escape belongs to the Space while the owner drives; the keydown handler below stops it closing the view.
 $("screen-view").addEventListener("cancel", (event) => { if (view.owner) event.preventDefault(); });
 $("screen-view").addEventListener("close", () => {
   if (view.owner) setControl(false);
@@ -2222,9 +2232,9 @@ $("notify").addEventListener("click", async () => {
 
 /* ---------- views and the URL ---------- */
 // The URL's hash keeps the owner's place, so a reload, Back, or a copied link lands there again: `view` (routines,
-// memory, settings; the chat when absent), `tab` (Settings' connections; its chat tab when absent), and `bot` (the open
+// memory, settings; the chat when absent), `tab` (Settings' connections or startup; its chat tab when absent), and `bot` (the open
 // bot; the main bot when absent). #bot=<id> links from before views had URLs still open that bot's chat.
-const VIEWS = ["chat", "routines", "memory", "settings"], TABS = ["chat", "connections"];
+const VIEWS = ["chat", "routines", "memory", "settings"], TABS = ["chat", "connections", "startup"];
 let place = { view: "chat", tab: "chat" };
 
 function readPlace() {
@@ -2257,6 +2267,7 @@ function loadView() {
   if (place.view === "routines") loadRoutines();
   else if (place.view === "memory") loadMemory();
   else if (place.view === "settings" && place.tab === "connections") loadConnections();
+  else if (place.view === "settings" && place.tab === "startup") loadAutostart();
   else if (place.view === "chat") focusInput();
 }
 
@@ -2304,6 +2315,29 @@ for (const { input, key, parse, join } of quickFields) {
   input.addEventListener("change", () => { input.value = settings[key].join(join); });
 }
 
+/* ---------- startup ---------- */
+// Start at sign-in lives on the bot's computer (src/autostart.ts), not in this browser, so the toggle reads and
+// writes /api/autostart and shows what the computer says.
+function showAutostart({ supported, enabled, where }) {
+  const input = $("set-autostart");
+  input.checked = enabled;
+  input.disabled = !supported;
+  $("autostart-hint").textContent = supported
+    ? `Runs start.py each time you sign in to this computer, so a restart doesn't leave the bots off until someone starts them. Saved as ${where}.`
+    : "This computer's OS has no sign-in entry cua-bot can add.";
+}
+function showStartupError(message) { $("startup-error").textContent = message; $("startup-error").hidden = !message; }
+async function loadAutostart() {
+  try { showAutostart(await request("GET", "/api/autostart")); showStartupError(""); }
+  catch (error) { showStartupError("Could not read the startup setting: " + error.message); }
+}
+$("set-autostart").addEventListener("change", async () => {
+  const input = $("set-autostart"), wanted = input.checked;
+  input.disabled = true;
+  try { showAutostart(await request("PUT", "/api/autostart", { enabled: wanted })); showStartupError(""); }
+  catch (error) { input.checked = !wanted; input.disabled = false; showStartupError("Could not change it: " + error.message); }
+});
+
 /* ---------- connections ---------- */
 function showConnError(message) { $("conn-error").textContent = message; $("conn-error").hidden = !message; }
 const capital = (text) => text.charAt(0).toUpperCase() + text.slice(1);
@@ -2327,10 +2361,10 @@ function spaceList(spaces) {
   for (const space of spaces) {
     const row = el("li", "space"), head = el("span", "head");
     head.append(el("b", "", space.name || space.id));
-    if (space.paired) {
-      const paired = el("span", "paired", "Bots' computer");
-      paired.title = "The paired Space: computer_use, space_bash, and the live screen use it";
-      head.append(paired);
+    if (space.isDefault) {
+      const tag = el("span", "default", "Default");
+      tag.title = "The bots' default Space: computer_use and space_bash use it when the bot names no Space, and the live screen shows it";
+      head.append(tag);
     }
     // A `direct:<host>:<port>` id carries the machine's address.
     let id = el("code", "id", space.id);

@@ -20,6 +20,13 @@ LISTEN_TIMEOUT_S = 10.0
 
 
 def configure_stdio() -> None:
+    # Under pythonw, as at sign-in, there is no console, so what start.py prints goes to the stdout log instead.
+    if sys.stdout is None or sys.stderr is None:
+        LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        log = LOG_PATH.open("a", encoding="utf-8")
+        sys.stdout = sys.stdout or log
+        sys.stderr = sys.stderr or log
+        print(f"--- start.py at {time.strftime('%Y-%m-%d %H:%M:%S')}")
     for stream in (sys.stdout, sys.stderr):
         reconfigure = getattr(stream, "reconfigure", None)
         if reconfigure is None:
@@ -108,7 +115,19 @@ def child_environment(dotenv: dict[str, str]) -> tuple[dict[str, str], int]:
     else:
         port = parse_port(port_raw.strip())
     env["CUABOT_PORT"] = str(port)
+    env["CUABOT_PYTHON"] = background_python()
     return env, port
+
+
+# The interpreter Settings > Startup registers to run start.py at sign-in: pythonw beside this one on Windows, so
+# signing in opens no console window.
+def background_python() -> str:
+    executable = Path(sys.executable)
+    if os.name == "nt":
+        windowless = executable.with_name("pythonw.exe")
+        if windowless.is_file():
+            return str(windowless)
+    return str(executable)
 
 
 def read_pid_record() -> dict | None:
@@ -214,8 +233,9 @@ def main() -> int:
         if isinstance(existing["pid"], bool):
             print(f"{PID_PATH} has a bad pid; remove it before starting", file=sys.stderr)
             return 1
-        if process_alive(existing_pid):
-            port = existing.get("port", DEFAULT_PORT)
+        # After a reboot the recorded pid can belong to an unrelated process, so a running bot must also answer on its port.
+        port = existing.get("port", DEFAULT_PORT)
+        if process_alive(existing_pid) and port_accepts(port):
             print(
                 f"cua-bot is already running (pid {existing_pid}) at http://127.0.0.1:{port}/say",
                 file=sys.stderr,

@@ -1,4 +1,4 @@
-// Who drives the paired Space's screen: the bots, or the owner. The web app's expanded live view takes control
+// Who drives the default Space's screen: the bots, or the owner. The web app's expanded live view takes control
 // (POST /api/computer/control) and hands it back with "I'm done"; src/web.ts also hands it back when the last
 // live viewer leaves. While the owner has it, every on-screen step of computer_use (src/computer.ts) waits in
 // botTurn(), so a running task pauses where it is and resumes on the owner's screen as they left it.

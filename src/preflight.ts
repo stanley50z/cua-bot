@@ -7,7 +7,7 @@ import { createServer } from "node:net";
 import { join } from "node:path";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { AssistantEntry, createRegistry, Harness, MemoryStorage, type ModelRef } from "@earendil-works/pi-durable";
-import { listDriverToolNames, spaceLabel } from "./computer.ts";
+import { defaultSpaceLabel, listDriverToolNames } from "./computer.ts";
 import { connectExecutor } from "./executor.ts";
 import { botModel, createBotModels } from "./models.ts";
 import { CREDENTIAL_FILE } from "./xai-auth.ts";
@@ -184,9 +184,10 @@ function unanswered(reason: string, detail: unknown): string {
 	return `unanswered (${reason}) ${clip(scrub(extra))}`;
 }
 
-// Lists the paired Space's driver tools the same way the computer extension does. Read-only: no clicks or typing.
+// Lists the default Space's driver tools the same way the computer extension does. Read-only: no clicks or typing.
 async function checkSpace(): Promise<Check> {
-	const fix = `Fix: open the Cua Spaces app and check that ${spaceLabel() ?? "the paired Space"} is online`;
+	const label = await deadline(SPACE_TIMEOUT_MS, defaultSpaceLabel(), "space").catch(() => undefined);
+	const fix = `Fix: open the Cua Spaces app and check that ${label ?? "the default Space"} is online`;
 	try {
 		const names = await deadline(SPACE_TIMEOUT_MS, listDriverToolNames(), "space");
 		const missing = ["get_desktop_state", "click"].filter((name) => !names.includes(name));

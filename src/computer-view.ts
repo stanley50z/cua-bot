@@ -1,5 +1,5 @@
-// What the web app's computer pane shows: the paired Space's name, the newest screenshot, and the
-// driver steps of the bot's most recent computer_use run. src/bots.ts builds one per bot with
+// What the web app's computer pane shows: the default Space's name, the newest screenshot, and the
+// driver steps of the bot's most recent computer_use run, with the Space it ran on. src/bots.ts builds one per bot with
 // createComputerView() and hands it to createChat(), which pushes fresh snapshots while a computer_use
 // call is running. computer_use runs its driver calls in a child conversation of the bot's (src/computer.ts),
 // so the newest conversation the bot owns is its latest run.
@@ -16,13 +16,17 @@ import {
 	type Storage,
 	ToolResultEntry,
 } from "@earendil-works/pi-durable";
+import { taskSpaceName } from "./computer.ts";
 
 const MAX_STEPS = 40;
 const DETAIL_LIMIT = 80;
 
 export type ComputerStep = { callId: string; name: string; detail: string; at: number; status: "running" | "done" | "error" };
 export type ComputerSnapshot = {
+	/** The default Space, which the live screen shows. */
 	space?: string;
+	/** The Space the steps ran on. */
+	taskSpace?: string;
 	shot?: { name: string; at: number };
 	steps: ComputerStep[];
 };
@@ -106,8 +110,10 @@ export function createComputerView(deps: {
 				childId = page.items[0]?.id;
 			}
 			const child = childId === undefined ? undefined : await harness.conversation(childId, context);
+			const taskSpace = childId === undefined ? undefined : await taskSpaceName(harness, childId, context);
 			return {
 				...(deps.space === undefined ? {} : { space: deps.space }),
+				...(taskSpace === undefined ? {} : { taskSpace }),
 				...(await newestShot(shotsDir).then((shot) => (shot === undefined ? {} : { shot }))),
 				steps: child === undefined ? [] : await stepsOf(child, context),
 			};

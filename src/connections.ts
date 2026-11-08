@@ -7,7 +7,7 @@ import type { Executor } from "./executor.ts";
 
 /** A Cua Space as listed by `cua mcp`'s list_spaces, or by ~/.cua/spaces.json when that can't answer. */
 export type Space = { id: string; name?: string; os?: string; phase?: string; version?: string; hostName?: string };
-export type SpaceView = Space & { paired: boolean };
+export type SpaceView = Space & { isDefault: boolean };
 
 /** The computer cua-bot runs on. Its addresses tell which SSH hosts and Spaces are this computer. */
 export type Here = { name: string; os: string; user: string; addresses: string[]; pid: number; startedAt: number; database: string };
@@ -35,7 +35,8 @@ export type ConnectionsDeps = {
 	/** The live list; it may throw, and then `fallback` is shown. */
 	spaces: () => Promise<Space[]>;
 	fallback: () => Space[];
-	pairedSpace?: string;
+	/** The bots' default Space's id. */
+	defaultSpace?: string;
 	now?: () => number;
 };
 
@@ -135,7 +136,7 @@ export function createConnections(deps: ConnectionsDeps) {
 		const otherSpaces: SpaceView[] = [];
 		const machines: Machine[] = remote.map((group, index) => ({ ...group, online: online[index]!, spaces: [] }));
 		for (const space of spaces) {
-			const view = { ...space, paired: space.id === deps.pairedSpace };
+			const view = { ...space, isDefault: space.id === deps.defaultSpace };
 			const host = directHost(space.id);
 			const named = space.hostName?.toLowerCase();
 			// A local Space runs beside the cua CLI, on this computer; a relay Space names the machine that provides it.

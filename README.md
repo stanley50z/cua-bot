@@ -18,7 +18,7 @@ cua-bot runs on your own computer as an always-on service for one owner. When a 
 
 ## What it does
 
-- **Uses a real computer.** `computer_use` clicks and types on the paired Space's computer, and you watch it live in the browser. Click Take control to drive it yourself; the bot waits until you hand it back.
+- **Uses real computers.** `computer_use` clicks and types on any of your Cua Spaces, picked by name, and you watch the default one live in the browser. Click Take control to drive it yourself; the bot waits until you hand it back.
 - **Runs several bots.** Each bot has its own chat, instructions (`agent.md`), routines and memory, and the bots can message each other.
 - **Runs routines.** Cron schedules (`30 7 * * 1-5`, `@daily`, `@every 30m`) stored as durable tasks, editable in the app or in `routines.json`.
 - **Remembers.** Plain markdown memory you can read and edit by hand, shared between bots or private to one.
@@ -29,7 +29,7 @@ cua-bot runs on your own computer as an always-on service for one owner. When a 
 
 ## Quick start
 
-You need Node.js 22.19+ (the project targets Node 24), pnpm, Python 3, and a paired [Cua Space](https://github.com/trycua/cua).
+You need Node.js 22.19+ (the project targets Node 24), pnpm, Python 3, and at least one [Cua Space](https://github.com/trycua/cua).
 
 ```sh
 pnpm install

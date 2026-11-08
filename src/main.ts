@@ -11,13 +11,14 @@ import { createNodePhotonImages } from "@earendil-works/pi-durable/images/node";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { botMemories, createBots, createBotsExtension } from "./bots.ts";
 import { toChatItem } from "./chat.ts";
-import { createComputerExtension, openLiveStream, pairedSpaceText, registrySpaces, screenControl, spaceId, spaceLabel } from "./computer.ts";
+import { createComputerExtension, defaultSpaceId, defaultSpaceLabel, openLiveStream, registrySpaces, screenControl, spacesText } from "./computer.ts";
 import { createConnections, listCuaSpaces, probeTcp } from "./connections.ts";
 import { createLiveScreen } from "./live-screen.ts";
 import { createBotToolSearchExtension } from "./tool-search.ts";
 import { connectCua, createCuaExtension, defaultCuaCommand } from "./cua-mcp.ts";
 import { createComputerView } from "./computer-view.ts";
 import { type Approvals, createApprovals, describeApproval } from "./approvals.ts";
+import { createAutostart } from "./autostart.ts";
 import { connectExecutor, createExecutor, createExecutorExtension } from "./executor.ts";
 import { DATA_DIR, log } from "./log.ts";
 import { createMachines, ownerHosts, resolveSsh } from "./machines.ts";
@@ -54,12 +55,12 @@ registry.install(
 		sections: [
 			section(
 				"preamble",
-				() =>
+				async () =>
 					[
 						"You are a bot in cua-bot, a self-hosted personal agent that runs 24/7 for one owner.",
 						`The owner's email is ${process.env.OWNER_EMAIL || "(unset)"}. Mail to the owner goes through Gmail in Executor like any other mail.`,
 						"The owner sees only what you send with send_message; your own text is private notes. Answer the owner's messages with send_message, and send it whenever something needs them, even mid-task; each message pops up in their browser. When nothing needs the owner, send nothing. Never email the owner unless they ask for an email.",
-						`Your computer to use is ${pairedSpaceText()}. Run CLI commands there with space_bash. Delegate every on-screen task to computer_use, one at a time.`,
+						`Your computers are the Cua Spaces ${await spacesText()}. Run CLI commands on one with space_bash, and delegate every on-screen task to computer_use, one at a time. Both take \`space\`, a Space's name or id; pick the Space the work needs, and switch whenever it moves. Without \`space\` they use the default.`,
 						"For recurring or future work, create a routine with schedule. A message starting with [routine] is a routine firing: do the work, and send_message the owner only if the outcome needs them.",
 						"Be brief.",
 					].join("\n"),
@@ -72,7 +73,7 @@ registry.install(
 registry.install(traceExtension);
 const AGENT = { model: MODEL, thinkingLevel: "medium" } as const;
 registry.install(createBotsExtension({ agent: () => AGENT }));
-registry.install(createComputerExtension());
+registry.install(createComputerExtension(registry));
 registry.install(createBotToolSearchExtension());
 // Web Push to every browser that turned notifications on in the web app (data/push.json).
 const push = createPush({ file: join(DATA_DIR, "push.json"), log });
@@ -82,7 +83,7 @@ const cuaConnect = connectCua(cuaCommand);
 // One `cua mcp` session for the bots' cua_* tools and the web app's Connections tab.
 const cua = createExecutor(cuaConnect);
 try {
-	registry.install(await createCuaExtension(cuaConnect, { pairedSpace: spaceId(), call: cua }));
+	registry.install(await createCuaExtension(cuaConnect, { defaultSpace: defaultSpaceId(), call: cua }));
 } catch (error) {
 	log(`cua: \`${cuaCommand} mcp\` failed (${error instanceof Error ? error.message : String(error)}); Cua Spaces tools are off`);
 }
@@ -152,7 +153,7 @@ async function say(text: string): Promise<string> {
 	return sent.join("\n\n");
 }
 
-const space = spaceLabel();
+const space = await defaultSpaceLabel();
 const bots = await createBots({
 	harness,
 	root,
@@ -169,7 +170,7 @@ log(`bots: ${bots.list().map((bot) => bot.name).join(", ")}`);
 const live = createLiveScreen(openLiveStream);
 const ownMemories = () => bots.list().map((bot) => ({ id: bot.id, memory: memories.of(bot) }));
 // The Connections tab: this computer, which runs the Harness and every bot, then the owner's SSH machines and the Spaces.
-const paired = spaceId();
+const defaultSpace = defaultSpaceId();
 const connections = createConnections({
 	here: {
 		name: hostname(),
@@ -185,11 +186,13 @@ const connections = createConnections({
 	probe: probeTcp,
 	spaces: () => listCuaSpaces(cua),
 	fallback: registrySpaces,
-	...(paired === undefined ? {} : { pairedSpace: paired }),
+	...(defaultSpace === undefined ? {} : { defaultSpace }),
 });
 // Fits images the owner pastes in the chat to the model's limits, in a worker thread.
 const images = await createNodePhotonImages();
-createBotServer({ say, bots, memory, botMemories: ownMemories, images, model: MODEL.modelId, context, log, control: screenControl, live, push, connections, ...(approvals === undefined ? {} : { approvals }) }).listen(PORT, "127.0.0.1", () =>
+// Settings > Startup: start.py at sign-in.
+const autostart = createAutostart({ startScript: join(import.meta.dirname, "..", "start.py") });
+createBotServer({ say, bots, memory, botMemories: ownMemories, images, model: MODEL.modelId, context, log, control: screenControl, live, push, connections, autostart, ...(approvals === undefined ? {} : { approvals }) }).listen(PORT, "127.0.0.1", () =>
 	log(`listening: web app http://127.0.0.1:${PORT}/ · chat POST http://127.0.0.1:${PORT}/say`),
 );
 

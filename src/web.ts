@@ -1,6 +1,6 @@
 // The bot's HTTP surface on 127.0.0.1: the web app at GET / with its service worker at /sw.js, its JSON
 // API under /api/ (the bot list and its edits, routines CRUD, each bot's chat history/send/react/stop and the owner's pasted images, a server-sent
-// event stream of one bot's live chat state, Web Push subscriptions, the Connections tab's check, and the Mac's live screen with the owner's control of it), screenshots under /shots/, and the original POST /say. Loopback only, no auth; isOwnRequest refuses
+// event stream of one bot's live chat state, Web Push subscriptions, the Connections tab's check, start at sign-in, and the default Space's live screen with the owner's control of it), screenshots under /shots/, and the original POST /say. Loopback only, no auth; isOwnRequest refuses
 // requests other sites make through the owner's browser.
 // Mutations go through the routines manager and the chat module, so every surface agrees.
 import { readFile } from "node:fs/promises";
@@ -10,6 +10,7 @@ import type { Context } from "@earendil-works/chord";
 import type { Cursor } from "@earendil-works/pi-durable";
 import { DEFAULT_IMAGE_LIMITS, type ImageProcessor } from "@earendil-works/pi-durable/tools";
 import { ApprovalError, type Approvals, type EmailEdit } from "./approvals.ts";
+import type { Autostart } from "./autostart.ts";
 import { BotError, type BotInput, type Bots } from "./bots.ts";
 import type { Chat, ChatImage } from "./chat.ts";
 import type { Connections } from "./connections.ts";
@@ -116,14 +117,16 @@ export type BotServerDeps = {
 	/** Shown in the chat header, e.g. "grok-4.7". */
 	model?: string;
 	shotsDir?: string;
-	/** Enables GET /api/computer/live: the Mac's screen as a stream of H.264 access units. */
+	/** Enables GET /api/computer/live: the default Space's screen as a stream of H.264 access units. */
 	live?: LiveScreen;
-	/** With `live`, enables POST /api/computer/control and /api/computer/input: the owner driving the Mac. */
+	/** With `live`, enables POST /api/computer/control and /api/computer/input: the owner driving that Space. */
 	control?: ScreenControl;
 	/** Enables GET/POST /api/push: the VAPID public key, and a browser's push subscription. */
 	push?: Push;
 	/** Enables GET /api/connections: this computer, the owner's SSH machines, and the Cua Spaces, checked on each call. */
 	connections?: Connections;
+	/** Enables GET/PUT /api/autostart: whether start.py runs when the owner signs in to this computer. */
+	autostart?: Autostart;
 	log?: (...parts: unknown[]) => void;
 };
 
@@ -190,7 +193,7 @@ function reactionInput(body: unknown): { entryId: number; emoji: string; on: boo
 }
 
 // One SSE client of one bot's chat: a `live` snapshot right away, then every chat event, the full
-// approvals list whenever it changes, the bot list whenever it changes, and who drives the Mac (a `control`
+// approvals list whenever it changes, the bot list whenever it changes, and who drives the default Space (a `control`
 // event right away and on every change), until the socket closes.
 function streamChat(req: IncomingMessage, res: ServerResponse, chat: Chat, bots: Bots, deps: BotServerDeps): void {
 	res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-store", connection: "keep-alive" });
@@ -239,9 +242,9 @@ function streamLive(res: ServerResponse, live: LiveScreen, control: ScreenContro
 	});
 }
 
-// The owner driving the Mac from the expanded live view. POST /api/computer/control with `{ owner }` takes
+// The owner driving the default Space from the expanded live view. POST /api/computer/control with `{ owner }` takes
 // control (the bots' on-screen steps wait) or hands it back; POST /api/computer/input with `{ events }`
-// performs the owner's mouse and keyboard on the Mac, in order, and is refused while the bots have control.
+// performs the owner's mouse and keyboard on the Space, in order, and is refused while the bots have control.
 async function routeControl(req: IncomingMessage, res: ServerResponse, deps: BotServerDeps, url: URL, method: string) {
 	const { live, control } = deps;
 	if (live === undefined || control === undefined || method !== "POST") throw new HttpError(404, "not found");
@@ -430,6 +433,7 @@ async function route(req: IncomingMessage, res: ServerResponse, deps: BotServerD
 	}
 	if (url.pathname.startsWith("/api/computer/")) return routeControl(req, res, deps, url, method);
 	if (url.pathname === "/api/push") return routePush(req, res, deps, method);
+	if (url.pathname === "/api/autostart") return routeAutostart(req, res, deps, method);
 	if (method === "GET" && url.pathname === "/api/connections") {
 		if (deps.connections === undefined) throw new HttpError(404, "not found");
 		return sendJson(res, 200, await deps.connections());
@@ -453,6 +457,20 @@ async function routePush(req: IncomingMessage, res: ServerResponse, deps: BotSer
 	push.subscribe(subscription);
 	deps.log?.(`owner (web): turned on notifications for ${new URL(subscription.endpoint).host}`);
 	res.writeHead(204).end();
+}
+
+// Settings > Startup: GET reads whether start.py runs at sign-in; PUT {"enabled"} turns it on or off.
+async function routeAutostart(req: IncomingMessage, res: ServerResponse, deps: BotServerDeps, method: string) {
+	const autostart = deps.autostart;
+	if (autostart === undefined) throw new HttpError(404, "not found");
+	if (method === "GET") return sendJson(res, 200, await autostart.state());
+	if (method !== "PUT") throw new HttpError(404, "not found");
+	const { enabled } = ((await readJson(req)) ?? {}) as { enabled?: unknown };
+	if (typeof enabled !== "boolean") throw new HttpError(400, "enabled must be true or false");
+	if (!(await autostart.state()).supported) throw new HttpError(400, "starting at sign-in isn't supported on this OS");
+	const state = await autostart.set(enabled);
+	deps.log?.(`owner (web): turned ${enabled ? "on" : "off"} start at sign-in (${state.where})`);
+	sendJson(res, 200, state);
 }
 
 function factInput(body: unknown): { fact: string; tier: "profile" | "log"; bot?: number } {

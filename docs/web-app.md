@@ -13,7 +13,7 @@ The URL hash keeps your place, so a reload, Back, or a copied link lands in the 
 | Key | Values | When absent |
 | --- | --- | --- |
 | `view` | `routines`, `memory`, `settings` | The chat |
-| `tab` | `connections` | Settings' Chat tab |
+| `tab` | `connections`, `startup` | Settings' Chat tab |
 | `bot` | A bot id | The main bot |
 
 For example `#view=settings&tab=connections` or `#view=memory&bot=3`. Each new view or tab is a history entry; switching bots replaces the entry. Old links of the form `#bot=<id>` still open that bot's chat.
@@ -62,7 +62,7 @@ On a bot reply, the smiley opens the quick emoji (👍 👎 ❤️ 😂 🎉 �
 
 ## Computer pane
 
-The right column shows the paired Space's screen live, plus each click and keystroke of the most recent computer-use task. The frame turns amber while the bot is driving.
+The right column shows the default Space's screen live, plus each click and keystroke of the most recent computer-use task. When that task ran on another Space, the steps heading names it. The frame turns amber while the bot is driving.
 
 All open panes share one media session: about 15 fps at the display's native resolution, roughly 100 KB/s on a quiet screen and more when it changes a lot, decoded with WebCodecs. A pane streams only while its tab is visible, unless you have control. The session closes when the last pane closes. If the stream is down, or the browser lacks WebCodecs, the pane stays black. The caption says Connecting… while it retries, or that the browser can't play the live screen.
 
@@ -86,7 +86,7 @@ The open memory shows its lasting facts, then its dated ones, newest first. Each
 
 ## Settings
 
-Settings has two tabs in its own sidebar.
+Settings has three tabs in its own sidebar.
 
 ### Chat
 
@@ -115,9 +115,21 @@ Lists the computers the bot can reach ([src/connections.ts](../src/connections.t
 - a relay Space under the host its `host_name` names,
 - anything else, like cloud Spaces, under Other Spaces.
 
-The Bots' computer label marks the paired Space, the one `computer_use`, `space_bash` and the live screen use. The list is Cua's live one (`list_spaces`, through the same `cua mcp` session as the bots' `cua_*` tools). If Cua doesn't answer, the tab shows `~/.cua/spaces.json` without status and says why.
+The Default label marks the bots' default Space: `computer_use` and `space_bash` use it when the bot names no Space, and the live screen shows it. The bots can use every Space listed here. The list is Cua's live one (`list_spaces`, through the same `cua mcp` session as the bots' `cua_*` tools). If Cua doesn't answer, the tab shows `~/.cua/spaces.json` without status and says why.
 
 The tab blurs users, SSH addresses, `direct:` Space ids and the database path, so a screenshot doesn't leak them. Click one (or focus it and press Enter) to reveal it until the next check.
+
+### Startup
+
+**Start when I sign in** (off by default) runs `start.py` each time you sign in to the bot's computer, so a restart doesn't leave the bots off until someone starts them. Unlike the Chat tab, it's saved on that computer, not in the browser ([src/autostart.ts](../src/autostart.ts)). None of these entries needs admin rights:
+
+| OS | Entry |
+| --- | --- |
+| Windows | Value `cua-bot` under `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`, running `start.py` with `pythonw`, so no console window opens |
+| macOS | `~/Library/LaunchAgents/cua-bot.plist` |
+| Linux | `~/.config/autostart/cua-bot.desktop`, for desktop sessions that follow the XDG autostart spec |
+
+The interpreter is the one `start.py` last ran under (Windows uses `pythonw.exe` from the same folder). On macOS and Linux the entry also carries the bot's `PATH`, so `node` and `pnpm` are found at sign-in. If you move the checkout or change Python, turn the setting off and on again. On other OSes the toggle is disabled.
 
 ## Notifications
 
