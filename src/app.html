@@ -369,6 +369,9 @@ dialog textarea { resize: vertical; }
 dialog .hint { color: var(--muted); font-size: 12.5px; margin: 6px 0 0; }
 dialog .hint code { background: var(--bg); padding: 0 4px; border-radius: 3px; }
 #bot-dialog { width: min(820px, 94vw); }
+.b-models { display: flex; gap: 12px; }
+.b-models .b-field { flex: 1; min-width: 0; }
+.b-models select { width: 100%; }
 /* the bot's avatar beside its name, and the picker that drops from it */
 .b-top { position: relative; display: flex; align-items: flex-end; gap: 14px; }
 .b-top .b-field { flex: 1; min-width: 0; }
@@ -495,8 +498,8 @@ dialog .row { display: flex; gap: 8px; justify-content: flex-end; margin-top: 18
     <div class="bar"><h1>Model</h1><span class="aside">Saved in .env on this computer.</span></div>
     <div class="banner" id="model-error" role="alert" hidden></div>
     <div class="settings">
-     <label class="setting field"><span><b>Model</b><small>What every bot runs on, from its next turn. Lists the models with a key in models.json or a sign-in from src/login.ts.</small></span><select id="set-model" disabled></select></label>
-     <label class="setting field"><span><b>Reasoning effort</b><small>How long the bots think before answering. More is slower and uses more of your quota. The computer-use helper runs with reasoning off.</small></span><select id="set-reasoning" disabled></select></label>
+     <label class="setting field"><span><b>Default model</b><small>What the bots run on, from their next turn, unless a bot's edit dialog picks its own. Lists the models with a key in models.json or a sign-in from src/login.ts.</small></span><select id="set-model" disabled></select></label>
+     <label class="setting field"><span><b>Default reasoning effort</b><small>How long the bots think before answering, on-screen work included. More is slower and uses more of your quota.</small></span><select id="set-reasoning" disabled></select></label>
     </div>
    </div>
    <div class="pane" id="tab-connections" hidden>
@@ -567,6 +570,10 @@ dialog .row { display: flex; gap: 8px; justify-content: flex-end; margin-top: 18
     <div class="av-shapes" id="av-shapes" role="group" aria-label="Shape"></div>
     <div class="av-colors" id="av-colors" role="group" aria-label="Color"></div>
    </div>
+  </div>
+  <div class="b-models">
+   <div class="b-field"><label for="b-model">Model</label><select id="b-model" disabled></select></div>
+   <div class="b-field"><label for="b-effort">Reasoning effort</label><select id="b-effort" disabled></select></div>
   </div>
   <label for="b-instructions">Agent file</label>
   <textarea id="b-instructions" rows="18" spellcheck="false" placeholder="Track job openings that fit my profile and tell me about new ones each week."></textarea>
@@ -1836,7 +1843,6 @@ async function loadHistory() {
   addItems(data.items);
   state.before = data.before;
   state.live = data.live;
-  if (data.model) $("model").textContent = data.model;
   renderLive();
   renderChat();
   $("msgs").scrollTop = $("msgs").scrollHeight;
@@ -1913,6 +1919,7 @@ function renderBots() {
   const bot = currentBot();
   $("chat-av").replaceChildren(...(bot.avatar ? [avatar(bot, false, 26)] : []));
   $("chat-h").textContent = bot.name;
+  $("model").textContent = bot.activeModel || "";
   $("edit-bot").setAttribute("aria-label", "Edit " + bot.name);
   $("input").dataset.placeholder = "Message " + bot.name;
   $("input").setAttribute("aria-label", "Message " + bot.name);
@@ -2070,6 +2077,34 @@ const closePicker = (event) => {
 $("bot-dialog").addEventListener("keydown", closePicker);
 $("bot-dialog").addEventListener("cancel", closePicker);
 
+// A bot's own model and effort; "" follows Settings > Model. They fill from /api/model as the dialog opens, and until
+// then Save leaves them alone.
+let botModels = null;
+function showBotEffort(level) {
+  const levels = botModels.choices.find((choice) => choice.id === ($("b-model").value || botModels.model)).levels;
+  $("b-effort").replaceChildren(new Option(`Use default (${effortName(botModels.thinkingLevel)})`, ""), ...effortOptions(levels));
+  $("b-effort").value = levels.includes(level) ? level : "";
+}
+async function loadBotModels(bot) {
+  botModels = null;
+  $("b-model").replaceChildren();
+  $("b-effort").replaceChildren();
+  $("b-model").disabled = $("b-effort").disabled = true;
+  try {
+    const data = await request("GET", "/api/model");
+    if (editingBot !== bot) return;
+    // An override whose key or sign-in is gone still shows, so the dialog says what the bot is set to.
+    if (bot && bot.model && !data.choices.some((choice) => choice.id === bot.model)) data.choices.unshift({ id: bot.model, provider: "No key or sign-in", name: bot.model, levels: [] });
+    botModels = data;
+    const fallback = data.choices.find((choice) => choice.id === data.model);
+    $("b-model").replaceChildren(new Option(`Use default (${fallback.name})`, ""), ...modelOptions(data.choices));
+    $("b-model").value = (bot && bot.model) || "";
+    showBotEffort(bot && bot.thinkingLevel);
+    $("b-model").disabled = $("b-effort").disabled = false;
+  } catch (error) { $("b-error").textContent = "Could not read the models: " + error.message; }
+}
+$("b-model").addEventListener("change", () => showBotEffort($("b-effort").value));
+
 function openBot(bot) {
   editingBot = bot;
   picked = bot ? bot.avatar : suggestAvatar();
@@ -2083,6 +2118,7 @@ function openBot(bot) {
   $("b-file").replaceChildren(...(bot && bot.file ? ["Saved as ", el("code", "", bot.file), " in the project folder, beside its routines and memory. The bot re-reads it every turn, so edits there apply at once."] : ["Saved as agent.md in the bot's own folder under bots/ in the project folder."]));
   $("b-delete").hidden = !bot || bot.main;
   $("b-error").textContent = "";
+  loadBotModels(bot);
   $("bot-dialog").showModal();
   $("b-name").focus();
 }
@@ -2095,6 +2131,11 @@ $("bot-form").addEventListener("submit", async (event) => {
   // The avatar goes only when it changed; back at the default it goes as null, so the bot keeps following its default.
   if (!editingBot) payload.avatar = picked;
   else if (!sameAvatar(picked, editingBot.avatar)) payload.avatar = sameAvatar(picked, editingBot.defaultAvatar) ? null : picked;
+  // The same for the model and effort: sent only when changed, and null follows the default again.
+  if (botModels) for (const [key, input] of [["model", "b-model"], ["thinkingLevel", "b-effort"]]) {
+    const value = $(input).value || null;
+    if (value !== ((editingBot && editingBot[key]) || null)) payload[key] = value;
+  }
   $("b-save").disabled = true;
   try {
     const bot = editingBot ? await request("PUT", "/api/bots/" + editingBot.id, payload) : await request("POST", "/api/bots", payload);
@@ -2360,23 +2401,27 @@ $("set-autostart").addEventListener("change", async () => {
 // /api/model. Each change saves both; the server answers with what it kept, and a failed save shows the last good state.
 let modelState = null;
 function showModelError(message) { $("model-error").textContent = message; $("model-error").hidden = !message; }
+const effortName = (level) => (level === "xhigh" ? "Extra high" : capital(level));
+const effortOptions = (levels) => levels.map((level) => new Option(effortName(level), level));
+// One <optgroup> per provider, for a model picker.
+function modelOptions(choices) {
+  const groups = new Map();
+  for (const choice of choices) {
+    if (!groups.has(choice.provider)) groups.set(choice.provider, Object.assign(document.createElement("optgroup"), { label: choice.provider }));
+    groups.get(choice.provider).append(new Option(choice.name, choice.id));
+  }
+  return [...groups.values()];
+}
 function showReasoning(level) {
-  const levels = modelState.choices.find((choice) => choice.id === $("set-model").value).levels;
-  $("set-reasoning").replaceChildren(...levels.map((name) => new Option(name === "xhigh" ? "Extra high" : capital(name), name)));
+  $("set-reasoning").replaceChildren(...effortOptions(modelState.choices.find((choice) => choice.id === $("set-model").value).levels));
   $("set-reasoning").value = level;
 }
 function showModelSettings(next) {
   modelState = next;
-  const groups = new Map();
-  for (const choice of next.choices) {
-    if (!groups.has(choice.provider)) groups.set(choice.provider, Object.assign(document.createElement("optgroup"), { label: choice.provider }));
-    groups.get(choice.provider).append(new Option(choice.name, choice.id));
-  }
-  $("set-model").replaceChildren(...groups.values());
+  $("set-model").replaceChildren(...modelOptions(next.choices));
   $("set-model").value = next.model;
   showReasoning(next.thinkingLevel);
   $("set-model").disabled = $("set-reasoning").disabled = false;
-  $("model").textContent = next.model.slice(next.model.indexOf("/") + 1);
 }
 async function loadModelSettings() {
   try { showModelSettings(await request("GET", "/api/model")); showModelError(""); }

@@ -6,7 +6,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { hostname, networkInterfaces, release, type, userInfo, version } from "node:os";
 import { join } from "node:path";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
-import { configure, type ConversationId, createRegistry, type Cursor, defineExtension, Harness, section } from "@earendil-works/pi-durable";
+import { type ConversationId, createRegistry, type Cursor, defineExtension, Harness, section } from "@earendil-works/pi-durable";
 import { createNodePhotonImages } from "@earendil-works/pi-durable/images/node";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { botMemories, createBots, createBotsExtension } from "./bots.ts";
@@ -120,8 +120,6 @@ const DATABASE = join(DATA_DIR, "cua-bot.sqlite");
 const storage = await openNodeSqliteStorage(DATABASE);
 const harness = await Harness.open(storage, { models, registry, env: pcEnv }, context);
 const root = await harness.root(context, { agent: botAgent() });
-// root() sets the agent only when it creates the conversation; apply the configured model to an existing one too.
-await root.commit((tx) => configure(tx, root.id, botAgent()), context);
 bindRoutines({ harness, root, legacyFile: LEGACY_ROUTINE_FILE });
 harness.resume();
 const synced = await syncRoutines(context);
@@ -193,7 +191,7 @@ const images = await createNodePhotonImages();
 const autostart = createAutostart({ startScript: join(import.meta.dirname, "..", "start.py") });
 // Settings > Model: the model and reasoning effort in .env, applied to every bot without a restart.
 const modelSettings = createModelSettings({ models, apply: bots.applyAgent });
-createBotServer({ say, bots, memory, botMemories: ownMemories, images, model: () => botModel().modelId, context, log, control: screenControl, live, push, connections, autostart, modelSettings, ...(approvals === undefined ? {} : { approvals }) }).listen(PORT, "127.0.0.1", () =>
+createBotServer({ say, bots, memory, botMemories: ownMemories, images, context, log, control: screenControl, live, push, connections, autostart, modelSettings, ...(approvals === undefined ? {} : { approvals }) }).listen(PORT, "127.0.0.1", () =>
 	log(`listening: web app http://127.0.0.1:${PORT}/ · chat POST http://127.0.0.1:${PORT}/say`),
 );
 

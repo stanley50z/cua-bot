@@ -70,7 +70,7 @@ Code: [src/computer.ts](../src/computer.ts).
 
 The bots work on every Space your Cua account lists, the way `cua mcp`'s `list_spaces` shows them: Spaces you added, and computers the Cua Spaces app shares over the relay, such as the one cua-bot runs on. The SDK runtime signs in with your `cua auth login` session to open the relay ones. A relay Space on the same network still connects directly; the relay only finds it. The prompt lists each Space's name, system and id on every request, and marks the default (`CUA_SPACE_ID`, else the first in `~/.cua/spaces.json`).
 
-- **`computer_use`** runs in the foreground as a subagent on the bot's model, with every driver tool the chosen Space lists (60 on the Mac's cua-driver and 61 on Windows as of 2026-11-07, including the typed `browser_*` tools, `run_steps` and `run_script`). On-screen work goes here, one task at a time on each Space.
+- **`computer_use`** runs in the foreground as a subagent on the calling bot's model and reasoning effort, with every driver tool the chosen Space lists (60 on the Mac's cua-driver and 61 on Windows as of 2026-11-07, including the typed `browser_*` tools, `run_steps` and `run_script`). On-screen work goes here, one task at a time on each Space.
 - **`space_bash`** runs a shell command on a Space (`/bin/sh -c`, or `cmd.exe /C` on a Windows Space). The bot calls it directly for CLI tools, files and inspection; `computer_use` has it too.
 
 Both take `space`, a Space's name (any case) or its id. Without it they use the default; inside `computer_use`, `space_bash` uses the task's Space. A bot can switch Spaces between calls in one job.

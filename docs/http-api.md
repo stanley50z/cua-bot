@@ -37,8 +37,8 @@ Code: [src/bots.ts](../src/bots.ts).
 | Route | Does |
 | --- | --- |
 | `GET /api/bots` | Lists every bot. |
-| `POST /api/bots` | `{name, instructions, avatar}` adds one. `instructions` becomes its agent file; without `avatar` it gets the default. |
-| `PUT /api/bots/<id>` | Edits one. An edit without `avatar` keeps it; `avatar: null` goes back to the default. |
+| `POST /api/bots` | `{name, instructions, avatar, model, thinkingLevel}` adds one. `instructions` becomes its agent file; without `avatar`, `model` or `thinkingLevel` it gets the default. `model` is `provider/model` and needs a key or sign-in. |
+| `PUT /api/bots/<id>` | Edits one. An edit without `avatar`, `model` or `thinkingLevel` keeps it; `null` goes back to the default. |
 | `DELETE /api/bots/<id>` | Stops a bot and removes it. Its transcript stays in the database. |
 
 Each listed bot carries:
@@ -50,6 +50,8 @@ Each listed bot carries:
 | `folder`, `file` | Paths of its folder and agent file |
 | `avatar` | The avatar to draw |
 | `defaultAvatar` | The avatar it gets without a pick |
+| `model`, `thinkingLevel` | Its own model and effort, present only while it overrides the default |
+| `activeModel` | The id of the model it runs on, for the chat header |
 
 It also says whether the bot is working.
 

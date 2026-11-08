@@ -42,9 +42,9 @@ Two subscriptions are built in, signed in once with the bot stopped and saved to
 | `openai/<model>` | `node src/login.ts openai` (your ChatGPT plan) | `OPENAI_API_KEY` |
 | `xai/<model>` | `node src/login.ts xai` (SuperGrok or X Premium) | `XAI_API_KEY` |
 
-Pick the model and reasoning effort in Settings > Model, or with `CUABOT_MODEL` and `CUABOT_REASONING` in `.env`. The page writes those two lines and moves every bot over from its next turn, with no restart. A variable set in your real environment wins over `.env` at the next start.
+Pick the model and reasoning effort in Settings > Model, or with `CUABOT_MODEL` and `CUABOT_REASONING` in `.env`. The page writes those two lines and moves every bot over from its next turn, with no restart. A variable set in your real environment wins over `.env` at the next start. These are the defaults: a bot's edit dialog can pick its own model and effort, which stay in the database and win over them.
 
-The `computer_use` helper runs on the same model as the bot, with reasoning off.
+The `computer_use` helper runs on the model and effort of the bot that called it.
 
 ## Environment (`.env`)
 

@@ -22,7 +22,7 @@ For example `#view=settings&tab=connections` or `#view=memory&bot=3`. Each new v
 
 Each bot has a row with its newest message, and a pulsing dot while it works. Click a row to open that bot's chat. The + button adds a bot.
 
-The pencil next to the chat title opens the bot's settings: its agent file (with its path) to read or edit, its name, its avatar, and Delete.
+The pencil next to the chat title opens the bot's settings: its agent file (with its path) to read or edit, its name, its avatar, its model and reasoning effort, and Delete. Use default follows Settings > Model. The efforts listed are the ones the picked model supports, and a change reaches the bot on its next turn. Everything the bot does on screen through `computer_use` runs on the same model and effort.
 
 **Avatars.** Each bot shows as a small character that blinks every few seconds and, at the larger sizes, now and then glances aside. Each bot keeps its own rhythm, and the motion stops when the system asks for reduced motion. Click the big avatar in the dialog to pick a shape (hover one for its name) and a color; Reset goes back to the bot's default. The pick applies when you save. A new bot gets a shape and a color no other bot wears yet, while any are left.
 
@@ -106,7 +106,7 @@ Saved in this browser's `localStorage` (`cua-bot.settings`), so each browser kee
 
 ### Model
 
-Picks the model every bot runs on and their reasoning effort ([src/model-settings.ts](../src/model-settings.ts)). The list holds each model with a key in `models.json` or a sign-in from `node src/login.ts`, and the efforts follow the picked model. A change saves `CUABOT_MODEL` and `CUABOT_REASONING` to the computer's `.env` and reaches every bot on its next turn, with no restart.
+Picks the default model and reasoning effort for the bots ([src/model-settings.ts](../src/model-settings.ts)). A bot can override either in its edit dialog. The list holds each model with a key in `models.json` or a sign-in from `node src/login.ts`, and the efforts follow the picked model. A change saves `CUABOT_MODEL` and `CUABOT_REASONING` to the computer's `.env` and reaches every bot on its default on its next turn, with no restart.
 
 ### Connections
 

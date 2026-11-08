@@ -15,6 +15,7 @@ import { fauxAssistantMessage, fauxProvider, fauxText, fauxToolCall } from "@ear
 import { type AgentChange, type ConversationId, createRegistry, Harness, MemoryStorage } from "@earendil-works/pi-durable";
 import { botMemories, type BotView, createBots, createBotsExtension, defaultAvatar, readBots } from "../src/bots.ts";
 import { type ChatItem, SEND_MESSAGE } from "../src/chat.ts";
+import { createModelSettings } from "../src/model-settings.ts";
 import { bindRoutines, createRoutinesExtension, deleteRoutine, removeBotRoutines, type RoutineView, syncRoutines } from "../src/routines.ts";
 import { createBotServer } from "../src/web.ts";
 
@@ -31,7 +32,7 @@ const sendOwner = (text: string) => fauxAssistantMessage([fauxToolCall(SEND_MESS
 // The faux model answers by what it is asked, since two bots' requests can interleave in any order.
 // Every request's full prompt is kept in `prompts`.
 async function open() {
-	const faux = fauxProvider();
+	const faux = fauxProvider({ models: [{ id: "faux-1" }, { id: "faux-2" }] });
 	const models = createModels();
 	models.setProvider(faux.provider);
 	const prompts: string[] = [];
@@ -69,7 +70,8 @@ async function open() {
 		sent: (bot, text) => replies.push([bot.name, text]),
 	});
 	await syncRoutines(context);
-	const server = createBotServer({ say: async (text) => text, bots, context });
+	const modelSettings = createModelSettings({ models, apply: bots.applyAgent, envFile: join(temp, ".env") });
+	const server = createBotServer({ say: async (text) => text, bots, context, modelSettings });
 	await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
 	const address = server.address();
 	assert.ok(address !== null && typeof address === "object");
@@ -115,6 +117,38 @@ test("applyAgent moves every bot to the current settings, and a new bot starts o
 			(await until(async () => bot.bots.list(), (list) => list.length === 3)).map(async ({ id }) => (await (await bot.harness.conversation(id as ConversationId, context))?.agent(context))?.thinkingLevel),
 		);
 		assert.deepEqual(levels, ["high", "high", "high"]);
+	} finally {
+		await bot.close();
+	}
+});
+
+test("a bot's own model and effort override the default, survive a default change, and clear with null", { timeout: 20_000 }, async () => {
+	const bot = await open();
+	const running = async (id: number) => {
+		const agent = await (await bot.harness.conversation(id as ConversationId, context))?.agent(context);
+		return [agent?.model?.modelId, agent?.thinkingLevel];
+	};
+	const edit = (id: number, body: object) => send(bot.base, "PUT", `/api/bots/${id}`, { name: "Dev", instructions: "", ...body });
+	try {
+		const made = await send(bot.base, "POST", "/api/bots", { name: "Dev", instructions: "", model: "faux/faux-2", thinkingLevel: "high" });
+		assert.equal(made.status, 201);
+		const { id } = (await made.json()) as BotView;
+		assert.deepEqual(await running(id), ["faux-2", "high"]);
+
+		Object.assign(bot.agent, { thinkingLevel: "low" });
+		await bot.bots.applyAgent();
+		assert.deepEqual(await running(id), ["faux-2", "high"], "a new default leaves the override alone");
+		assert.equal((await until(async () => bot.bots.list(), (list) => list.length === 2)).find((b) => b.id === id)?.activeModel, "faux-2");
+
+		assert.equal((await edit(id, {})).status, 200);
+		assert.deepEqual(await running(id), ["faux-2", "high"], "an edit that doesn't name them keeps them");
+		assert.equal((await edit(id, { thinkingLevel: "extreme" })).status, 400);
+		assert.equal((await edit(id, { model: "not-a-ref" })).status, 400);
+		assert.equal((await edit(id, { model: "nope/x" })).status, 400, "no key or sign-in");
+
+		assert.equal((await edit(id, { model: null, thinkingLevel: null })).status, 200);
+		assert.deepEqual(await running(id), ["faux-1", "low"], "null follows the default again");
+		assert.equal(bot.bots.list().find((b) => b.id === id)?.activeModel, "faux-1");
 	} finally {
 		await bot.close();
 	}

@@ -10,6 +10,7 @@ import { existsSync, watch as watchFiles } from "node:fs";
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 import type { Context } from "@earendil-works/chord";
+import type { ModelThinkingLevel } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
 import {
 	type AgentChange,
@@ -27,6 +28,7 @@ import {
 import { BOT_MESSAGE, type BotMessage, type Chat, type ChatItem, createChat, SEND_MESSAGE } from "./chat.ts";
 import type { ComputerView } from "./computer-view.ts";
 import { createMemory, type Memory } from "./memory.ts";
+import { parseModelRef, parseThinkingLevel } from "./models.ts";
 
 export const MAIN_NAME = "cua-bot";
 /** One folder per bot, in the project root. */
@@ -70,8 +72,9 @@ export function defaultAvatar(id: number, main: boolean): Avatar {
 }
 
 // Instructions live in the bot's agent file; records from before agent files still carry an ignored `instructions`.
-// `avatar` is absent until the owner picks one; `pinnedAt` until the owner pins the bot to the top of the list.
-type BotRecord = { name: string; createdAt: number; avatar?: Avatar; pinnedAt?: number };
+// `avatar` is absent until the owner picks one; `pinnedAt` until the owner pins the bot to the top of the list;
+// `model` ("provider/model") and `thinkingLevel` while the bot overrides Settings > Model.
+type BotRecord = { name: string; createdAt: number; avatar?: Avatar; pinnedAt?: number; model?: string; thinkingLevel?: ModelThinkingLevel };
 type BotsState = { main?: number; bots: { [conversationId: string]: BotRecord } };
 
 const BotsDoc = defineDoc<BotsState>({
@@ -85,12 +88,13 @@ const BotsDoc = defineDoc<BotsState>({
 /**
  * `avatar` is the one to draw: the owner's pick, else `defaultAvatar`, which the web app's Reset goes back to.
  * `pinnedAt` is set while the bot is pinned; the web app shows pinned bots at the top, oldest pin first.
+ * `model` and `thinkingLevel` are set only while the bot overrides Settings > Model.
  */
-type BotEntry = { id: number; name: string; main: boolean; createdAt: number; avatar: Avatar; defaultAvatar: Avatar; pinnedAt?: number };
+type BotEntry = { id: number; name: string; main: boolean; createdAt: number; avatar: Avatar; defaultAvatar: Avatar; pinnedAt?: number; model?: string; thinkingLevel?: ModelThinkingLevel };
 /** `folder` is the bot's folder and `file` its agent file, as paths from the project root, for the web app. */
 export type Bot = BotEntry & { instructions: string; folder: string; file: string };
-/** `avatar` is ids to validate; an edit without one keeps the bot's avatar, and null goes back to the default. */
-export type BotInput = { name: string; instructions: string; avatar?: { shape: string; color: string } | null };
+/** `avatar`, `model` and `thinkingLevel` are checked here; an edit without one keeps the bot's, and null goes back to the default. */
+export type BotInput = { name: string; instructions: string; avatar?: { shape: string; color: string } | null; model?: string | null; thinkingLevel?: string | null };
 
 const entryOf = (id: number, record: BotRecord, main: boolean): BotEntry => {
 	const fallback = defaultAvatar(id, main);
@@ -102,8 +106,17 @@ const entryOf = (id: number, record: BotRecord, main: boolean): BotEntry => {
 		avatar: record.avatar ?? fallback,
 		defaultAvatar: fallback,
 		...(record.pinnedAt === undefined ? {} : { pinnedAt: record.pinnedAt }),
+		...(record.model === undefined ? {} : { model: record.model }),
+		...(record.thinkingLevel === undefined ? {} : { thinkingLevel: record.thinkingLevel }),
 	};
 };
+
+// The settings a bot runs with: `agent`, the ones from Settings > Model, under the bot's own overrides.
+const agentOf = (bot: Pick<BotRecord, "model" | "thinkingLevel">, agent: AgentChange): AgentChange => ({
+	...agent,
+	...(bot.model === undefined ? {} : { model: parseModelRef(bot.model) }),
+	...(bot.thinkingLevel === undefined ? {} : { thinkingLevel: bot.thinkingLevel }),
+});
 
 export class BotError extends Error {
 	readonly status: 400 | 404;
@@ -195,7 +208,7 @@ function validAvatar(avatar: BotInput["avatar"]): Avatar | null | undefined {
 	return { shape, color };
 }
 
-type ValidInput = { name: string; instructions: string; avatar: Avatar | null | undefined };
+type ValidInput = { name: string; instructions: string; avatar: Avatar | null | undefined; model: string | null | undefined; thinkingLevel: ModelThinkingLevel | null | undefined };
 
 function validInput(input: BotInput, others: BotEntry[]): ValidInput {
 	const name = input.name.trim().replace(/\s+/g, " ");
@@ -207,7 +220,9 @@ function validInput(input: BotInput, others: BotEntry[]): ValidInput {
 	const slug = slugOf(name);
 	const clash = others.find((bot) => slug !== "" && slugOf(bot.name) === slug);
 	if (clash !== undefined) throw new BotError(400, `${name} would share a folder with ${clash.name}; pick another name.`);
-	return { name, instructions, avatar: validAvatar(input.avatar) };
+	if (input.model != null) parseModelRef(input.model);
+	const thinkingLevel = input.thinkingLevel == null ? input.thinkingLevel : parseThinkingLevel(input.thinkingLevel);
+	return { name, instructions, avatar: validAvatar(input.avatar), model: input.model, thinkingLevel };
 }
 
 type Commit = <T>(run: (tx: Tx) => Promise<T>) => Promise<T>;
@@ -219,8 +234,14 @@ async function createBot(commit: Commit, dir: string, input: BotInput, agent: Ag
 		const doc = await tx.doc(BotsDoc);
 		const valid = validInput(input, botsOf(doc));
 		const { id } = await tx.createConversation({ ownership: { kind: "ownerless" } });
-		await configure(tx, id, agent);
-		const record: BotRecord = { name: valid.name, createdAt: now, ...(valid.avatar == null ? {} : { avatar: valid.avatar }) };
+		const record: BotRecord = {
+			name: valid.name,
+			createdAt: now,
+			...(valid.avatar == null ? {} : { avatar: valid.avatar }),
+			...(valid.model == null ? {} : { model: valid.model }),
+			...(valid.thinkingLevel == null ? {} : { thinkingLevel: valid.thinkingLevel }),
+		};
+		await configure(tx, id, agentOf(record, agent));
 		doc.bots[String(id)] = record;
 		return { ...entryOf(Number(id), record, false), instructions: valid.instructions };
 	});
@@ -355,6 +376,8 @@ export function createBotsExtension(options: { agent: () => AgentChange; dir?: s
 
 export type BotView = Bot & {
 	busy: boolean;
+	/** The id of the model the bot runs on, its override or the default, for the chat header. */
+	activeModel: string;
 	/** The newest message between the owner and the bot, for the bot list. */
 	preview?: { text: string; at: number };
 	/** The newest message from another bot; the web app shows it instead when it is newer and bot talk is on. */
@@ -390,7 +413,7 @@ export async function createBots(deps: {
 	harness: Harness;
 	root: Conversation;
 	context: Context;
-	/** The model settings every bot runs with, as of the call. */
+	/** The model settings a bot runs with unless it overrides them, as of the call. */
 	agent: () => AgentChange;
 	/** Where the bot folders live; DEFAULT_BOTS_DIR unless a test moves them. */
 	dir?: string;
@@ -411,8 +434,8 @@ export async function createBots(deps: {
 		doc.bots[String(root.id)] ??= { name: MAIN_NAME, createdAt: 0 };
 	}, context);
 	for (const bot of botsOf(await harness.snapshot(BotsDoc, context))) {
-		// A bot made by an older run keeps the model it had; give every bot the configured one, like the root.
-		if (!bot.main) await harness.commit((tx) => configure(tx, bot.id as ConversationId, deps.agent()), context);
+		// root() and a bot made by an older run keep the settings they had; give every bot the configured ones.
+		await harness.commit((tx) => configure(tx, bot.id as ConversationId, agentOf(bot, deps.agent())), context);
 		// Every bot has an agent file the owner can open, even before it has instructions.
 		if (!existsSync(agentPath(dir, bot))) await writeAgentFile(dir, bot, "");
 	}
@@ -423,7 +446,8 @@ export async function createBots(deps: {
 	let bots: Bot[] = [];
 	let lastSent = "";
 
-	const list = (): BotView[] => bots.map((bot) => ({ ...bot, busy: false, ...views.get(bot.id) }));
+	const activeModel = (bot: Bot) => (bot.model === undefined ? deps.agent().model?.modelId : parseModelRef(bot.model).modelId) ?? "";
+	const list = (): BotView[] => bots.map((bot) => ({ ...bot, busy: false, ...views.get(bot.id), activeModel: activeModel(bot) }));
 	const publish = () => {
 		const all = list();
 		const text = JSON.stringify(all);
@@ -515,9 +539,10 @@ export async function createBots(deps: {
 			await reload();
 			return bot;
 		},
-		/** Puts every bot, the main one too, on the current model settings, for its next turn. */
+		/** Puts every bot, the main one too, on the current model settings under its own overrides, for its next turn. */
 		async applyAgent() {
-			for (const bot of list()) await harness.commit((tx) => configure(tx, bot.id as ConversationId, deps.agent()), context);
+			for (const bot of botsOf(await harness.snapshot(BotsDoc, context))) await harness.commit((tx) => configure(tx, bot.id as ConversationId, agentOf(bot, deps.agent())), context);
+			publish();
 		},
 		async update(id: number, input: BotInput): Promise<Bot> {
 			const { bot, before } = await harness.commit(async (tx) => {
@@ -533,6 +558,11 @@ export async function createBots(deps: {
 				record.name = valid.name;
 				if (valid.avatar === null) delete record.avatar;
 				else if (valid.avatar !== undefined) record.avatar = valid.avatar;
+				if (valid.model === null) delete record.model;
+				else if (valid.model !== undefined) record.model = valid.model;
+				if (valid.thinkingLevel === null) delete record.thinkingLevel;
+				else if (valid.thinkingLevel !== undefined) record.thinkingLevel = valid.thinkingLevel;
+				await configure(tx, id as ConversationId, agentOf(record, deps.agent()));
 				return { bot: { ...entryOf(id, record, before.main), instructions: valid.instructions }, before };
 			}, context);
 			// The folder, with its routines and memory, follows a rename.

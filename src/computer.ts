@@ -317,11 +317,14 @@ const computerUse = defineTool({
 		const extension = await spaceExtension(space.id);
 		const childTools = [spaceBash, ...(extension.tools ?? [])];
 		const instructions = `${CHILD_BRIEF} You work on the Cua Space ${describeSpace(space)}.`;
+		// The child thinks like the bot that called it.
+		const { model = botModel(), thinkingLevel } = await api.agent(callContext);
 		const child = await api.commit(async (tx) => {
 			const existing = (await tx.scanConversations({ ownerTaskId: api.taskId }, 1)).items[0];
 			const id = existing?.id ?? (await tx.createConversation({ ownership: { kind: "task", taskId: api.taskId } })).id;
 			await configure(tx, id, {
-				model: botModel(), // the bot's own model
+				model,
+				thinkingLevel,
 				extensions: [traceExtension, computerExtension, extension],
 				tools: childTools,
 				modelTools: childTools,

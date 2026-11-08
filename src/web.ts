@@ -55,6 +55,7 @@ function messageOf(error: unknown): string {
 
 function statusFor(error: unknown): number {
 	if (error instanceof HttpError || error instanceof BotError) return error.status;
+	if (error instanceof ModelsConfigError) return 400;
 	if (error instanceof RoutineNotFoundError) return 404;
 	if (error instanceof RoutineValidationError) return 400;
 	if (error instanceof RoutineLimitError) return 409;
@@ -116,8 +117,6 @@ export type BotServerDeps = {
 	approvals?: Approvals;
 	/** Fits pasted chat images to the model's limits, converting formats it does not take. Without it, images pass as they are. */
 	images?: ImageProcessor;
-	/** Shown in the chat header, e.g. "grok-4.7". A function, because Settings > Model changes it while running. */
-	model?: () => string;
 	shotsDir?: string;
 	/** Enables GET /api/computer/live: the default Space's screen as a stream of H.264 access units. */
 	live?: LiveScreen;
@@ -129,7 +128,7 @@ export type BotServerDeps = {
 	connections?: Connections;
 	/** Enables GET/PUT /api/autostart: whether start.py runs when the owner signs in to this computer. */
 	autostart?: Autostart;
-	/** Enables GET/PUT /api/model: the bots' model and reasoning effort. */
+	/** Enables GET/PUT /api/model: the bots' model and reasoning effort. Also refuses a bot override with no key or sign-in. */
 	modelSettings?: ModelSettings;
 	log?: (...parts: unknown[]) => void;
 };
@@ -285,12 +284,27 @@ function botInput(body: unknown): BotInput {
 	const record = body !== null && typeof body === "object" && !Array.isArray(body) ? (body as Record<string, unknown>) : {};
 	const instructions = record.instructions ?? "";
 	if (typeof record.name !== "string" || typeof instructions !== "string") throw new HttpError(400, "name and instructions must be strings");
+	const override = (key: "model" | "thinkingLevel") => {
+		const value = record[key];
+		if (value !== undefined && value !== null && typeof value !== "string") throw new HttpError(400, `${key} must be a string or null`);
+		return value;
+	};
+	const model = override("model");
+	const thinkingLevel = override("thinkingLevel");
+	const input: BotInput = { name: record.name, instructions, ...(model === undefined ? {} : { model }), ...(thinkingLevel === undefined ? {} : { thinkingLevel }) };
 	// The ids themselves are checked by bots.ts against its lists.
 	const avatar = record.avatar;
-	if (avatar === undefined || avatar === null) return { name: record.name, instructions, ...(avatar === null ? { avatar } : {}) };
+	if (avatar === undefined || avatar === null) return { ...input, ...(avatar === null ? { avatar } : {}) };
 	const { shape, color } = typeof avatar === "object" ? (avatar as Record<string, unknown>) : {};
 	if (typeof shape !== "string" || typeof color !== "string") throw new HttpError(400, "avatar must be {shape, color} or null");
-	return { name: record.name, instructions, avatar: { shape, color } };
+	return { ...input, avatar: { shape, color } };
+}
+
+// A bot's body from POST or PUT, with its model override checked against the models that have a key or sign-in.
+async function checkedBotInput(req: IncomingMessage, deps: BotServerDeps): Promise<BotInput> {
+	const input = botInput(await readJson(req));
+	if (typeof input.model === "string") await deps.modelSettings?.check(input.model);
+	return input;
 }
 
 // The bot list: every bot with its newest message, and adding, editing, pinning, or deleting one.
@@ -299,13 +313,13 @@ async function routeBots(req: IncomingMessage, res: ServerResponse, deps: BotSer
 	if (bots === undefined) throw new HttpError(404, "not found");
 	if (method === "GET" && url.pathname === "/api/bots") return sendJson(res, 200, { bots: bots.list() });
 	if (method === "POST" && url.pathname === "/api/bots") {
-		const bot = await bots.create(botInput(await readJson(req)));
+		const bot = await bots.create(await checkedBotInput(req, deps));
 		deps.log?.(`owner (web): created bot ${bot.name} (${bot.id})`);
 		return sendJson(res, 201, bot);
 	}
 	const id = Number(url.pathname.match(/^\/api\/bots\/(\d+)$/)?.[1]);
 	if (Number.isInteger(id) && method === "PUT") {
-		const bot = await bots.update(id, botInput(await readJson(req)));
+		const bot = await bots.update(id, await checkedBotInput(req, deps));
 		deps.log?.(`owner (web): edited bot ${bot.name} (${bot.id})`);
 		return sendJson(res, 200, bot);
 	}
@@ -486,14 +500,9 @@ async function routeModel(req: IncomingMessage, res: ServerResponse, deps: BotSe
 	if (method !== "PUT") throw new HttpError(404, "not found");
 	const { model, thinkingLevel } = ((await readJson(req)) ?? {}) as { model?: unknown; thinkingLevel?: unknown };
 	if (typeof model !== "string" || typeof thinkingLevel !== "string") throw new HttpError(400, "model and thinkingLevel must be strings");
-	try {
-		const state = await settings.set(model, thinkingLevel);
-		deps.log?.(`owner (web): set the bots to ${state.model}, reasoning ${state.thinkingLevel}`);
-		sendJson(res, 200, state);
-	} catch (error) {
-		if (error instanceof ModelsConfigError) throw new HttpError(400, error.message);
-		throw error;
-	}
+	const state = await settings.set(model, thinkingLevel);
+	deps.log?.(`owner (web): set the bots to ${state.model}, reasoning ${state.thinkingLevel}`);
+	sendJson(res, 200, state);
 }
 
 function factInput(body: unknown): { fact: string; tier: "profile" | "log"; bot?: number } {
@@ -555,7 +564,7 @@ async function routeChat(req: IncomingMessage, res: ServerResponse, deps: BotSer
 		const chat = await chatFor(bots, bot);
 		const limit = Math.min(Math.max(Number(url.searchParams.get("limit")) || HISTORY_LIMIT, 1), 200);
 		const page = await chat.history(limit, decodeCursor(url.searchParams.get("before")));
-		sendJson(res, 200, { items: page.items, before: encodeCursor(page.before), live: chat.live, model: deps.model?.() ?? null });
+		sendJson(res, 200, { items: page.items, before: encodeCursor(page.before), live: chat.live });
 		return;
 	}
 	if (method === "POST" && url.pathname === "/api/chat") {

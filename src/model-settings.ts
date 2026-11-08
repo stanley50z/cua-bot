@@ -1,6 +1,6 @@
-// Settings > Model: which model the bots run on and their reasoning effort. Both live in .env as CUABOT_MODEL and
-// CUABOT_REASONING, so a hand edit and the web app change the same two lines. main.ts builds one with
-// createModelSettings() and web.ts serves it at GET/PUT /api/model.
+// Settings > Model: the model and reasoning effort every bot runs on unless its edit dialog overrides them (src/bots.ts).
+// Both live in .env as CUABOT_MODEL and CUABOT_REASONING, so a hand edit and the web app change the same two lines.
+// main.ts builds one with createModelSettings() and web.ts serves it at GET/PUT /api/model.
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { ModelThinkingLevel } from "@earendil-works/pi-ai";
@@ -24,6 +24,13 @@ export function withEnvValues(text: string, values: Record<string, string>): str
 export function createModelSettings(options: { models: Models; apply: () => Promise<void>; envFile?: string }) {
 	const { models, apply, envFile = ENV_FILE } = options;
 
+	/** The model named "provider/model". Throws ModelsConfigError unless it has a key or sign-in. */
+	async function check(model: string) {
+		const target = (await models.getAvailable()).find((choice) => `${choice.provider}/${choice.id}` === model);
+		if (target === undefined) throw new ModelsConfigError(`${model} has no key or sign-in`);
+		return target;
+	}
+
 	/** What Settings shows: the current pick, and every model with a key or sign-in with the efforts it supports. */
 	async function state() {
 		const { provider, modelId } = botModel();
@@ -43,9 +50,7 @@ export function createModelSettings(options: { models: Models; apply: () => Prom
 
 	/** Saves the pick to .env and applies it without a restart. A model that can't take the effort gets its nearest. */
 	async function set(model: string, level: string): Promise<Awaited<ReturnType<typeof state>>> {
-		const target = (await models.getAvailable()).find((choice) => `${choice.provider}/${choice.id}` === model);
-		if (target === undefined) throw new ModelsConfigError(`${model} has no key or sign-in`);
-		const thinkingLevel: ModelThinkingLevel = clampThinkingLevel(target, parseThinkingLevel(level));
+		const thinkingLevel: ModelThinkingLevel = clampThinkingLevel(await check(model), parseThinkingLevel(level));
 		const values = { CUABOT_MODEL: model, CUABOT_REASONING: thinkingLevel };
 		writeFileSync(envFile, withEnvValues(existsSync(envFile) ? readFileSync(envFile, "utf8") : "", values));
 		Object.assign(process.env, values);
@@ -53,5 +58,5 @@ export function createModelSettings(options: { models: Models; apply: () => Prom
 		return state();
 	}
 
-	return { state, set };
+	return { state, set, check };
 }
