@@ -120,15 +120,15 @@ const DATABASE = join(DATA_DIR, "cua-bot.sqlite");
 const storage = await openNodeSqliteStorage(DATABASE);
 const harness = await Harness.open(storage, { models, registry, env: pcEnv }, context);
 const root = await harness.root(context, { agent: botAgent() });
-bindRoutines({ harness, root, legacyFile: LEGACY_ROUTINE_FILE });
+const logRoutineSyncFailure = (error: unknown) =>
+	log("routine file sync failed:", error instanceof Error ? error.message : String(error));
+bindRoutines({ harness, root, legacyFile: LEGACY_ROUTINE_FILE, onError: logRoutineSyncFailure });
 harness.resume();
 const synced = await syncRoutines(context);
 log(
 	`routines: ${synced.total} from ${routineDir()} (created ${synced.created}, updated ${synced.updated}, deleted ${synced.deleted}${synced.adopted ? ", adopted existing" : ""})`,
 );
-const stopWatching = startRoutineFileWatch(context, (error) =>
-	log("routine file sync failed:", error instanceof Error ? error.message : String(error)),
-);
+const stopWatching = startRoutineFileWatch(context, logRoutineSyncFailure);
 log(`cua-bot up: model ${botModel().provider}/${botModel().modelId}, reasoning ${botThinking()}, root ${root.id}`);
 
 // Submits one owner message to the root conversation and returns what the bot sent the owner (send_message) by the end of the turn.

@@ -78,7 +78,7 @@ While you have control, your mouse, wheel and keyboard drive the Space's compute
 
 ## Routines
 
-Lists every bot's routines with the bot, the schedule in words (hover for the cron spec), next run and last run. Add, edit, run now and delete from here, with a live preview of the next runs while you type a cron schedule.
+Lists every bot's routines with the bot, the schedule in words (hover for the cron spec), next run and last run. Add, edit, run now and delete from here, with a live preview of the next runs while you type a cron schedule. Turn on Run only once and the routine fires at its next matching time, then disappears from the list.
 
 A new routine goes to the bot whose chat you had open unless you pick another; an edited routine stays with its bot. Everything saved here lands in that bot's `routines.json`. File rules are in [How it works](architecture.md#routines).
 
@@ -86,7 +86,7 @@ A new routine goes to the bot whose chat you had open unless you pick another; a
 
 The sidebar lists Every bot (the shared memory), then each bot's own memory with its fact count. Picking a bot opens its chat too.
 
-The open memory shows its lasting facts, then its dated ones, newest first. Each section ends in an add line, so where you type decides who sees the fact and its kind. Forget a fact with its ✕. The search box finds facts in every memory at once and labels each with whose it is.
+The open memory shows its lasting facts, then its dated ones, newest first. Each section ends in an add line, so where you type decides who sees the fact and its kind. The pencil rewords a fact in place and keeps its date: Enter or clicking away saves, Escape cancels. Forget a fact with its ✕. The search box finds facts in every memory at once and labels each with whose it is.
 
 ## Settings
 

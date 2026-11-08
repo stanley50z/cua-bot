@@ -92,7 +92,7 @@ async function readJson(req: IncomingMessage, limit = MAX_BODY_BYTES): Promise<u
 }
 
 // `bot` picks the bot a new routine runs in (the main bot when absent); editing never moves a routine.
-function routineInput(body: unknown): { title: string; prompt: string; cron: string; bot?: number } {
+function routineInput(body: unknown): { title: string; prompt: string; cron: string; once?: boolean; bot?: number } {
 	if (body === null || typeof body !== "object" || Array.isArray(body)) {
 		throw new HttpError(400, "expected a JSON object with title, prompt, and cron");
 	}
@@ -101,7 +101,14 @@ function routineInput(body: unknown): { title: string; prompt: string; cron: str
 		throw new HttpError(400, "title, prompt, and cron must be strings");
 	}
 	if (record.bot !== undefined && record.bot !== null && !Number.isInteger(record.bot)) throw new HttpError(400, "bot must be a bot id");
-	return { title: record.title, prompt: record.prompt, cron: record.cron, ...(typeof record.bot === "number" ? { bot: record.bot } : {}) };
+	if (record.once !== undefined && typeof record.once !== "boolean") throw new HttpError(400, "once must be true or false");
+	return {
+		title: record.title,
+		prompt: record.prompt,
+		cron: record.cron,
+		...(record.once === true ? { once: true } : {}),
+		...(typeof record.bot === "number" ? { bot: record.bot } : {}),
+	};
 }
 
 export type BotServerDeps = {
@@ -515,7 +522,7 @@ function factInput(body: unknown): { fact: string; tier: "profile" | "log"; bot?
 }
 
 // The Memory view: list every fact (log newest first) of the shared memory and of each bot's own, under
-// `bots`; add one, or forget one by its text. A POST with `bot` goes to that bot's memory, else the shared one.
+// `bots`; add one, or edit or forget one by its text. A POST with `bot` goes to that bot's memory, else the shared one.
 async function routeMemory(req: IncomingMessage, res: ServerResponse, deps: BotServerDeps, url: URL, method: string) {
 	const shared = deps.memory;
 	if (shared === undefined) throw new HttpError(404, "not found");
@@ -539,6 +546,17 @@ async function routeMemory(req: IncomingMessage, res: ServerResponse, deps: BotS
 			const saved = await (bot === undefined ? shared : ownOf(bot)).remember(fact, tier);
 			deps.log?.(`memory (web): ${saved.added ? "added" : "already had"} ${bot === undefined ? "shared" : `bot ${bot}`} ${tier}: ${saved.fact.text}`);
 			sendJson(res, saved.added ? 201 : 200, saved);
+			return;
+		}
+		if (method === "POST" && url.pathname === "/api/memory/edit") {
+			const body = await readJson(req);
+			const { fact, tier, bot } = factInput(body);
+			const { to } = (body ?? {}) as { to?: unknown };
+			if (typeof to !== "string") throw new HttpError(400, "to must be a string");
+			const edited = await (bot === undefined ? shared : ownOf(bot)).edit(fact, to, tier);
+			if (edited === undefined) throw new HttpError(404, "no saved fact matches that text");
+			deps.log?.(`memory (web): edited ${bot === undefined ? "shared" : `bot ${bot}`} ${tier}: ${fact} -> ${edited.text}`);
+			sendJson(res, 200, { fact: edited });
 			return;
 		}
 		if (method === "POST" && url.pathname === "/api/memory/forget") {
@@ -633,7 +651,7 @@ async function routeApi(
 	if (method === "GET" && url.pathname === "/api/preview") {
 		const cron = url.searchParams.get("cron") ?? "";
 		try {
-			sendJson(res, 200, previewCron(cron));
+			sendJson(res, 200, previewCron(cron, url.searchParams.has("once")));
 		} catch (error) {
 			sendJson(res, 400, { error: messageOf(error) });
 		}

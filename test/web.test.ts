@@ -200,6 +200,33 @@ test("validation and not-found failures are JSON errors with status codes", { ti
 	}
 });
 
+test("once travels through the routines API and the preview", { timeout: 20_000 }, async () => {
+	const session = await open();
+	try {
+		const body = { title: "PDMA", prompt: "Remind me", cron: "CRON_TZ=UTC 0 12 9 11 *" };
+		const created = await api(session, "POST", "/api/routines", { ...body, once: true });
+		assert.equal(created.status, 201);
+		const view = created.json as RoutineView;
+		assert.equal(view.once, true);
+		assert.equal(view.label, "once, Nov 9 12:00 UTC");
+		const saved = JSON.parse(await readFile(session.file, "utf8")) as Array<{ once?: boolean }>;
+		assert.equal(saved[0]?.once, true);
+
+		const updated = await api(session, "PUT", `/api/routines/${view.id}`, body);
+		assert.equal((updated.json as RoutineView).once, undefined);
+		assert.equal((updated.json as RoutineView).label, "yearly Nov 9 12:00 UTC");
+
+		const bad = await api(session, "POST", "/api/routines", { ...body, once: "yes" });
+		assert.equal(bad.status, 400);
+		assert.match((bad.json as { error: string }).error, /once/);
+
+		const preview = await api(session, "GET", `/api/preview?once=1&cron=${encodeURIComponent(body.cron)}`);
+		assert.deepEqual(preview.json, { label: "once, Nov 9 12:00 UTC", next: ["2024-11-09T12:00:00.000Z"] });
+	} finally {
+		await close(session);
+	}
+});
+
 test("preview computes the next three fires", { timeout: 20_000 }, async () => {
 	const session = await open();
 	try {

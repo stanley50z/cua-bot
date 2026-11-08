@@ -1,5 +1,5 @@
 // bots/<bot-name>/routines.json: the human-editable file that holds one bot's routine definitions (id, title,
-// prompt, cron). The bot syncs it into Durable state on start, on its own writes, and when it changes on
+// prompt, cron, once). The bot syncs it into Durable state on start, on its own writes, and when it changes on
 // disk. Run history (lastFiredAt) is not stored here; it stays in the Durable doc.
 // Reading validates the whole file and throws on the first problem, so a bad edit changes nothing.
 import { readFile, rename, writeFile } from "node:fs/promises";
@@ -15,6 +15,8 @@ export type RoutineDefinition = {
 	title: string;
 	prompt: string;
 	cron: string;
+	/** Fire at the next slot only, then remove this routine. */
+	once?: boolean;
 };
 
 function messageOf(error: unknown): string {
@@ -64,6 +66,8 @@ export async function readRoutineFile(
 		const title = record.title;
 		const prompt = record.prompt;
 		const cron = record.cron;
+		const once = record.once;
+		if (once !== undefined && typeof once !== "boolean") throw new Error(`${what}: once must be true or false`);
 		if (typeof title !== "string" || title.trim().length === 0) throw new Error(`${what}: title is required`);
 		if (typeof prompt !== "string" || prompt.trim().length === 0) throw new Error(`${what}: prompt is required`);
 		if (typeof cron !== "string" || cron.trim().length === 0) throw new Error(`${what}: cron is required`);
@@ -82,7 +86,7 @@ export async function readRoutineFile(
 		if (typeof id !== "string" || id.trim().length === 0) throw new Error(`${what}: id must be a non-empty string`);
 		if (seen.has(id)) throw new Error(`${name}: duplicate routine id ${JSON.stringify(id)}`);
 		seen.add(id);
-		return { id, title, prompt, cron: spec };
+		return { id, title, prompt, cron: spec, ...(once === true ? { once } : {}) };
 	});
 	return { defs, assignedIds };
 }

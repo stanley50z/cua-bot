@@ -45,6 +45,14 @@ async function writeText(file: string, text: string): Promise<void> {
 	await rename(`${file}.tmp`, file);
 }
 
+// The text as a fact stores it, or a MemoryError when a fact cannot hold it.
+function factText(text: string): string {
+	const fact = normalize(text);
+	if (fact === "") throw new MemoryError("A fact cannot be empty.");
+	if (fact.length > MAX_FACT) throw new MemoryError(`A fact is at most ${MAX_FACT} characters; this one is ${fact.length}.`);
+	return fact;
+}
+
 function factsIn(text: string | undefined, tier: Tier, file: string): Fact[] {
 	return (text ?? "").split(/\r?\n/).flatMap((line) => {
 		const match = FACT_LINE.exec(line);
@@ -90,9 +98,7 @@ export function createMemory(options: { dir: string; now?: () => Date }) {
 		/** Save a fact. Returns the stored fact, or the existing one when the same text is already in that tier. */
 		remember: (text: string, tier: Tier) =>
 			serial(async () => {
-				const fact = normalize(text);
-				if (fact === "") throw new MemoryError("A fact cannot be empty.");
-				if (fact.length > MAX_FACT) throw new MemoryError(`A fact is at most ${MAX_FACT} characters; this one is ${fact.length}.`);
+				const fact = factText(text);
 				const existing = (await all())[tier].find((known) => same(known.text, fact));
 				if (existing !== undefined) return { fact: existing, added: false };
 				const date = localDate(now());
@@ -102,6 +108,22 @@ export function createMemory(options: { dir: string; now?: () => Date }) {
 				const before = (await readText(file)) ?? (tier === "profile" ? PROFILE_HEADER : `# ${date.slice(0, 7)}\n`);
 				await writeText(file, `${before}${before.endsWith("\n") ? "" : "\n"}- (${date}) ${fact}\n`);
 				return { fact: { text: fact, date, tier, file: name } satisfies Fact, added: true };
+			}),
+
+		/** Reword the tier's fact whose text matches, on its own line and keeping its date. Returns it, or undefined when none matches. */
+		edit: (before: string, after: string, tier: Tier) =>
+			serial(async () => {
+				const fact = factText(after);
+				const known = (await all())[tier];
+				const target = known.find((candidate) => same(candidate.text, before));
+				if (target === undefined) return undefined;
+				if (known.some((other) => other !== target && same(other.text, fact))) throw new MemoryError(`"${fact}" is already saved.`);
+				const file = join(dir, target.file);
+				const lines = ((await readText(file)) as string).split(/\r?\n/);
+				const at = lines.findIndex((line) => same(FACT_LINE.exec(line)?.[2] ?? "", before));
+				lines[at] = `- (${target.date}) ${fact}`;
+				await writeText(file, lines.join("\n"));
+				return { ...target, text: fact } satisfies Fact;
 			}),
 
 		/** Remove every fact whose text matches, ignoring case and spacing. Returns the removed facts. */

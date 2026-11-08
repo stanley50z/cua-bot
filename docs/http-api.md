@@ -79,6 +79,7 @@ Code: [src/approvals.ts](../src/approvals.ts).
 | Route | Does |
 | --- | --- |
 | `GET /api/memory` | The shared memory and, under `bots`, each bot's own ([src/memory.ts](../src/memory.ts)). |
+| `POST /api/memory/edit` | `{"fact", "to", "tier", "bot"}` rewords the fact whose text matches `fact` in that tier, keeping its date; without `bot`, in the shared memory. 400 for an empty or oversized `to`, or one another fact in the tier already has. 404 when nothing matches. |
 | `GET /api/connections` | Checks this computer, the owner's SSH hosts and the Cua Spaces for the Connections tab ([src/connections.ts](../src/connections.ts)). |
 | `GET /api/push` | The Web Push public key ([src/push.ts](../src/push.ts)). |
 | `POST /api/push` | Saves a browser's `PushSubscription`. |

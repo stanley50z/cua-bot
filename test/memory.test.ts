@@ -63,6 +63,37 @@ test("forget removes matching facts from any file and leaves everything else", (
 		assert.deepEqual(await memory.forget("never saved"), []);
 	}));
 
+test("edit rewords one fact on its own line and keeps its date and everything around it", () =>
+	withDir(async (dir) => {
+		await mkdir(join(dir, "log"), { recursive: true });
+		await writeFile(join(dir, "profile.md"), "# About the owner\nSome notes I wrote.\n- (2026-10-01) Lives in Seattle\n- (2026-10-02) Timezone is Pacific\n");
+		await writeFile(join(dir, "log", "2026-09.md"), "# 2026-09\n- (2026-09-14) Lives in Seattle\n");
+		const memory = createMemory({ dir, now: () => new Date("2026-11-08T09:00:00") });
+		const edited = await memory.edit("lives in SEATTLE", "  Lives in   Pittsburgh ", "profile");
+		assert.deepEqual(edited, { text: "Lives in Pittsburgh", date: "2026-10-01", tier: "profile", file: "profile.md" });
+		assert.equal(await readFile(join(dir, "profile.md"), "utf8"), "# About the owner\nSome notes I wrote.\n- (2026-10-01) Lives in Pittsburgh\n- (2026-10-02) Timezone is Pacific\n");
+		assert.equal(await readFile(join(dir, "log", "2026-09.md"), "utf8"), "# 2026-09\n- (2026-09-14) Lives in Seattle\n", "the same words in the other tier stay");
+
+		const dated = await memory.edit("Lives in Seattle", "Moved out of Seattle", "log");
+		assert.equal(dated?.file, "log/2026-09.md");
+		assert.equal(await readFile(join(dir, "log", "2026-09.md"), "utf8"), "# 2026-09\n- (2026-09-14) Moved out of Seattle\n");
+	}));
+
+test("edit fails on a missing fact, on bad text, and on text another fact already has, but allows changing only the case", () =>
+	withDir(async (dir) => {
+		const memory = createMemory({ dir, now: () => new Date("2026-10-31T09:00:00") });
+		await memory.remember("Prefers short answers", "profile");
+		await memory.remember("Timezone is Pacific", "profile");
+		assert.equal(await memory.edit("never saved", "Anything", "profile"), undefined);
+		assert.equal(await memory.edit("Prefers short answers", "Anything", "log"), undefined, "looks only in the given tier");
+		await assert.rejects(memory.edit("Prefers short answers", "   ", "profile"), /cannot be empty/);
+		assert.equal((await memory.edit("Prefers short answers", "y".repeat(500), "profile"))?.text, "y".repeat(500));
+		await assert.rejects(memory.edit("y".repeat(500), "y".repeat(501), "profile"), /at most 500 characters/);
+		await assert.rejects(memory.edit("y".repeat(500), "timezone is PACIFIC", "profile"), /already saved/);
+		assert.equal((await memory.edit("Timezone is Pacific", "timezone is PACIFIC", "profile"))?.text, "timezone is PACIFIC");
+		assert.deepEqual((await memory.all()).profile.map((fact) => fact.text), ["y".repeat(500), "timezone is PACIFIC"]);
+	}));
+
 test("hand edits are read as-is, including a byte-order mark from a Windows editor", () =>
 	withDir(async (dir) => {
 		await mkdir(join(dir, "log"), { recursive: true });
@@ -154,6 +185,44 @@ test("a fact the bot remembers, shared or its own, is in its prompt on the next 
 			assert.doesNotMatch(await readFile(join(dir, "shared", "profile.md"), "utf8"), /orchids/, "an own fact stays out of the shared memory");
 		} finally {
 			await harness.close(context);
+		}
+	}));
+
+test("the web app edits a fact in the shared memory or a bot's own", () =>
+	withDir(async (dir) => {
+		const now = () => new Date("2026-10-31T09:00:00");
+		const memory = createMemory({ dir, now });
+		const own = createMemory({ dir: join(dir, "bot-7"), now });
+		await memory.remember("Timezone is Pacific", "profile");
+		await memory.remember("Dinner Friday", "log");
+		await own.remember("Timezone is Pacific", "profile");
+		const server: Server = createBotServer({ say: async (text) => text, memory, botMemories: () => [{ id: 7, memory: own }], context });
+		await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+		const address = server.address();
+		assert.ok(address !== null && typeof address === "object");
+		const edit = (body: unknown) =>
+			fetch(`http://127.0.0.1:${address.port}/api/memory/edit`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+		const texts = async (store: typeof memory, tier: "profile" | "log") => (await store.all())[tier].map((fact) => fact.text);
+		try {
+			const saved = await edit({ fact: "Timezone is Pacific", to: "Timezone is Eastern", tier: "profile" });
+			assert.equal(saved.status, 200);
+			assert.deepEqual(await saved.json(), { fact: { text: "Timezone is Eastern", date: "2026-10-31", tier: "profile", file: "profile.md" } });
+			assert.deepEqual(await texts(memory, "profile"), ["Timezone is Eastern"]);
+			assert.deepEqual(await texts(own, "profile"), ["Timezone is Pacific"], "a shared edit leaves the bot's own memory alone");
+
+			assert.equal((await edit({ fact: "Timezone is Pacific", to: "Timezone is Central", tier: "profile", bot: 7 })).status, 200);
+			assert.deepEqual(await texts(own, "profile"), ["Timezone is Central"]);
+			assert.deepEqual(await texts(memory, "profile"), ["Timezone is Eastern"], "a bot's edit leaves the shared memory alone");
+
+			assert.equal((await edit({ fact: "Dinner Friday", to: "Dinner Saturday", tier: "log" })).status, 200);
+			assert.deepEqual(await texts(memory, "log"), ["Dinner Saturday"]);
+
+			assert.equal((await edit({ fact: "Never saved", to: "Anything", tier: "profile" })).status, 404);
+			assert.equal((await edit({ fact: "Timezone is Eastern", to: "   ", tier: "profile" })).status, 400);
+			assert.equal((await edit({ fact: "Timezone is Eastern", tier: "profile" })).status, 400, "the new text is required");
+			assert.equal((await edit({ fact: "Timezone is Eastern", to: "Anything", tier: "profile", bot: 8 })).status, 404);
+		} finally {
+			await new Promise<void>((resolve) => server.close(() => resolve()));
 		}
 	}));
 

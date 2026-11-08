@@ -60,6 +60,7 @@ type Session = {
 	clock: { now: number };
 	harness: Harness;
 	root: Conversation;
+	syncErrors: unknown[];
 };
 
 async function open(): Promise<Session> {
@@ -75,9 +76,10 @@ async function open(): Promise<Session> {
 		context,
 	);
 	const root = await harness.root(context, { agent: { model: { provider: "faux", modelId: "faux-1" } } });
-	bindRoutines({ harness, root, dir: dirname(dirname(file)), now: () => clock.now });
+	const syncErrors: unknown[] = [];
+	bindRoutines({ harness, root, dir: dirname(dirname(file)), now: () => clock.now, onError: (error) => syncErrors.push(error) });
 	harness.resume();
-	return { dir, file, clock, harness, root };
+	return { dir, file, clock, harness, root, syncErrors };
 }
 
 async function close(session: Session): Promise<void> {
@@ -253,6 +255,141 @@ test("a missing file adopts current routines instead of deleting them", { timeou
 			(await sleeping(session, 1)).map((task) => task.until),
 			deadlineBefore,
 		);
+	} finally {
+		await close(session);
+	}
+});
+
+const ONCE = { id: "once", title: "One-off", prompt: "Remind me", cron: "CRON_TZ=UTC 0 12 9 11 *", once: true };
+
+async function firings(session: Session, title: string): Promise<number> {
+	const view = await session.root.context(context);
+	return view.messages.filter((message) => messageText(message).includes(`[routine] "${title}" is due`)).length;
+}
+
+function fireAt(session: Session, until: number): void {
+	session.clock.now = until;
+	session.harness.resume();
+}
+
+test("a firing once-routine leaves the bot's other routines alone", { timeout: 20_000 }, async () => {
+	const session = await open();
+	try {
+		await writeDefs(session, [ONCE, AGENDA]);
+		await syncRoutines(context);
+		const [agenda, once] = await sleeping(session, 2);
+		assert.equal(agenda?.until, Date.UTC(2023, 10, 15, 7, 30));
+		assert.equal(once?.until, Date.UTC(2024, 10, 9, 12, 0));
+		assert.equal((await listRoutineViews(context)).find((view) => view.id === "once")?.label, "once, Nov 9 12:00 UTC");
+
+		await writeDefs(session, [{ ...ONCE, cron: "@every 1m" }, AGENDA]);
+		await syncRoutines(context);
+		await sleeping(session, 2);
+		fireAt(session, BASE + 60_000);
+		await eventually(async () => (await firings(session, "One-off")) === 1);
+		await eventually(async () => (await readDefs(session)).length === 1);
+
+		assert.deepEqual((await readDefs(session)).map((def) => def.id), ["agenda"]);
+		assert.deepEqual((await listRoutineViews(context)).map((view) => view.id), ["agenda"]);
+		assert.deepEqual((await sleeping(session, 1)).map((task) => task.until), [Date.UTC(2023, 10, 15, 7, 30)]);
+
+		// Nothing is left over from the firing: the same id written back is a new routine.
+		await writeDefs(session, [ONCE, AGENDA]);
+		assert.equal((await syncRoutines(context)).created, 1);
+		assert.deepEqual((await readDefs(session)).map((def) => def.id), ["once", "agenda"]);
+	} finally {
+		await close(session);
+	}
+});
+
+test("a missing file adopts a once-routine as once", { timeout: 20_000 }, async () => {
+	const session = await open();
+	try {
+		await writeDefs(session, [ONCE]);
+		await syncRoutines(context);
+		await rm(session.file);
+		assert.equal((await syncRoutines(context)).adopted, true);
+		assert.deepEqual(await readDefs(session), [ONCE]);
+	} finally {
+		await close(session);
+	}
+});
+
+test("a fired once-routine stays gone when its file could not be cleaned at the time", { timeout: 20_000 }, async () => {
+	const session = await open();
+	try {
+		await writeDefs(session, [{ ...ONCE, cron: "@every 1m" }]);
+		await syncRoutines(context);
+		await sleeping(session, 1);
+		await writeDefs(session, "not json{");
+		fireAt(session, BASE + 60_000);
+		await eventually(async () => session.syncErrors.length === 1);
+		assert.deepEqual(await listRoutineViews(context), []);
+
+		await writeDefs(session, [{ ...ONCE, cron: "@every 1m" }, SWEEP]);
+		const summary = await syncRoutines(context);
+		assert.deepEqual(summary, { created: 1, updated: 0, deleted: 0, total: 1, adopted: false });
+		assert.deepEqual((await readDefs(session)).map((def) => def.id), ["sweep"]);
+		assert.deepEqual((await listRoutineViews(context)).map((view) => view.id), ["sweep"]);
+
+		// The note is used up: the same id added later is a new routine.
+		await writeDefs(session, [{ ...ONCE, cron: "@every 1m" }, SWEEP]);
+		assert.equal((await syncRoutines(context)).created, 1);
+		assert.deepEqual((await listRoutineViews(context)).map((view) => view.id).sort(), ["once", "sweep"]);
+	} finally {
+		await close(session);
+	}
+});
+
+test("turning once on or off replaces the sleeper and sticks", { timeout: 20_000 }, async () => {
+	const session = await open();
+	try {
+		await writeDefs(session, [{ ...SWEEP, once: false }]);
+		await syncRoutines(context);
+		assert.equal((await listRoutineViews(context))[0]?.once, undefined);
+		const [plain] = await sleeping(session, 1);
+
+		await writeDefs(session, [{ ...SWEEP, once: true }]);
+		assert.equal((await syncRoutines(context)).updated, 1);
+		assert.equal((await session.harness.getTask(plain!.id, context))?.state.status, "terminal");
+		assert.equal((await listRoutineViews(context))[0]?.once, true);
+
+		const [marked] = await sleeping(session, 1);
+		await updateRoutine("sweep", { title: SWEEP.title, prompt: SWEEP.prompt, cron: SWEEP.cron }, context);
+		assert.equal((await session.harness.getTask(marked!.id, context))?.state.status, "terminal");
+		assert.equal((await listRoutineViews(context))[0]?.once, undefined);
+		await sleeping(session, 1);
+
+		fireAt(session, BASE + 60_000);
+		await eventually(async () => (await firings(session, SWEEP.title)) === 1);
+		assert.deepEqual((await sleeping(session, 1)).map((task) => task.until), [BASE + 120_000]);
+		assert.deepEqual((await readDefs(session)).map((def) => def.id), ["sweep"]);
+	} finally {
+		await close(session);
+	}
+});
+
+test("a non-boolean once is rejected whole", { timeout: 20_000 }, async () => {
+	const session = await open();
+	try {
+		await writeDefs(session, [{ ...SWEEP, once: "yes" }]);
+		await assert.rejects(syncRoutines(context), /once must be true or false/);
+		assert.deepEqual(await listRoutineViews(context), []);
+	} finally {
+		await close(session);
+	}
+});
+
+test("running a once-routine by hand keeps it armed for its slot", { timeout: 20_000 }, async () => {
+	const session = await open();
+	try {
+		await writeDefs(session, [ONCE]);
+		await syncRoutines(context);
+		await sleeping(session, 1);
+		await runRoutineNow("once", context);
+		await eventually(async () => (await firings(session, "One-off")) === 1);
+		assert.deepEqual((await readDefs(session)).map((def) => def.id), ["once"]);
+		assert.deepEqual((await sleeping(session, 1)).map((task) => task.until), [Date.UTC(2024, 10, 9, 12, 0)]);
 	} finally {
 		await close(session);
 	}

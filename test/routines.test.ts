@@ -84,6 +84,11 @@ function answerFor(request: { messages: readonly Message[] }): AssistantMessage 
 			{ stopReason: "toolUse" },
 		);
 	}
+	if (text.includes("schedule once")) {
+		return fauxAssistantMessage([fauxToolCall("schedule", { title: TITLE, prompt: PROMPT, cron: "@every 1m", once: true })], {
+			stopReason: "toolUse",
+		});
+	}
 	if (text.includes("schedule 51")) {
 		const calls = Array.from({ length: 51 }, (_, i) =>
 			fauxToolCall("schedule", { title: `R${i + 1}`, prompt: PROMPT, cron: "@every 1m" }, { id: `cap-${i + 1}` }),
@@ -351,6 +356,41 @@ test("the second firing says when it last ran, and list shows it", { timeout: 20
 		session.harness.resume();
 		await eventually(async () => wakeCount(await transcript(session.root)) === 2);
 		assert.match(await transcript(session.root), /last ran 1 minute ago/);
+		assertNoFaults(session);
+	} finally {
+		await session.harness.close(context);
+	}
+});
+
+test("a once routine fires one time and removes itself", { timeout: 20_000 }, async () => {
+	const clock = { now: BASE };
+	const session = await openSession(new MemoryStorage(), clock, scriptedModel());
+	try {
+		await say(session.root, "schedule once please");
+		const { taskId } = scheduledId(await transcript(session.root));
+		assert.match(await transcript(session.root), /It removes itself after that\./);
+		const saved = JSON.parse(await readFile(session.routineFile, "utf8")) as Array<{ once?: boolean }>;
+		assert.equal(saved[0]?.once, true);
+		await say(session.root, "list routines");
+		assert.match(await transcript(session.root), /@every 1m {2}once {2}next /);
+
+		const until = await sleepDeadline(session.harness);
+		clock.now = until;
+		session.harness.resume();
+		await eventually(async () => wakeCount(await transcript(session.root)) === 1);
+		await eventually(async () => !existsSync(session.routineFile));
+		assert.match(await transcript(session.root), /is due \(once, every 1m\)/);
+
+		const record = await session.harness.getTask(taskId as TaskId, context);
+		assert.equal(record?.state.status, "terminal");
+		if (record?.state.status === "terminal") assert.equal(record.state.outcome.status, "completed");
+
+		clock.now = until + 300_000;
+		session.harness.resume();
+		await new Promise((resolve) => setTimeout(resolve, 300));
+		assert.equal(wakeCount(await transcript(session.root)), 1);
+		await say(session.root, "list routines");
+		assert.match(await transcript(session.root), /No routines\./);
 		assertNoFaults(session);
 	} finally {
 		await session.harness.close(context);

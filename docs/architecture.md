@@ -145,6 +145,8 @@ Tools: `schedule`, `list_routines`, `run_routine`, `cancel_routine`. Each routin
 
 **Missed runs.** A deadline that passed while the bot was down fires once on restart. Missed slots are not replayed.
 
+**One-time routines.** A routine with `once: true` fires at its next slot and is then removed from the database and `routines.json`, without the model doing anything. Removal happens as soon as the turn is queued, because a firing never waits for the answer, so a turn that fails is not retried. Cron has no year, so `0 12 9 11 *` with `once` means the next Nov 9 at 12:00. Run now does not use it up.
+
 **Ownership.** A routine is a task of its bot's conversation and fires as a turn in that bot's chat. A bot's tools see and change only its own routines. At most 50 per bot. Deleting a bot cancels its routines.
 
 ### `routines.json`
@@ -162,8 +164,9 @@ Each bot's definitions live in `routines.json` in its folder. The chat tools, th
 ```
 
 - `id` is optional; the bot fills it in.
-- The file is the source of truth for its bot's definitions. On start and on every change the service syncs that bot's durable tasks to match: editing a title, prompt or cron replaces that routine's sleeper, and removing an entry cancels it.
-- An invalid file (bad JSON, bad cron, duplicate ids, more than 50 entries) is rejected whole. That bot's running routines keep going, the other bots still sync, and the log says why.
+- `once` is optional; `true` makes it a one-time routine.
+- The file is the source of truth for its bot's definitions. On start and on every change the service syncs that bot's durable tasks to match: editing a title, prompt, cron or `once` replaces that routine's sleeper, and removing an entry cancels it.
+- An invalid file (bad JSON, bad cron, a non-boolean `once`, duplicate ids, more than 50 entries) is rejected whole. That bot's running routines keep going, the other bots still sync, and the log says why.
 - If a bot's file is missing while it has routines, the service recreates it from them instead of deleting them. To cancel them all, empty the file to `[]` or delete them in the app.
 - A bot with no routines has no file; removing its last routine deletes it.
 - The file moves with its bot's folder on a rename.
