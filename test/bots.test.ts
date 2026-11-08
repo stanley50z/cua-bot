@@ -12,7 +12,7 @@ import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { Message } from "@earendil-works/pi-ai";
 import { createModels } from "@earendil-works/pi-ai/models";
 import { fauxAssistantMessage, fauxProvider, fauxText, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
-import { createRegistry, Harness, MemoryStorage } from "@earendil-works/pi-durable";
+import { type AgentChange, type ConversationId, createRegistry, Harness, MemoryStorage } from "@earendil-works/pi-durable";
 import { botMemories, type BotView, createBots, createBotsExtension, defaultAvatar, readBots } from "../src/bots.ts";
 import { type ChatItem, SEND_MESSAGE } from "../src/chat.ts";
 import { bindRoutines, createRoutinesExtension, deleteRoutine, removeBotRoutines, type RoutineView, syncRoutines } from "../src/routines.ts";
@@ -57,11 +57,12 @@ async function open() {
 	await writeFile(legacyFile, JSON.stringify([{ id: "old", title: "Old agenda", prompt: "Brief me", cron: "@daily" }]));
 	bindRoutines({ harness, root, dir, legacyFile });
 	harness.resume();
+	const agent: AgentChange = { model: MODEL };
 	const bots = await createBots({
 		harness,
 		root,
 		context,
-		agent: { model: MODEL },
+		agent: () => agent,
 		dir,
 		renamed: () => syncRoutines(context),
 		removing: (id) => removeBotRoutines(id, context),
@@ -74,6 +75,7 @@ async function open() {
 	assert.ok(address !== null && typeof address === "object");
 	return {
 		base: `http://127.0.0.1:${address.port}`,
+		agent,
 		bots,
 		harness,
 		prompts,
@@ -101,6 +103,22 @@ async function until<T>(read: () => Promise<T>, done: (value: T) => boolean): Pr
 		await new Promise((resolve) => setTimeout(resolve, 50));
 	}
 }
+
+test("applyAgent moves every bot to the current settings, and a new bot starts on them", { timeout: 20_000 }, async () => {
+	const bot = await open();
+	try {
+		await send(bot.base, "POST", "/api/bots", { name: "Scout", instructions: "" });
+		Object.assign(bot.agent, { thinkingLevel: "high" });
+		await bot.bots.applyAgent();
+		await send(bot.base, "POST", "/api/bots", { name: "Later", instructions: "" });
+		const levels = await Promise.all(
+			(await until(async () => bot.bots.list(), (list) => list.length === 3)).map(async ({ id }) => (await (await bot.harness.conversation(id as ConversationId, context))?.agent(context))?.thinkingLevel),
+		);
+		assert.deepEqual(levels, ["high", "high", "high"]);
+	} finally {
+		await bot.close();
+	}
+});
 
 test("a bot's message lands in the other bot's chat and wakes it", { timeout: 20_000 }, async () => {
 	const bot = await open();

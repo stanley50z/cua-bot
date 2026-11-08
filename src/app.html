@@ -8,7 +8,7 @@
  The cua-bot web app (Workbench layout), served by src/web.ts at GET /. One self-contained document:
  inline CSS and JS, no dependencies, works offline. Talks to /api/bots (the bot list and its edits),
  /api/chat?bot=<id> (one bot's history, send, react, stop),
- /api/chat/events (server-sent live state), /api/chat/computer, /api/computer/control, /api/push, /api/routines, /api/connections, /api/autostart,
+ /api/chat/events (server-sent live state), /api/chat/computer, /api/computer/control, /api/push, /api/routines, /api/connections, /api/autostart, /api/model,
  and /shots/. Registers /sw.js for Web Push once the owner turns notifications on.
  Every server string is rendered with textContent or built DOM nodes, never parsed as HTML.
 -->
@@ -321,9 +321,10 @@ dialog .row .btn.danger { margin-right: auto; }
 .setting input[type="checkbox"]:checked { background: var(--accent); }
 .setting input[type="checkbox"]:checked::after { transform: translateX(16px); }
 .setting.field { align-items: flex-start; cursor: default; }
-.setting.field input, .setting.field textarea { flex: none; width: 220px; border: 1px solid var(--line); border-radius: 7px; padding: 6px 9px; font: inherit; color: var(--ink); background: #fff; resize: vertical; }
+.setting.field input, .setting.field textarea, .setting.field select { flex: none; width: 220px; border: 1px solid var(--line); border-radius: 7px; padding: 6px 9px; font: inherit; color: var(--ink); background: #fff; resize: vertical; }
+.setting.field select:disabled { color: var(--muted); background: var(--bg); }
 .setting.field input { font-size: 17px; letter-spacing: .12em; }
-.setting.field input:focus, .setting.field textarea:focus { outline: none; border-color: #9FB2C8; }
+.setting.field input:focus, .setting.field textarea:focus, .setting.field select:focus { outline: none; border-color: #9FB2C8; }
 /* settings' own sidebar, styled like the bot list: one row per tab */
 #view-settings { flex-direction: row; }
 .pane { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
@@ -416,6 +417,7 @@ dialog .row { display: flex; gap: 8px; justify-content: flex-end; margin-top: 18
  <symbol id="i-pointer" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M6 3.5l12.5 7.2-5.6 1.4 3.3 5.9-2.6 1.5-3.3-5.9-4.3 3.9z"/></symbol>
  <symbol id="i-screen" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4.5" width="18" height="12" rx="1.5"/><path d="M9 20h6M12 16.5V20"/></symbol>
  <symbol id="i-power" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 3.5v8"/><path d="M7.2 6.4a7.5 7.5 0 1 0 9.6 0"/></symbol>
+ <symbol id="i-chip" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="7" y="7" width="10" height="10" rx="1.5"/><path d="M10 3.5V7M14 3.5V7M10 17v3.5M14 17v3.5M3.5 10H7M3.5 14H7M17 10h3.5M17 14h3.5"/></symbol>
  <symbol id="i-edit"viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13 7l4 4"/></symbol>
 </svg>
 
@@ -474,6 +476,7 @@ dialog .row { display: flex; gap: 8px; justify-content: flex-end; margin-top: 18
     <div class="bar"><h2 id="settings-h">Settings</h2></div>
     <ul id="settings-tabs">
      <li><button type="button" class="navrow" data-tab="chat" aria-current="page"><svg aria-hidden="true"><use href="#i-chat"/></svg>Chat</button></li>
+     <li><button type="button" class="navrow" data-tab="model" aria-current="false"><svg aria-hidden="true"><use href="#i-chip"/></svg>Model</button></li>
      <li><button type="button" class="navrow" data-tab="connections" aria-current="false"><svg aria-hidden="true"><use href="#i-screen"/></svg>Connections</button></li>
      <li><button type="button" class="navrow" data-tab="startup" aria-current="false"><svg aria-hidden="true"><use href="#i-power"/></svg>Startup</button></li>
     </ul>
@@ -486,6 +489,14 @@ dialog .row { display: flex; gap: 8px; justify-content: flex-end; margin-top: 18
      <label class="setting"><span><b>Show routine runs</b><small>A line in the bot's chat each time one of its routines starts.</small></span><input type="checkbox" data-setting="routineRuns"></label>
      <label class="setting field"><span><b>Quick replies</b><small>One per line. They show on the bar over text you select in a message; clicking one adds that text to the message box as a quote, with the reply after it.</small></span><textarea id="set-phrases" rows="4" spellcheck="false"></textarea></label>
      <label class="setting field"><span><b>Quick emoji</b><small>The reactions under a reply's smiley, and emoji replies on the bar over selected text, which add that text to the message box as a quote with the emoji after it.</small></span><input type="text" id="set-emoji" spellcheck="false" autocomplete="off"></label>
+    </div>
+   </div>
+   <div class="pane" id="tab-model" hidden>
+    <div class="bar"><h1>Model</h1><span class="aside">Saved in .env on this computer.</span></div>
+    <div class="banner" id="model-error" role="alert" hidden></div>
+    <div class="settings">
+     <label class="setting field"><span><b>Model</b><small>What every bot runs on, from its next turn. Lists the models with a key in models.json or a sign-in from src/login.ts.</small></span><select id="set-model" disabled></select></label>
+     <label class="setting field"><span><b>Reasoning effort</b><small>How long the bots think before answering. More is slower and uses more of your quota. The computer-use helper runs with reasoning off.</small></span><select id="set-reasoning" disabled></select></label>
     </div>
    </div>
    <div class="pane" id="tab-connections" hidden>
@@ -2237,9 +2248,9 @@ $("notify").addEventListener("click", async () => {
 
 /* ---------- views and the URL ---------- */
 // The URL's hash keeps the owner's place, so a reload, Back, or a copied link lands there again: `view` (routines,
-// memory, settings; the chat when absent), `tab` (Settings' connections or startup; its chat tab when absent), and `bot` (the open
+// memory, settings; the chat when absent), `tab` (Settings' model, connections or startup; its chat tab when absent), and `bot` (the open
 // bot; the main bot when absent). #bot=<id> links from before views had URLs still open that bot's chat.
-const VIEWS = ["chat", "routines", "memory", "settings"], TABS = ["chat", "connections", "startup"];
+const VIEWS = ["chat", "routines", "memory", "settings"], TABS = ["chat", "model", "connections", "startup"];
 let place = { view: "chat", tab: "chat" };
 
 function readPlace() {
@@ -2271,6 +2282,7 @@ function showView(view, tab = place.tab) {
 function loadView() {
   if (place.view === "routines") loadRoutines();
   else if (place.view === "memory") loadMemory();
+  else if (place.view === "settings" && place.tab === "model") loadModelSettings();
   else if (place.view === "settings" && place.tab === "connections") loadConnections();
   else if (place.view === "settings" && place.tab === "startup") loadAutostart();
   else if (place.view === "chat") focusInput();
@@ -2342,6 +2354,41 @@ $("set-autostart").addEventListener("change", async () => {
   try { showAutostart(await request("PUT", "/api/autostart", { enabled: wanted })); showStartupError(""); }
   catch (error) { input.checked = !wanted; input.disabled = false; showStartupError("Could not change it: " + error.message); }
 });
+
+/* ---------- model ---------- */
+// The bots' model and reasoning effort live in the computer's .env (src/model-settings.ts), so these read and write
+// /api/model. Each change saves both; the server answers with what it kept, and a failed save shows the last good state.
+let modelState = null;
+function showModelError(message) { $("model-error").textContent = message; $("model-error").hidden = !message; }
+function showReasoning(level) {
+  const levels = modelState.choices.find((choice) => choice.id === $("set-model").value).levels;
+  $("set-reasoning").replaceChildren(...levels.map((name) => new Option(name === "xhigh" ? "Extra high" : capital(name), name)));
+  $("set-reasoning").value = level;
+}
+function showModelSettings(next) {
+  modelState = next;
+  const groups = new Map();
+  for (const choice of next.choices) {
+    if (!groups.has(choice.provider)) groups.set(choice.provider, Object.assign(document.createElement("optgroup"), { label: choice.provider }));
+    groups.get(choice.provider).append(new Option(choice.name, choice.id));
+  }
+  $("set-model").replaceChildren(...groups.values());
+  $("set-model").value = next.model;
+  showReasoning(next.thinkingLevel);
+  $("set-model").disabled = $("set-reasoning").disabled = false;
+  $("model").textContent = next.model.slice(next.model.indexOf("/") + 1);
+}
+async function loadModelSettings() {
+  try { showModelSettings(await request("GET", "/api/model")); showModelError(""); }
+  catch (error) { showModelError("Could not read the model settings: " + error.message); }
+}
+async function saveModelSettings(level) {
+  $("set-model").disabled = $("set-reasoning").disabled = true;
+  try { showModelSettings(await request("PUT", "/api/model", { model: $("set-model").value, thinkingLevel: level })); showModelError(""); }
+  catch (error) { showModelSettings(modelState); showModelError("Could not change it: " + error.message); }
+}
+$("set-model").addEventListener("change", () => saveModelSettings($("set-reasoning").value));
+$("set-reasoning").addEventListener("change", () => saveModelSettings($("set-reasoning").value));
 
 /* ---------- connections ---------- */
 function showConnError(message) { $("conn-error").textContent = message; $("conn-error").hidden = !message; }

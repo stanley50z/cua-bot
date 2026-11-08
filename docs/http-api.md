@@ -72,7 +72,7 @@ Code: [src/approvals.ts](../src/approvals.ts).
 | `POST /api/approvals/<id>/approve` | Runs the call. Optional JSON `{to, subject, body}` edits an email first. |
 | `POST /api/approvals/<id>/discard` | Drops it. |
 
-## Memory, connections, push, startup
+## Memory, connections, push, startup, model
 
 | Route | Does |
 | --- | --- |
@@ -83,3 +83,5 @@ Code: [src/approvals.ts](../src/approvals.ts).
 | `GET /sw.js` | The service worker that shows the pushes ([src/sw.js](../src/sw.js)). |
 | `GET /api/autostart` | `{supported, enabled, where}`: whether `start.py` runs when the owner signs in, and where that is saved ([src/autostart.ts](../src/autostart.ts)). |
 | `PUT /api/autostart` | `{"enabled": true}` or `false` adds or removes the sign-in entry and returns the new state. |
+| `GET /api/model` | `{model, thinkingLevel, choices}`: the bots' model as `provider/model`, their reasoning effort, and every model with a key or sign-in with the efforts it supports ([src/model-settings.ts](../src/model-settings.ts)). |
+| `PUT /api/model` | `{"model", "thinkingLevel"}` saves both to `.env`, applies them to every bot and returns the new state. An effort the model doesn't support becomes its nearest one. 400 for a model with no key or sign-in. |

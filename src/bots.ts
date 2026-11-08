@@ -390,7 +390,8 @@ export async function createBots(deps: {
 	harness: Harness;
 	root: Conversation;
 	context: Context;
-	agent: AgentChange;
+	/** The model settings every bot runs with, as of the call. */
+	agent: () => AgentChange;
 	/** Where the bot folders live; DEFAULT_BOTS_DIR unless a test moves them. */
 	dir?: string;
 	computer?: (conversation: Conversation) => ComputerView;
@@ -411,7 +412,7 @@ export async function createBots(deps: {
 	}, context);
 	for (const bot of botsOf(await harness.snapshot(BotsDoc, context))) {
 		// A bot made by an older run keeps the model it had; give every bot the configured one, like the root.
-		if (!bot.main) await harness.commit((tx) => configure(tx, bot.id as ConversationId, deps.agent), context);
+		if (!bot.main) await harness.commit((tx) => configure(tx, bot.id as ConversationId, deps.agent()), context);
 		// Every bot has an agent file the owner can open, even before it has instructions.
 		if (!existsSync(agentPath(dir, bot))) await writeAgentFile(dir, bot, "");
 	}
@@ -510,9 +511,13 @@ export async function createBots(deps: {
 			return chats.get(id ?? Number(root.id))?.chat;
 		},
 		async create(input: BotInput): Promise<Bot> {
-			const bot = await createBot((run) => harness.commit(run, context), dir, input, deps.agent, Date.now());
+			const bot = await createBot((run) => harness.commit(run, context), dir, input, deps.agent(), Date.now());
 			await reload();
 			return bot;
+		},
+		/** Puts every bot, the main one too, on the current model settings, for its next turn. */
+		async applyAgent() {
+			for (const bot of list()) await harness.commit((tx) => configure(tx, bot.id as ConversationId, deps.agent()), context);
 		},
 		async update(id: number, input: BotInput): Promise<Bot> {
 			const { bot, before } = await harness.commit(async (tx) => {

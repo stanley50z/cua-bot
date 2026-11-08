@@ -35,9 +35,16 @@ Copy `models.example.json` to `models.json` (gitignored) and list your endpoints
 | `models[].id` | The deployment name. |
 | `models[]` optional | `reasoning`, `thinkingLevelMap`, `input`, `contextWindow`, `maxTokens`, `cost`. |
 
-xAI is built in as `xai/<model>`. Sign in once with `node src/login.ts`, or set `XAI_API_KEY`.
+Two subscriptions are built in, signed in once with the bot stopped and saved to `data/credentials.json`:
 
-The `computer_use` helper runs on the same model as the bot.
+| Provider | Sign in | Or set |
+| --- | --- | --- |
+| `openai/<model>` | `node src/login.ts openai` (your ChatGPT plan) | `OPENAI_API_KEY` |
+| `xai/<model>` | `node src/login.ts xai` (SuperGrok or X Premium) | `XAI_API_KEY` |
+
+Pick the model and reasoning effort in Settings > Model, or with `CUABOT_MODEL` and `CUABOT_REASONING` in `.env`. The page writes those two lines and moves every bot over from its next turn, with no restart. A variable set in your real environment wins over `.env` at the next start.
+
+The `computer_use` helper runs on the same model as the bot, with reasoning off.
 
 ## Environment (`.env`)
 
@@ -47,12 +54,14 @@ Copy `.env.example` to `.env`.
 | --- | --- | --- |
 | `OWNER_EMAIL` | yes | Your address. Mail sent only to it skips the approval card. |
 | `AZURE_FOUNDRY_API_KEY` (or whatever `models.json` names) | yes | Model provider key. |
-| `XAI_API_KEY` | no | For `xai/<model>`, instead of `node src/login.ts`. |
+| `XAI_API_KEY` | no | For `xai/<model>`, instead of `node src/login.ts xai`. |
+| `OPENAI_API_KEY` | no | For `openai/<model>`, instead of `node src/login.ts openai`. |
 | `EXECUTOR_MCP_URL` | no | The URL on Executor's Connect card, e.g. `https://executor.sh/<org>/mcp`. |
 | `EXECUTOR_API_KEY` | no | A key from Executor's API keys page. |
 | `CUA_SPACE_ID` | no | The default Space's id: the one `computer_use` and `space_bash` use when the bot names no Space, and the one the live screen shows. Defaults to the first in `~/.cua/spaces.json`. |
 | `CUA_MCP_COMMAND` | no | The `cua` CLI to run `cua mcp` with. Defaults to the Cua Spaces app's bundled `cua.exe` on Windows, else `cua` on PATH. |
 | `CUABOT_MODEL` | no | `"provider/model"`, overriding `default` in `models.json`. |
+| `CUABOT_REASONING` | no | The bots' reasoning effort: `off`, `minimal`, `low`, `medium`, `high`, `xhigh` or `max`. Defaults to `medium`. A model that doesn't support the effort uses its nearest one. |
 | `CUABOT_PORT` | no | HTTP port. Defaults to `43142`. The server listens on `127.0.0.1` only. |
 
 ## Gmail and Calendar

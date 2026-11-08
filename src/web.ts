@@ -1,6 +1,6 @@
 // The bot's HTTP surface on 127.0.0.1: the web app at GET / with its service worker at /sw.js, its JSON
 // API under /api/ (the bot list and its edits, routines CRUD, each bot's chat history/send/react/stop and the owner's pasted images, a server-sent
-// event stream of one bot's live chat state, Web Push subscriptions, the Connections tab's check, start at sign-in, and the default Space's live screen with the owner's control of it), screenshots under /shots/, and the original POST /say. Loopback only, no auth; isOwnRequest refuses
+// event stream of one bot's live chat state, Web Push subscriptions, the Connections tab's check, start at sign-in, the bots' model and reasoning effort, and the default Space's live screen with the owner's control of it), screenshots under /shots/, and the original POST /say. Loopback only, no auth; isOwnRequest refuses
 // requests other sites make through the owner's browser.
 // Mutations go through the routines manager and the chat module, so every surface agrees.
 import { readFile } from "node:fs/promises";
@@ -17,6 +17,8 @@ import type { Connections } from "./connections.ts";
 import { type Memory, MemoryError } from "./memory.ts";
 import { DATA_DIR } from "./log.ts";
 import type { InputEvent, LiveScreen } from "./live-screen.ts";
+import type { ModelSettings } from "./model-settings.ts";
+import { ModelsConfigError } from "./models.ts";
 import { isSubscription, type Push } from "./push.ts";
 import type { ScreenControl } from "./screen-control.ts";
 import {
@@ -114,8 +116,8 @@ export type BotServerDeps = {
 	approvals?: Approvals;
 	/** Fits pasted chat images to the model's limits, converting formats it does not take. Without it, images pass as they are. */
 	images?: ImageProcessor;
-	/** Shown in the chat header, e.g. "grok-4.7". */
-	model?: string;
+	/** Shown in the chat header, e.g. "grok-4.7". A function, because Settings > Model changes it while running. */
+	model?: () => string;
 	shotsDir?: string;
 	/** Enables GET /api/computer/live: the default Space's screen as a stream of H.264 access units. */
 	live?: LiveScreen;
@@ -127,6 +129,8 @@ export type BotServerDeps = {
 	connections?: Connections;
 	/** Enables GET/PUT /api/autostart: whether start.py runs when the owner signs in to this computer. */
 	autostart?: Autostart;
+	/** Enables GET/PUT /api/model: the bots' model and reasoning effort. */
+	modelSettings?: ModelSettings;
 	log?: (...parts: unknown[]) => void;
 };
 
@@ -434,6 +438,7 @@ async function route(req: IncomingMessage, res: ServerResponse, deps: BotServerD
 	if (url.pathname.startsWith("/api/computer/")) return routeControl(req, res, deps, url, method);
 	if (url.pathname === "/api/push") return routePush(req, res, deps, method);
 	if (url.pathname === "/api/autostart") return routeAutostart(req, res, deps, method);
+	if (url.pathname === "/api/model") return routeModel(req, res, deps, method);
 	if (method === "GET" && url.pathname === "/api/connections") {
 		if (deps.connections === undefined) throw new HttpError(404, "not found");
 		return sendJson(res, 200, await deps.connections());
@@ -471,6 +476,24 @@ async function routeAutostart(req: IncomingMessage, res: ServerResponse, deps: B
 	const state = await autostart.set(enabled);
 	deps.log?.(`owner (web): turned ${enabled ? "on" : "off"} start at sign-in (${state.where})`);
 	sendJson(res, 200, state);
+}
+
+// Settings > Model: GET reads the bots' model and reasoning effort; PUT {"model", "thinkingLevel"} changes them.
+async function routeModel(req: IncomingMessage, res: ServerResponse, deps: BotServerDeps, method: string) {
+	const settings = deps.modelSettings;
+	if (settings === undefined) throw new HttpError(404, "not found");
+	if (method === "GET") return sendJson(res, 200, await settings.state());
+	if (method !== "PUT") throw new HttpError(404, "not found");
+	const { model, thinkingLevel } = ((await readJson(req)) ?? {}) as { model?: unknown; thinkingLevel?: unknown };
+	if (typeof model !== "string" || typeof thinkingLevel !== "string") throw new HttpError(400, "model and thinkingLevel must be strings");
+	try {
+		const state = await settings.set(model, thinkingLevel);
+		deps.log?.(`owner (web): set the bots to ${state.model}, reasoning ${state.thinkingLevel}`);
+		sendJson(res, 200, state);
+	} catch (error) {
+		if (error instanceof ModelsConfigError) throw new HttpError(400, error.message);
+		throw error;
+	}
 }
 
 function factInput(body: unknown): { fact: string; tier: "profile" | "log"; bot?: number } {
@@ -532,7 +555,7 @@ async function routeChat(req: IncomingMessage, res: ServerResponse, deps: BotSer
 		const chat = await chatFor(bots, bot);
 		const limit = Math.min(Math.max(Number(url.searchParams.get("limit")) || HISTORY_LIMIT, 1), 200);
 		const page = await chat.history(limit, decodeCursor(url.searchParams.get("before")));
-		sendJson(res, 200, { items: page.items, before: encodeCursor(page.before), live: chat.live, model: deps.model ?? null });
+		sendJson(res, 200, { items: page.items, before: encodeCursor(page.before), live: chat.live, model: deps.model?.() ?? null });
 		return;
 	}
 	if (method === "POST" && url.pathname === "/api/chat") {

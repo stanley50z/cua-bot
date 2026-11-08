@@ -10,9 +10,11 @@ import { AssistantEntry, createRegistry, Harness, MemoryStorage, type ModelRef }
 import { defaultSpaceLabel, listDriverToolNames } from "./computer.ts";
 import { connectExecutor } from "./executor.ts";
 import { botModel, createBotModels } from "./models.ts";
-import { CREDENTIAL_FILE } from "./xai-auth.ts";
+import { CREDENTIAL_FILE } from "./sign-in.ts";
 
 const REQUIRED_ENV = ["OWNER_EMAIL"] as const;
+// The providers `node src/login.ts` signs in to, and the API key each takes instead.
+const SIGN_IN_KEYS: Record<string, string> = { xai: "XAI_API_KEY", openai: "OPENAI_API_KEY" };
 const XAI_TIMEOUT_MS = 60_000;
 const SPACE_TIMEOUT_MS = 60_000;
 const SECRET_KEYS = new Set(["access", "refresh", "key", "id_token", "password", "secret", "token", "api_key", "access_token", "refresh_token"]);
@@ -43,7 +45,7 @@ function clip(text: string, max = 200): string {
 // Values that must never appear in check output: env secrets, plus token fields from the credential file.
 function secretValues(): string[] {
 	const found: string[] = [];
-	for (const name of ["XAI_API_KEY", "EXECUTOR_API_KEY", "AZURE_FOUNDRY_API_KEY", "AZURE_FOUNDRY_2_API_KEY"]) {
+	for (const name of ["XAI_API_KEY", "OPENAI_API_KEY", "EXECUTOR_API_KEY", "AZURE_FOUNDRY_API_KEY", "AZURE_FOUNDRY_2_API_KEY"]) {
 		const value = process.env[name]?.trim();
 		if (value !== undefined && value.length >= 8) found.push(value);
 	}
@@ -51,7 +53,7 @@ function secretValues(): string[] {
 	try {
 		collectSecrets(JSON.parse(readFileSync(CREDENTIAL_FILE, "utf8")), found);
 	} catch {
-		// The xai check reports a broken file. There is nothing safe to redact from it.
+		// The model check reports a broken file. There is nothing safe to redact from it.
 	}
 	return found;
 }
@@ -109,7 +111,7 @@ function deadline<T>(ms: number, work: Promise<T>, label: string): Promise<T> {
 	});
 }
 
-function credentialState(): CredentialState {
+function credentialState(provider: string): CredentialState {
 	if (!existsSync(CREDENTIAL_FILE)) return "absent";
 	let parsed: unknown;
 	try {
@@ -118,7 +120,7 @@ function credentialState(): CredentialState {
 		return "invalid";
 	}
 	if (!isRecord(parsed)) return "invalid";
-	if (!Object.hasOwn(parsed, "xai") || parsed.xai === null || parsed.xai === undefined) return "absent";
+	if (!Object.hasOwn(parsed, provider) || parsed[provider] === null || parsed[provider] === undefined) return "absent";
 	return "present";
 }
 
@@ -139,11 +141,12 @@ async function checkModel(): Promise<Check> {
 	}
 	const name = `${model.provider}/${model.modelId}`;
 	let fix = "Fix: check the provider's baseUrl, apiKey, and model id in models.json";
-	if (model.provider === "xai") {
-		fix = "Fix: run `node src/login.ts` or set XAI_API_KEY";
-		const stored = credentialState();
-		if (stored === "invalid") return report("FAIL", "model", `data/xai-credential.json is not valid JSON. ${fix}`);
-		if (stored !== "present" && !process.env.XAI_API_KEY?.trim()) return report("FAIL", "model", `${name}: no xAI sign-in and XAI_API_KEY is unset. ${fix}`);
+	const keyName = SIGN_IN_KEYS[model.provider];
+	if (keyName !== undefined) {
+		fix = `Fix: run \`node src/login.ts ${model.provider}\` or set ${keyName}`;
+		const stored = credentialState(model.provider);
+		if (stored === "invalid") return report("FAIL", "model", `data/credentials.json is not valid JSON. ${fix}`);
+		if (stored !== "present" && !process.env[keyName]?.trim()) return report("FAIL", "model", `${name}: no ${model.provider} sign-in and ${keyName} is unset. ${fix}`);
 	}
 	try {
 		const reply = await deadline(XAI_TIMEOUT_MS, askModel(model), "model");

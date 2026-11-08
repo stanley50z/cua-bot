@@ -30,7 +30,8 @@ import { bindRoutines, createRoutinesExtension, removeBotRoutines, routineDir, s
 import { today } from "./today.ts";
 import { traceExtension } from "./trace.ts";
 import { createBotServer } from "./web.ts";
-import { botModel, createBotModels } from "./models.ts";
+import { createModelSettings } from "./model-settings.ts";
+import { botAgent, botModel, botThinking, createBotModels } from "./models.ts";
 const PORT = Number(process.env.CUABOT_PORT || 43142);
 const CRASH_DIR = join(DATA_DIR, "crash");
 mkdirSync(CRASH_DIR, { recursive: true });
@@ -46,7 +47,6 @@ process.on("unhandledRejection", crash("unhandledRejection"));
 
 const context = BACKGROUND_CONTEXT;
 const models = createBotModels(); // providers from models.json; see src/models.ts
-const MODEL = botModel();
 
 const registry = createRegistry();
 registry.install(
@@ -71,8 +71,7 @@ registry.install(
 	}),
 );
 registry.install(traceExtension);
-const AGENT = { model: MODEL, thinkingLevel: "medium" } as const;
-registry.install(createBotsExtension({ agent: () => AGENT }));
+registry.install(createBotsExtension({ agent: botAgent }));
 registry.install(createComputerExtension(registry));
 registry.install(createBotToolSearchExtension());
 // Web Push to every browser that turned notifications on in the web app (data/push.json).
@@ -120,9 +119,9 @@ if (executorUrl && executorKey) {
 const DATABASE = join(DATA_DIR, "cua-bot.sqlite");
 const storage = await openNodeSqliteStorage(DATABASE);
 const harness = await Harness.open(storage, { models, registry, env: pcEnv }, context);
-const root = await harness.root(context, { agent: AGENT });
+const root = await harness.root(context, { agent: botAgent() });
 // root() sets the agent only when it creates the conversation; apply the configured model to an existing one too.
-await root.commit((tx) => configure(tx, root.id, AGENT), context);
+await root.commit((tx) => configure(tx, root.id, botAgent()), context);
 bindRoutines({ harness, root, legacyFile: LEGACY_ROUTINE_FILE });
 harness.resume();
 const synced = await syncRoutines(context);
@@ -132,7 +131,7 @@ log(
 const stopWatching = startRoutineFileWatch(context, (error) =>
 	log("routine file sync failed:", error instanceof Error ? error.message : String(error)),
 );
-log(`cua-bot up: model ${MODEL.provider}/${MODEL.modelId}, root ${root.id}`);
+log(`cua-bot up: model ${botModel().provider}/${botModel().modelId}, reasoning ${botThinking()}, root ${root.id}`);
 
 // Submits one owner message to the root conversation and returns what the bot sent the owner (send_message) by the end of the turn.
 async function say(text: string): Promise<string> {
@@ -158,7 +157,7 @@ const bots = await createBots({
 	harness,
 	root,
 	context,
-	agent: AGENT,
+	agent: botAgent,
 	// A renamed bot's routine file is renamed on the next sync; a deleted bot's routines go with it.
 	renamed: () => syncRoutines(context),
 	removing: (id) => removeBotRoutines(id, context),
@@ -192,7 +191,9 @@ const connections = createConnections({
 const images = await createNodePhotonImages();
 // Settings > Startup: start.py at sign-in.
 const autostart = createAutostart({ startScript: join(import.meta.dirname, "..", "start.py") });
-createBotServer({ say, bots, memory, botMemories: ownMemories, images, model: MODEL.modelId, context, log, control: screenControl, live, push, connections, autostart, ...(approvals === undefined ? {} : { approvals }) }).listen(PORT, "127.0.0.1", () =>
+// Settings > Model: the model and reasoning effort in .env, applied to every bot without a restart.
+const modelSettings = createModelSettings({ models, apply: bots.applyAgent });
+createBotServer({ say, bots, memory, botMemories: ownMemories, images, model: () => botModel().modelId, context, log, control: screenControl, live, push, connections, autostart, modelSettings, ...(approvals === undefined ? {} : { approvals }) }).listen(PORT, "127.0.0.1", () =>
 	log(`listening: web app http://127.0.0.1:${PORT}/ · chat POST http://127.0.0.1:${PORT}/say`),
 );
 

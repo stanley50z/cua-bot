@@ -13,7 +13,7 @@ The URL hash keeps your place, so a reload, Back, or a copied link lands in the 
 | Key | Values | When absent |
 | --- | --- | --- |
 | `view` | `routines`, `memory`, `settings` | The chat |
-| `tab` | `connections`, `startup` | Settings' Chat tab |
+| `tab` | `model`, `connections`, `startup` | Settings' Chat tab |
 | `bot` | A bot id | The main bot |
 
 For example `#view=settings&tab=connections` or `#view=memory&bot=3`. Each new view or tab is a history entry; switching bots replaces the entry. Old links of the form `#bot=<id>` still open that bot's chat.
@@ -90,7 +90,7 @@ The open memory shows its lasting facts, then its dated ones, newest first. Each
 
 ## Settings
 
-Settings has three tabs in its own sidebar.
+Settings has four tabs in its own sidebar.
 
 ### Chat
 
@@ -103,6 +103,10 @@ Saved in this browser's `localStorage` (`cua-bot.settings`), so each browser kee
 | Show routine runs | off | See [Chat](#chat) |
 | Quick replies | Yes, No, Explain | One phrase per line |
 | Quick emoji | 👍 👎 ❤️ 😂 🎉 😮 | Typed or pasted in any spacing; anything that isn't an emoji is dropped when you leave the field. Clearing it hides the smiley. |
+
+### Model
+
+Picks the model every bot runs on and their reasoning effort ([src/model-settings.ts](../src/model-settings.ts)). The list holds each model with a key in `models.json` or a sign-in from `node src/login.ts`, and the efforts follow the picked model. A change saves `CUABOT_MODEL` and `CUABOT_REASONING` to the computer's `.env` and reaches every bot on its next turn, with no restart.
 
 ### Connections
 

@@ -1,7 +1,7 @@
-// xAI auth for grokbot: the SuperGrok / X Premium subscription sign-in pi-ai ships (same OAuth client as
-// Grok Build), stored in data/xai-credential.json. `node src/login.ts` signs in once; main.ts calls
-// createBotModels() and pi-ai refreshes the token inside modify(). XAI_API_KEY still works when nothing is stored.
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+// Subscription sign-ins pi-ai ships: SuperGrok / X Premium for xAI and Sign in with ChatGPT for OpenAI, stored in
+// data/credentials.json. `node src/login.ts <provider>` signs in once; main.ts calls createBotModels() and pi-ai
+// refreshes the token inside modify(). XAI_API_KEY and OPENAI_API_KEY still work when nothing is stored.
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import {
 	type AuthOperationOptions,
@@ -10,9 +10,11 @@ import {
 	InMemoryCredentialStore,
 } from "@earendil-works/pi-ai";
 import { createModels } from "@earendil-works/pi-ai/models";
+import { openaiProvider } from "@earendil-works/pi-ai/providers/openai";
 import { xaiProvider } from "@earendil-works/pi-ai/providers/xai";
 
-export const CREDENTIAL_FILE = join(import.meta.dirname, "..", "data", "xai-credential.json");
+export const CREDENTIAL_FILE = join(import.meta.dirname, "..", "data", "credentials.json");
+const LEGACY_CREDENTIAL_FILE = join(dirname(CREDENTIAL_FILE), "xai-credential.json");
 
 // A CredentialStore that keeps credentials in memory and writes the whole map to one JSON file after every
 // change. One process owns the file (the bot or the login script), so no cross-process lock is needed.
@@ -67,10 +69,12 @@ class FileCredentialStore implements CredentialStore {
 	}
 }
 
-// A Models collection with the xAI provider over the file-backed store. src/models.ts adds the bot's other
+// A Models collection with the sign-in providers over the file-backed store. src/models.ts adds the bot's other
 // providers; login.ts uses it alone.
-export function createXaiModels() {
+export function createSignInModels() {
+	if (existsSync(LEGACY_CREDENTIAL_FILE) && !existsSync(CREDENTIAL_FILE)) renameSync(LEGACY_CREDENTIAL_FILE, CREDENTIAL_FILE);
 	const models = createModels({ credentials: new FileCredentialStore(CREDENTIAL_FILE) });
 	models.setProvider(xaiProvider());
+	models.setProvider(openaiProvider());
 	return models;
 }

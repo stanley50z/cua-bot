@@ -3,21 +3,23 @@
 // "openai-completions", also settable per model), an apiKey, and the models it serves; "default" names
 // the model the bot and its computer-use child run on, as "provider/model". apiKey is either the key or
 // "$NAME" to read environment variable NAME, so keys can stay in .env or the user's environment.
-// CUABOT_MODEL ("provider/model") overrides the default. pi-ai's xAI provider stays registered too.
-// main.ts and preflight.ts call createBotModels() and botModel(); computer.ts calls botModel().
+// CUABOT_MODEL ("provider/model") overrides the default and CUABOT_REASONING sets the effort; Settings > Model
+// changes both (src/model-settings.ts). pi-ai's xAI and OpenAI providers stay registered too.
+// main.ts calls createBotModels() and botAgent(); preflight.ts and computer.ts call botModel().
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { type Api, type ApiKeyAuth, envApiKeyAuth, type Model } from "@earendil-works/pi-ai";
+import { type Api, type ApiKeyAuth, envApiKeyAuth, type Model, type ModelThinkingLevel } from "@earendil-works/pi-ai";
 import { openAICompletionsApi } from "@earendil-works/pi-ai/api/openai-completions.lazy";
 import { openAIResponsesApi } from "@earendil-works/pi-ai/api/openai-responses.lazy";
 import { createProvider } from "@earendil-works/pi-ai/models";
 import type { ModelRef } from "@earendil-works/pi-durable";
-import { createXaiModels } from "./xai-auth.ts";
+import { createSignInModels } from "./sign-in.ts";
 
 export const MODELS_FILE = join(import.meta.dirname, "..", "models.json");
 
 const APIS = ["openai-responses", "openai-completions"] as const;
 type ConfigApi = (typeof APIS)[number];
+const THINKING_LEVELS: readonly ModelThinkingLevel[] = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
 
 type ModelConfig = Partial<Omit<Model<Api>, "id" | "api" | "provider" | "baseUrl">> & { id: string; api?: ConfigApi };
 type ProviderConfig = { name?: string; baseUrl: string; api?: ConfigApi; apiKey: string; headers?: Record<string, string>; models: ModelConfig[] };
@@ -100,9 +102,26 @@ export function botModel(): ModelRef {
 	return parseModelRef(process.env.CUABOT_MODEL?.trim() || config().default);
 }
 
-/** Every provider the bot can use: xAI, plus each provider in models.json. */
+/** Checks a reasoning effort from .env or the web app. Throws ModelsConfigError naming the valid ones. */
+export function parseThinkingLevel(text: string): ModelThinkingLevel {
+	const level = THINKING_LEVELS.find((name) => name === text);
+	if (level === undefined) throw new ModelsConfigError(`reasoning effort must be one of ${THINKING_LEVELS.join(", ")}, not "${text}"`);
+	return level;
+}
+
+/** The reasoning effort the bots run at: CUABOT_REASONING, else medium. */
+export function botThinking() {
+	return parseThinkingLevel(process.env.CUABOT_REASONING?.trim() || "medium");
+}
+
+/** The model settings every bot runs with, as of this call. */
+export function botAgent() {
+	return { model: botModel(), thinkingLevel: botThinking() };
+}
+
+/** Every provider the bot can use: xAI and OpenAI sign-ins, plus each provider in models.json. */
 export function createBotModels() {
-	const models = createXaiModels();
+	const models = createSignInModels();
 	for (const [id, provider] of Object.entries(config().providers)) models.setProvider(providerFromConfig(id, provider));
 	return models;
 }
