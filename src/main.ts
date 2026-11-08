@@ -9,7 +9,7 @@ import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { type ConversationId, createRegistry, type Cursor, defineExtension, Harness, section } from "@earendil-works/pi-durable";
 import { createNodePhotonImages } from "@earendil-works/pi-durable/images/node";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
-import { botMemories, createBots, createBotsExtension } from "./bots.ts";
+import { createBots, createBotsExtension, DEFAULT_BOTS_DIR, readBots } from "./bots.ts";
 import { toChatItem } from "./chat.ts";
 import { createComputerExtension, defaultSpaceId, defaultSpaceLabel, openLiveStream, registrySpaces, screenControl, spacesText } from "./computer.ts";
 import { createConnections, listCuaSpaces, probeTcp } from "./connections.ts";
@@ -22,7 +22,7 @@ import { createAutostart } from "./autostart.ts";
 import { connectExecutor, createExecutor, createExecutorExtension } from "./executor.ts";
 import { DATA_DIR, log } from "./log.ts";
 import { createMachines, ownerHosts, resolveSsh } from "./machines.ts";
-import { createMemory, createMemoryExtension } from "./memory.ts";
+import { createMemory, createMemoryExtension, migrateMemory } from "./memory.ts";
 import { createPcExtensions, pcEnv } from "./pc.ts";
 import { createPush } from "./push.ts";
 import { LEGACY_ROUTINE_FILE } from "./routines-file.ts";
@@ -92,10 +92,12 @@ for (const extension of createPcExtensions()) registry.install(extension);
 // read, write, edit, bash, and powershell, on this PC or, given `machine`, on any SSH destination of the owner's.
 const machines = createMachines();
 registry.install(machines.extension);
-// The shared memory every bot sees, and each bot's own in its folder.
+// The owner's memory, each fact tagged with the bots that get it. An install from before tags moves over first.
+if (await migrateMemory({ dir: join(DATA_DIR, "memory"), botsDir: DEFAULT_BOTS_DIR, backupDir: join(DATA_DIR, "memory-backup-pre-tags") })) {
+	log(`memory: moved to tags, backup in ${join(DATA_DIR, "memory-backup-pre-tags")}`);
+}
 const memory = createMemory({ dir: join(DATA_DIR, "memory") });
-const memories = botMemories();
-registry.install(createMemoryExtension({ shared: memory, own: memories.own }));
+registry.install(createMemoryExtension({ memory, bots: readBots }));
 const executorUrl = process.env.EXECUTOR_MCP_URL?.trim();
 const executorKey = process.env.EXECUTOR_API_KEY?.trim();
 let approvals: Approvals | undefined;
@@ -156,16 +158,23 @@ const bots = await createBots({
 	root,
 	context,
 	agent: botAgent,
-	// A renamed bot's routine file is renamed on the next sync; a deleted bot's routines go with it.
-	renamed: () => syncRoutines(context),
-	removing: (id) => removeBotRoutines(id, context),
+	// A renamed bot's routine file is renamed on the next sync and its memory tag follows; a deleted bot's routines
+	// go with it and its tag comes off its facts.
+	renamed: async (id, before, after) => {
+		await memory.botRenamed({ id, name: before }, { id, name: after });
+		await syncRoutines(context);
+	},
+	removing: async (id) => {
+		const bot = bots.list().find((b) => b.id === id);
+		if (bot !== undefined) await memory.botRemoved(bot);
+		await removeBotRoutines(id, context);
+	},
 	sent: (bot, text) => void push.send({ title: bot.name, body: text }),
 	computer: (conversation) =>
 		createComputerView({ harness, storage, conversation, shotsDir: join(DATA_DIR, "shots"), context, ...(space === undefined ? {} : { space }) }),
 });
 log(`bots: ${bots.list().map((bot) => bot.name).join(", ")}`);
 const live = createLiveScreen(openLiveStream);
-const ownMemories = () => bots.list().map((bot) => ({ id: bot.id, memory: memories.of(bot) }));
 // The Connections tab: this computer, which runs the Harness and every bot, then the owner's SSH machines and the Spaces.
 const defaultSpace = defaultSpaceId();
 const connections = createConnections({
@@ -191,7 +200,7 @@ const images = await createNodePhotonImages();
 const autostart = createAutostart({ startScript: join(import.meta.dirname, "..", "start.py") });
 // Settings > Model: the model and reasoning effort in .env, applied to every bot without a restart.
 const modelSettings = createModelSettings({ models, apply: bots.applyAgent });
-createBotServer({ say, bots, memory, botMemories: ownMemories, images, context, log, control: screenControl, live, push, connections, autostart, modelSettings, ...(approvals === undefined ? {} : { approvals }) }).listen(PORT, "127.0.0.1", () =>
+createBotServer({ say, bots, memory, memoryBots: () => bots.list(), images, context, log, control: screenControl, live, push, connections, autostart, modelSettings, ...(approvals === undefined ? {} : { approvals }) }).listen(PORT, "127.0.0.1", () =>
 	log(`listening: web app http://127.0.0.1:${PORT}/ · chat POST http://127.0.0.1:${PORT}/say`),
 );
 

@@ -78,8 +78,14 @@ Code: [src/approvals.ts](../src/approvals.ts).
 
 | Route | Does |
 | --- | --- |
-| `GET /api/memory` | The shared memory and, under `bots`, each bot's own ([src/memory.ts](../src/memory.ts)). |
-| `POST /api/memory/edit` | `{"fact", "to", "tier", "bot"}` rewords the fact whose text matches `fact` in that tier, keeping its date; without `bot`, in the shared memory. 400 for an empty or oversized `to`, or one another fact in the tier already has. 404 when nothing matches. |
+| `GET /api/memory` | Every fact (`profile`, `log`) with its `tags`, the store's `dir`, and every tag under `tags` as `{slug, name, kind, bots}` ([src/memory.ts](../src/memory.ts)). |
+| `POST /api/memory` | `{"fact", "tier", "tags"}` saves a fact under at least one tag. 201 when new; 200 when the text is already in that tier, with these tags added. 400 for a tag that doesn't exist. |
+| `POST /api/memory/edit` | `{"fact", "to", "tier"}` rewords the fact whose text matches `fact` in that tier, keeping its date and tags. 400 for an empty or oversized `to`, or one another fact in the tier already has. 404 when nothing matches. |
+| `POST /api/memory/retag` | `{"fact", "tier", "tags"}` replaces the fact's tags. An empty list leaves it for no bot. 400 for a tag that doesn't exist. 404 when nothing matches. |
+| `POST /api/memory/forget` | `{"fact"}` removes every fact with that text. 404 when nothing matches. |
+| `POST /api/memory/tags` | `{"name", "bots"}` makes one of your tags, its slug from the name. 400 when another tag has that slug. |
+| `PUT /api/memory/tags/<slug>` | `{"name", "bots"}` sets its name and bots. A new name rewrites its facts. 404 for no such tag. |
+| `DELETE /api/memory/tags/<slug>` | Deletes it and takes it off its facts. 404 for no such tag. |
 | `GET /api/connections` | Checks this computer, the owner's SSH hosts and the Cua Spaces for the Connections tab ([src/connections.ts](../src/connections.ts)). |
 | `GET /api/push` | The Web Push public key ([src/push.ts](../src/push.ts)). |
 | `POST /api/push` | Saves a browser's `PushSubscription`. |

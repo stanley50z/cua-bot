@@ -23,7 +23,7 @@ Code: [src/bots.ts](../src/bots.ts).
 The owner can run several bots. Each has a name, its own chat, and its own folder.
 
 - **The main bot** (named `cua-bot` until you rename it) is the root conversation. `/say`, and the routines and approval cards from before multi-bot support, belong to it. It can't be deleted.
-- **Every other bot** is an ownerless conversation with the same tools, shared memory, accounts and Space.
+- **Every other bot** is an ownerless conversation with the same tools, accounts and Space, and shares memory by tag.
 
 The bot list (names, conversation ids, avatars) lives in a session-wide Durable doc, `cua-bot.bots` in `data/cua-bot.sqlite`.
 
@@ -35,7 +35,6 @@ Everything else a bot owns lives in `bots/<folder>/` in the project root (gitign
 | --- | --- |
 | `agent.md` | Standing instructions. Plain markdown, no length cap, empty until the bot gets instructions. |
 | `routines.json` | Routine definitions, present only while the bot has routines. See [Routines](#routines). |
-| `memory/` | The bot's own memory. See [Memory](#memory). |
 
 `agent.md` is re-read on every request, so a hand edit applies on the bot's next turn; the web app picks it up within a second.
 
@@ -121,19 +120,22 @@ They are deferred. The bot loads the ones it needs with `tool_search`, so their 
 
 Code: [src/memory.ts](../src/memory.ts).
 
-Plain markdown in two kinds of store:
+Plain markdown in one store, `data/memory/`: `profile.md` for lasting facts and `log/YYYY-MM.md` for dated ones, one fact per line as `- (YYYY-MM-DD) [tag, tag] fact`. A fact's tags say which bots get it:
 
-| Store | Path | Seen by |
+| Tag | Reaches | Where it comes from |
 | --- | --- | --- |
-| Shared | `data/memory/` | Every bot |
-| Own | `bots/<folder>/memory/` | That bot only |
+| `every-bot` | Every bot, including future ones | Built in |
+| `@<folder>`, such as `@job-search` | That bot | Each bot has one |
+| Any other, such as `job-bots` | The bots listed for it | `tags.json`, edited in Settings > Memory tags |
 
-Each store has `profile.md` for lasting facts and `log/YYYY-MM.md` for dated ones, one fact per line as `- (YYYY-MM-DD) fact`.
+A line with no tag, or only tags that name nothing, reaches no bot and shows under Untagged in the web app. Renaming a bot or one of your tags rewrites its facts. Deleting either takes the tag off; a fact left with no tag stays, under Untagged.
 
-- `remember` saves a fact with `scope` `shared` (facts about the owner every bot should know) or `own` (what only this bot's job needs).
-- `forget` removes one, and `recall` searches older facts. Both look in the shared store and the bot's own.
+- `remember` saves a fact with `tags`. Saving text a tier already has adds the tags to that fact.
+- `forget` removes a fact and `recall` searches older ones, both only among facts the bot can see.
 
-Every request carries a memory section with both stores: every profile fact plus the 30 most recent log facts of each, with no length cap. The files are re-read on every request, so hand edits apply at once.
+Every request carries a memory section with the list of tags, every profile fact the bot can see, and the 30 most recent log facts it can see, with no length cap. The files are re-read on every request, so hand edits apply at once. Tags decide what a bot is given and what `recall` returns; they aren't a security boundary, since bots with file tools can read the files.
+
+An install from before tags moves over once at startup (`migrateMemory`): shared facts get `every-bot`, each `bots/<folder>/memory/` fact gets `@<folder>`, and the same text in a tier becomes one fact with both tags and the earliest date. The old files are copied to `data/memory-backup-pre-tags/` first.
 
 ## Routines
 

@@ -19,9 +19,9 @@ cua-bot runs on your own computer as an always-on service for one owner. When a 
 ## What it does
 
 - **Uses real computers.** `computer_use` clicks and types on any of your Cua Spaces, picked by name, and you watch the default one live in the browser. Click Take control to drive it yourself; the bot waits until you hand it back.
-- **Runs several bots.** Each bot has its own chat, instructions (`agent.md`), routines and memory, and the bots can message each other.
+- **Runs several bots.** Each bot has its own chat, instructions (`agent.md`) and routines, and the bots can message each other.
 - **Runs routines.** Cron schedules (`30 7 * * 1-5`, `@daily`, `@every 30m`), repeating or run-once, stored as durable tasks, editable in the app or in `routines.json`.
-- **Remembers.** Plain markdown memory you can read and edit by hand, shared between bots or private to one.
+- **Remembers.** Plain markdown memory you can read and edit by hand, each fact tagged with the bots that get it.
 - **Asks before it acts.** An email to anyone but you, or a delete, becomes an approval card. Nothing goes out until you click.
 - **Reaches your other machines.** `read`, `write`, `edit` and `bash` run on any host in your `~/.ssh/config`. cua-bot itself has no machine list to maintain.
 - **Notifies you.** Messages arrive as Web Push notifications, even with every tab closed.
@@ -61,7 +61,7 @@ python say.py "Every weekday at 9:00, email me a short agenda."
 
 `say.py` posts to `/say` and prints the reply. It waits up to 10 minutes, since a computer-use turn can take that long.
 
-**As files.** Each bot lives in `bots/<name>/`. Edit `agent.md`, `routines.json` or `memory/` by hand and the bot picks the change up within a second or two:
+**As files.** Each bot lives in `bots/<name>/`. Edit `agent.md` or `routines.json` by hand and the bot picks the change up within a second or two. Memory is in `data/memory/`, and bots read it fresh on every reply:
 
 ```json
 [

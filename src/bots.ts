@@ -1,7 +1,7 @@
 // The owner's bots. The main bot is the root conversation; every other bot is an ownerless conversation
-// of its own. All of them run the same tools, shared memory, and Cua Spaces; each has a name, its own chat, and
+// of its own. All of them run the same tools and Cua Spaces and share memory through tags (src/memory.ts); each has a name, its own chat, and
 // its own folder bots/<name>/ holding agent.md (its standing instructions, re-read every turn, so hand
-// edits apply at once), routines.json (src/routines.ts), and memory/ (src/memory.ts). The folder follows
+// edits apply at once) and routines.json (src/routines.ts). The folder follows
 // a rename and goes with a delete. Bots message each other with message_bot: the text lands in the other bot's chat as
 // a `cua-bot.bot-message` entry (shown as "Message from <name>") and wakes it on a later turn.
 // main.ts installs createBotsExtension() before Harness.open, then builds the manager with createBots()
@@ -27,7 +27,6 @@ import {
 } from "@earendil-works/pi-durable";
 import { BOT_MESSAGE, type BotMessage, type Chat, type ChatItem, createChat, SEND_MESSAGE } from "./chat.ts";
 import type { ComputerView } from "./computer-view.ts";
-import { createMemory, type Memory } from "./memory.ts";
 import { parseModelRef, parseThinkingLevel } from "./models.ts";
 
 export const MAIN_NAME = "cua-bot";
@@ -134,7 +133,8 @@ const botsOf = (state: Readonly<BotsState> | null | undefined): BotEntry[] =>
 /** Every bot, the main bot first. Used by src/routines.ts, which keeps one routine file per bot. */
 export const readBots = async (reader: Pick<Harness, "snapshot">, context: Context) => botsOf(await reader.snapshot(BotsDoc, context));
 
-const slugOf = (name: string) =>
+/** A name as a file name or memory tag: "Job Search" → "job-search". */
+export const slugOf = (name: string) =>
 	name
 		.toLowerCase()
 		.replace(/[^\p{L}\p{N}]+/gu, "-")
@@ -176,28 +176,6 @@ const pathsOf = (dir: string, bot: BotEntry) => {
 const loadBots = (dir: string, state: Readonly<BotsState> | null | undefined): Promise<Bot[]> =>
 	Promise.all(botsOf(state).map(async (bot) => ({ ...bot, instructions: await readAgentFile(dir, bot), ...pathsOf(dir, bot) })));
 
-/**
- * Each bot's own memory store, bots/<name>/memory/. main.ts passes `own` to createMemoryExtension, which
- * finds the asking bot by its conversation, and `of` to the web app's Memory view.
- */
-export function botMemories(dir = DEFAULT_BOTS_DIR) {
-	// One store per folder, so writes to it stay serialized; a renamed bot gets the store of its new folder.
-	const stores = new Map<string, Memory>();
-	const of = (bot: { id: number; name: string }) => {
-		const path = join(dir, botFolder(bot), "memory");
-		let store = stores.get(path);
-		if (store === undefined) stores.set(path, (store = createMemory({ dir: path })));
-		return store;
-	};
-	return {
-		of,
-		async own(conversationId: number, read: Pick<Harness, "snapshot">, context: Context): Promise<Memory | undefined> {
-			const bot = (await readBots(read, context)).find((b) => b.id === conversationId);
-			return bot === undefined ? undefined : of(bot);
-		},
-	};
-}
-
 // The ids checked against the lists above; undefined and null pass through for update() to keep or clear.
 function validAvatar(avatar: BotInput["avatar"]): Avatar | null | undefined {
 	if (avatar === undefined || avatar === null) return avatar;
@@ -228,7 +206,7 @@ function validInput(input: BotInput, others: BotEntry[]): ValidInput {
 type Commit = <T>(run: (tx: Tx) => Promise<T>) => Promise<T>;
 
 // Creates the bot's conversation and its record in one commit, then its agent file. A folder already
-// there (one the owner made by hand) is adopted with its memory. Used by create_bot and the web app.
+// there (one the owner made by hand) is adopted. Used by create_bot and the web app.
 async function createBot(commit: Commit, dir: string, input: BotInput, agent: AgentChange, now: number): Promise<Bot> {
 	const bot = await commit(async (tx) => {
 		const doc = await tx.doc(BotsDoc);
@@ -267,11 +245,11 @@ export function botSection(bots: Bot[], self: number): string | undefined {
 	if (me === undefined) return undefined;
 	const others = bots.filter((bot) => bot.id !== self);
 	const lines = [
-		`Your name is ${me.name}. You are one of the owner's bots; each has its own chat with the owner, and all of you share the shared memory, the owner's accounts, and the Cua Spaces.`,
+		`Your name is ${me.name}. You are one of the owner's bots; each has its own chat with the owner, and all of you share the owner's accounts, the Cua Spaces, and memory, by tag.`,
 	];
 	if (me.instructions !== "") lines.push(`The owner's standing instructions for you, from your agent file ${me.file}:\n${me.instructions}`);
 	lines.push(
-		`Your folder ${me.folder}/ holds your agent file, your routines (routines.json), and your own memory (memory/); other bots have theirs. The owner edits them in the web app.`,
+		`Your folder ${me.folder}/ holds your agent file and your routines (routines.json); other bots have theirs. The owner edits them in the web app.`,
 	);
 	if (others.length === 0) lines.push("There are no other bots yet. When the owner asks for one, make it with create_bot.");
 	else {
@@ -418,9 +396,9 @@ export async function createBots(deps: {
 	/** Where the bot folders live; DEFAULT_BOTS_DIR unless a test moves them. */
 	dir?: string;
 	computer?: (conversation: Conversation) => ComputerView;
-	/** After the owner renames a bot and its folder has moved; main.ts resyncs its routines. */
-	renamed?: (id: number) => Promise<unknown>;
-	/** Before a bot is deleted, while its record still names it; main.ts cancels its routines. */
+	/** After the owner renames a bot and its folder has moved; main.ts resyncs its routines and moves its memory tag. */
+	renamed?: (id: number, before: string, after: string) => Promise<unknown>;
+	/** Before a bot is deleted, while its record still names it; main.ts cancels its routines and takes its tag off its facts. */
 	removing?: (id: number) => Promise<unknown>;
 	/** Each message a bot sends the owner with send_message, in any bot's chat; main.ts pushes it to the owner's browser. */
 	sent?: (bot: Bot, text: string) => void;
@@ -565,12 +543,12 @@ export async function createBots(deps: {
 				await configure(tx, id as ConversationId, agentOf(record, deps.agent()));
 				return { bot: { ...entryOf(id, record, before.main), instructions: valid.instructions }, before };
 			}, context);
-			// The folder, with its routines and memory, follows a rename.
+			// The folder, with its routines, follows a rename.
 			const from = join(dir, botFolder(before));
 			if (botFolder(before) !== botFolder(bot) && existsSync(from)) await rename(from, join(dir, botFolder(bot)));
 			await writeAgentFile(dir, bot, bot.instructions);
 			await reload();
-			if (bot.name !== before.name) await deps.renamed?.(id);
+			if (bot.name !== before.name) await deps.renamed?.(id, before.name, bot.name);
 			return { ...bot, ...pathsOf(dir, bot) };
 		},
 		/** Pins the bot to the top of the web app's list, after the bots already pinned, or unpins it. Pinning a pinned bot keeps its place. */
@@ -585,7 +563,7 @@ export async function createBots(deps: {
 			}, context);
 			await reload();
 		},
-		/** Stops the bot, ends its routines, deletes its folder (agent file and memory), and drops it from the list. Its transcript stays in the database. The main bot can't go. */
+		/** Stops the bot, ends its routines, deletes its folder (agent file and routines), and drops it from the list. Its transcript stays in the database. The main bot can't go. */
 		async remove(id: number): Promise<void> {
 			if (id === Number(root.id)) throw new BotError(400, "The main bot can't be deleted.");
 			const conversation = await conversationOf(id);

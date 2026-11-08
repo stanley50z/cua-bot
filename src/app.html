@@ -286,7 +286,7 @@ dialog .row .btn.danger { margin-right: auto; }
 .table .none { color: var(--muted); padding: 24px 10px; }
 .file { padding: 0 24px 16px; color: var(--muted); font-size: 12.5px; }
 
-/* memory: a sidebar of memories (every bot's shared one, then each bot's own) beside the open one's facts */
+/* memory: a sidebar of tags beside the facts carrying the open one */
 #view-memory { flex-direction: row; }
 #memory-stores .navrow small { margin-left: auto; color: var(--muted); font-weight: 400; font-size: 12px; }
 #memory-stores .navsep { font: 600 11.5px "Bahnschrift", sans-serif; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; padding: 12px 10px 4px; }
@@ -297,10 +297,30 @@ dialog .row .btn.danger { margin-right: auto; }
 .facts h2 small { font: 400 12px "Segoe UI Variable Text", "Segoe UI", sans-serif; }
 .facts ul { list-style: none; margin: 0; padding: 0; }
 .facts li { padding: 8px 0; border-bottom: 1px solid var(--line); font-size: 13.5px; display: grid; grid-template-columns: minmax(0, 1fr) auto 28px 28px; gap: 10px; align-items: start; }
-.facts ul.hits li { grid-template-columns: minmax(0, 1fr) auto auto 28px 28px; }
 .facts li .when { color: var(--muted); font-size: 12px; white-space: nowrap; padding-top: 1px; }
-.facts li .whose { font-size: 12px; padding: 1px 8px; border-radius: 5px; background: var(--bg); color: var(--muted); white-space: nowrap; }
-.facts li .whose.own { background: var(--me); color: var(--accent); }
+.tag-chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+.tag-chip { font-size: 12px; line-height: 18px; padding: 0 7px; border: 1px solid var(--line); border-radius: 5px; background: var(--panel); color: var(--muted); white-space: nowrap; }
+.tag-chip.every { background: var(--drive-bg); border-color: var(--drive-line); color: #8A5200; }
+.tag-chip.custom { background: var(--me); border-color: #C4D3E6; color: var(--accent); }
+.tag-chip.tag-add { border-style: dashed; background: transparent; cursor: pointer; font-family: inherit; }
+.tag-chip.tag-add:hover { color: var(--ink); border-color: var(--muted); }
+.tag-picker { position: fixed; inset: auto; margin: 0; width: 220px; max-height: min(420px, calc(100vh - 16px)); overflow: auto; padding: 5px; background: var(--panel); color: var(--ink); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 6px 18px rgba(27,33,41,.16); }
+.tag-picker label { display: flex; align-items: center; gap: 7px; padding: 3px 6px; font-size: 13px; border-radius: 5px; cursor: pointer; }
+.tag-picker label:hover { background: var(--bg); }
+.tag-picker input { margin: 0; accent-color: var(--accent); }
+.tag-picker hr { border: 0; border-top: 1px solid var(--line); margin: 4px 0; }
+.tag-note { margin: 0 0 8px; color: var(--muted); font-size: 12.5px; }
+#tag-rows .note { color: var(--muted); font-size: 13px; }
+.tag-row { display: grid; grid-template-columns: 150px minmax(0, 1fr) 28px; gap: 10px; align-items: start; max-width: 760px; padding: 10px 0; border-top: 1px solid var(--line); }
+.tag-row .name { width: 100%; box-sizing: border-box; padding: 3px 6px; margin-left: -6px; border: 1px solid transparent; border-radius: 6px; background: transparent; font: inherit; font-weight: 600; color: var(--ink); }
+.tag-row .name:hover, .tag-row .name:focus { border-color: var(--line); background: var(--panel); }
+.tag-row .tag-pills { display: flex; flex-wrap: wrap; gap: 4px; }
+.tag-row .tag-pill { font: inherit; font-size: 12.5px; line-height: 20px; padding: 1px 9px; border: 1px solid var(--line); border-radius: 5px; background: var(--panel); color: var(--muted); cursor: pointer; }
+.tag-row .tag-pill:hover { border-color: var(--muted); color: var(--ink); }
+.tag-row .tag-pill[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: #fff; }
+.tag-row .x { width: 26px; height: 26px; border: 0; background: transparent; border-radius: 6px; cursor: pointer; color: var(--muted); display: grid; place-items: center; }
+.tag-row .x:hover { background: var(--bad-bg); color: var(--bad); }
+.tag-row .x svg { width: 14px; height: 14px; }
 .facts mark { background: #FFE9A8; color: inherit; border-radius: 2px; }
 .facts .add { display: flex; padding: 8px 0; }
 .facts .add input { flex: 1; padding: 6px 10px; border: 1px dashed var(--line); border-radius: 7px; background: #FAFBFC; font: inherit; font-size: 13.5px; color: var(--ink); }
@@ -485,6 +505,7 @@ dialog .row { display: flex; gap: 8px; justify-content: flex-end; margin-top: 18
      <li><button type="button" class="navrow" data-tab="model" aria-current="false"><svg aria-hidden="true"><use href="#i-chip"/></svg>Model</button></li>
      <li><button type="button" class="navrow" data-tab="connections" aria-current="false"><svg aria-hidden="true"><use href="#i-screen"/></svg>Connections</button></li>
      <li><button type="button" class="navrow" data-tab="startup" aria-current="false"><svg aria-hidden="true"><use href="#i-power"/></svg>Startup</button></li>
+     <li><button type="button" class="navrow" data-tab="tags" aria-current="false"><svg aria-hidden="true"><use href="#i-mem"/></svg>Memory tags</button></li>
     </ul>
    </nav>
    <div class="pane" id="tab-chat">
@@ -509,6 +530,11 @@ dialog .row { display: flex; gap: 8px; justify-content: flex-end; margin-top: 18
     <div class="bar"><h1>Connections</h1><span class="aside" id="conn-checked"></span><button type="button" class="btn" id="conn-refresh">Check again</button></div>
     <div class="banner" id="conn-error" role="alert" hidden></div>
     <div class="conns" id="connections" aria-live="polite"></div>
+   </div>
+   <div class="pane" id="tab-tags" hidden>
+    <div class="bar"><h1>Memory tags</h1><span class="aside"></span><button type="button" class="btn" id="tag-new">New tag</button></div>
+    <div class="banner" id="tags-error" role="alert" hidden></div>
+    <div class="settings"><p class="tag-note">Every bot and each bot's own tag are always there.</p><div id="tag-rows"></div></div>
    </div>
    <div class="pane" id="tab-startup" hidden>
     <div class="bar"><h1>Startup</h1><span class="aside">Saved on this computer.</span></div>
@@ -1878,7 +1904,7 @@ function connect() {
     else if (data.type === "live") { state.live = data.live; renderLive(); renderChat(); }
     else if (data.type === "computer") { state.computer = data.computer; renderComputer(); }
     else if (data.type === "approvals") { state.approvals = data.approvals; renderChat(); }
-    else if (data.type === "bots") { state.bots = data.bots; renderBots(); renderMemoryStores(); }
+    else if (data.type === "bots") { state.bots = data.bots; renderBots(); refreshBotTags(); }
     else if (data.type === "control") applyControl(data.owner);
   };
 }
@@ -1986,7 +2012,6 @@ for (const type of ["resize", "blur"]) window.addEventListener(type, () => close
 document.addEventListener("scroll", () => closeBotMenu(false), true);
 
 // Opens a bot's chat: its history, its computer pane, and a fresh event stream. The choice is kept in the URL.
-// Picking a bot in the Memory view opens it too, so every view works on the same bot.
 async function selectBot(id) {
   if (!state.bots.some((b) => b.id === id)) id = mainId();
   const switched = id !== state.bot;
@@ -2119,7 +2144,7 @@ function openBot(bot) {
   $("b-save").textContent = bot ? "Save changes" : "Add bot";
   $("b-name").value = bot ? bot.name : "";
   $("b-instructions").value = bot ? bot.instructions : "";
-  $("b-file").replaceChildren(...(bot && bot.file ? ["Saved as ", el("code", "", bot.file), " in the project folder, beside its routines and memory. The bot re-reads it every turn, so edits there apply at once."] : ["Saved as agent.md in the bot's own folder under bots/ in the project folder."]));
+  $("b-file").replaceChildren(...(bot && bot.file ? ["Saved as ", el("code", "", bot.file), " in the project folder, beside its routines. The bot re-reads it every turn, so edits there apply at once."] : ["Saved as agent.md in the bot's own folder under bots/ in the project folder."]));
   $("b-delete").hidden = !bot || bot.main;
   $("b-error").textContent = "";
   loadBotModels(bot);
@@ -2151,7 +2176,7 @@ $("bot-form").addEventListener("submit", async (event) => {
 });
 $("b-delete").addEventListener("click", async () => {
   const bot = editingBot;
-  if (!bot || !window.confirm(`Delete ${bot.name}? Its chat, routines, and own memory go away (its folder is deleted), and other bots can no longer message it.`)) return;
+  if (!bot || !window.confirm(`Delete ${bot.name}? Its chat and routines go away (its folder is deleted), facts only it had move to Untagged in Memory, and other bots can no longer message it.`)) return;
   $("b-delete").disabled = true;
   try {
     await request("DELETE", "/api/bots/" + bot.id);
@@ -2293,15 +2318,15 @@ $("notify").addEventListener("click", async () => {
 
 /* ---------- views and the URL ---------- */
 // The URL's hash keeps the owner's place, so a reload, Back, or a copied link lands there again: `view` (routines,
-// memory, settings; the chat when absent), `tab` (Settings' model, connections or startup; its chat tab when absent), and `bot` (the open
-// bot; the main bot when absent). #bot=<id> links from before views had URLs still open that bot's chat.
-const VIEWS = ["chat", "routines", "memory", "settings"], TABS = ["chat", "model", "connections", "startup"];
+// memory, settings; the chat when absent), `tab` (Settings' model, connections, startup or tags; its chat tab when absent), `tag` (the
+// memory tag open in Memory; Every bot when absent), and `bot` (the open bot; the main bot when absent). #bot=<id> links from before views had URLs still open that bot's chat.
+const VIEWS = ["chat", "routines", "memory", "settings"], TABS = ["chat", "model", "connections", "startup", "tags"];
 let place = { view: "chat", tab: "chat" };
 
 function readPlace() {
   const hash = new URLSearchParams(location.hash.slice(1));
   const pick = (key, names) => (names.includes(hash.get(key)) ? hash.get(key) : names[0]);
-  return { view: pick("view", VIEWS), tab: pick("tab", TABS), bot: Number(hash.get("bot")) || undefined };
+  return { view: pick("view", VIEWS), tab: pick("tab", TABS), bot: Number(hash.get("bot")) || undefined, tag: hash.get("tag") ?? EVERY_BOT };
 }
 
 // A new view or tab is a new history entry, so Back returns to the last one; a bot switch replaces the entry.
@@ -2309,6 +2334,7 @@ function savePlace(push) {
   const hash = new URLSearchParams();
   if (place.view !== "chat") hash.set("view", place.view);
   if (place.view === "settings" && place.tab !== "chat") hash.set("tab", place.tab);
+  if (place.view === "memory" && memoryView.tag !== EVERY_BOT) hash.set("tag", memoryView.tag);
   if (state.bot !== null && state.bot !== mainId()) hash.set("bot", state.bot);
   const next = hash.size > 0 ? "#" + hash : "";
   if (next === location.hash) return;
@@ -2330,6 +2356,7 @@ function loadView() {
   else if (place.view === "settings" && place.tab === "model") loadModelSettings();
   else if (place.view === "settings" && place.tab === "connections") loadConnections();
   else if (place.view === "settings" && place.tab === "startup") loadAutostart();
+  else if (place.view === "settings" && place.tab === "tags") loadTags();
   else if (place.view === "chat") focusInput();
 }
 
@@ -2342,6 +2369,7 @@ document.querySelectorAll(".rail button[data-view]").forEach((button) => button.
 document.querySelectorAll("#settings-tabs button[data-tab]").forEach((button) => button.addEventListener("click", () => goTo("settings", button.dataset.tab)));
 window.addEventListener("popstate", () => {
   const next = readPlace();
+  memoryView.tag = next.tag;
   showView(next.view, next.tab);
   selectBot(next.bot ?? mainId());
   loadView();
@@ -2534,13 +2562,18 @@ function renderConnections(data) {
 }
 
 /* ---------- memory ---------- */
-// The sidebar lists the shared memory every bot sees, then each bot's own; `memoryView.shared` says which is
-// open, the shared one or the open bot's (picking a bot here opens it everywhere). A search covers them all.
-const memoryView = { data: null, shared: true };
+// The sidebar lists every tag: Every bot, the owner's, one per bot, and Untagged while a fact reaches no bot.
+// `memoryView.tag` is the open one, kept in the URL. A search covers every fact.
+const EVERY_BOT = "every-bot", UNTAGGED = "#untagged";
+const memoryView = { data: null, tag: EVERY_BOT };
 function showMemoryError(message) { $("memory-error").textContent = message; $("memory-error").hidden = !message; }
 const factDate = (date) => new Date(date + "T12:00:00").toLocaleDateString(undefined, { month: "short", day: "numeric" });
 const memoryQuery = () => $("memory-search").value.trim();
-const ownMemory = (id) => memoryView.data?.bots.find((own) => own.id === id);
+const tagNamed = (slug) => memoryView.data.tags.find((tag) => tag.slug === slug);
+const allFacts = () => [...memoryView.data.profile, ...memoryView.data.log];
+const tagsOfKind = (kind) => memoryView.data.tags.filter((tag) => tag.kind === kind);
+// Whether a fact goes under a sidebar row. A fact whose tags all name nothing, like a typo in the file, is untagged.
+const underTag = (fact, slug) => (slug === UNTAGGED ? !fact.tags.some((tag) => tagNamed(tag)) : fact.tags.includes(slug));
 $("memory-search").addEventListener("input", () => renderMemory());
 
 async function loadMemory() {
@@ -2551,60 +2584,75 @@ async function loadMemory() {
   } catch (error) { showMemoryError(error.message); }
 }
 
-// `bot` is a bot's id for its own memory, absent for the shared one.
-function openMemory(bot) {
-  memoryView.shared = bot === undefined;
+function openMemory(tag) {
+  memoryView.tag = tag;
   $("memory-search").value = "";
-  if (bot !== undefined) selectBot(bot);
+  savePlace(false);
   renderMemory();
 }
 
-// Also called when the bot list changes, so a renamed or new bot shows without redrawing the facts.
 function renderMemoryStores() {
-  const data = memoryView.data;
-  if (data === null) return;
   const searching = memoryQuery() !== "";
-  const row = (label, store, current, bot) => {
-    const count = store ? store.profile.length + store.log.length : 0;
+  const facts = allFacts();
+  const row = (label, slug) => {
+    const count = facts.filter((fact) => underTag(fact, slug)).length;
     const button = el("button", "navrow", label);
     button.type = "button";
-    button.setAttribute("aria-current", current && !searching ? "page" : "false");
+    button.setAttribute("aria-current", slug === memoryView.tag && !searching ? "page" : "false");
     button.setAttribute("aria-label", `${label}, ${count} ${count === 1 ? "fact" : "facts"}`);
     if (count > 0) button.append(el("small", "", String(count)));
-    button.addEventListener("click", () => openMemory(bot));
+    button.addEventListener("click", () => openMemory(slug));
     const item = el("li");
     item.append(button);
     return item;
   };
-  $("memory-stores").replaceChildren(row("Every bot", data, memoryView.shared), el("li", "navsep", "Only one bot"),
-    ...state.bots.map((bot) => row(bot.name, ownMemory(bot.id), !memoryView.shared && bot.id === state.bot, bot.id)));
+  const group = (title, kind) => {
+    const tags = tagsOfKind(kind);
+    return tags.length > 0 ? [el("li", "navsep", title), ...tags.map((tag) => row(tag.name, tag.slug))] : [];
+  };
+  const untagged = facts.some((fact) => underTag(fact, UNTAGGED)) ? [el("li", "navsep", "No bot"), row("Untagged", UNTAGGED)] : [];
+  $("memory-stores").replaceChildren(row("Every bot", EVERY_BOT), ...group("Your tags", "custom"), ...group("One bot", "bot"), ...untagged);
+}
+
+// Who the open tag's facts reach, in words.
+function memoryNote(tag) {
+  if (tag === undefined) return "No bot sees these. Give one a tag to share it.";
+  if (tag.kind === "every") return "Every bot sees these.";
+  if (tag.kind === "bot") return `Only ${tag.name} sees these, on top of what its other tags share.`;
+  const names = tagsOfKind("bot").filter((bot) => tag.bots.includes(bot.bots[0])).map((bot) => bot.name);
+  if (names.length === 0) return "No bot has this tag yet. Add bots in Settings, under Memory tags.";
+  return `${names.join(" and ")} ${names.length === 1 ? "sees" : "see"} these.`;
 }
 
 function renderMemory() {
   const data = memoryView.data;
   if (data === null) return;
+  const missing = memoryView.tag === UNTAGGED ? !allFacts().some((fact) => underTag(fact, UNTAGGED)) : tagNamed(memoryView.tag) === undefined;
+  if (missing) memoryView.tag = EVERY_BOT;
   renderMemoryStores();
   const query = memoryQuery();
   if (query !== "") { renderMemoryHits(query); return; }
-  const bot = currentBot();
-  const store = memoryView.shared ? data : ownMemory(bot.id) ?? { profile: [], log: [], dir: "" };
-  const target = memoryView.shared ? undefined : bot.id;
-  $("memory-title").textContent = memoryView.shared ? "Every bot" : bot.name;
+  const tag = tagNamed(memoryView.tag);
+  const here = (facts) => facts.filter((fact) => underTag(fact, memoryView.tag));
+  $("memory-title").textContent = tag?.name ?? "Untagged";
   $("memory-facts").replaceChildren(
-    el("p", "note", memoryView.shared ? "Every bot sees these." : `Only ${bot.name} sees these, on top of everything under Every bot.`),
-    ...factSection("profile", "Lasting", "Read before every reply.", "Add a lasting fact, for example: My partner is Dana", store.profile.toReversed(), target),
-    ...factSection("log", "Dated", "Events and plans. The latest 30 are read before every reply; a bot finds older ones by searching.", "Add a dated event, for example: Dentist on Nov 12", store.log, target));
-  $("memory-file").hidden = !store.dir;
-  $("memory-file").replaceChildren("Saved as markdown in ", el("code", "", store.dir), ": ", el("code", "", "profile.md"), " for lasting facts and one file per month under ", el("code", "", "log/"), " for dated ones. Edit them by hand anytime; the bots read them fresh on every reply.");
+    el("p", "note", memoryNote(tag)),
+    ...factSection("profile", "Lasting", "Read before every reply.", "Add a lasting fact, for example: My partner is Dana", here(data.profile).toReversed()),
+    ...factSection("log", "Dated", "Events and plans. The latest 30 a bot can see are read before every reply; it finds older ones by searching.", "Add a dated event, for example: Dentist on Nov 12", here(data.log)));
+  $("memory-file").hidden = false;
+  $("memory-file").replaceChildren("Saved as markdown in ", el("code", "", data.dir), ": ", el("code", "", "profile.md"), " for lasting facts and one file per month under ", el("code", "", "log/"), " for dated ones, each line as ", el("code", "", "- (date) [tags] fact"), ". Edit them by hand anytime; the bots read them fresh on every reply.");
 }
 
-// One kind of fact in the open memory, newest first, with its own add line: where you type decides who
-// sees the fact and its kind. `bot` is set in a bot's own memory.
-function factSection(tier, title, hint, placeholder, facts, bot) {
+// One kind of fact under the open tag, newest first, with an add line that saves under that tag. Untagged has
+// no add line, since a new fact needs a tag, and shows only the kinds it has.
+function factSection(tier, title, hint, placeholder, facts) {
+  const untagged = memoryView.tag === UNTAGGED;
+  if (untagged && facts.length === 0) return [];
   const heading = el("h2", "", title);
   heading.append(el("small", "", hint));
   const list = el("ul");
-  list.append(...facts.map((fact) => factRow(fact, bot, el("span", "when", factDate(fact.date)))));
+  list.append(...facts.map((fact) => factRow(fact)));
+  if (untagged) return [heading, list];
   const form = el("form", "add");
   const input = el("input");
   Object.assign(input, { placeholder, maxLength: 500, autocomplete: "off" });
@@ -2615,7 +2663,7 @@ function factSection(tier, title, hint, placeholder, facts, bot) {
     event.preventDefault();
     if (input.value.trim() === "") return;
     try {
-      await request("POST", "/api/memory", { fact: input.value, tier, ...(bot === undefined ? {} : { bot }) });
+      await request("POST", "/api/memory", { fact: input.value, tier, tags: [memoryView.tag] });
       await loadMemory();
       $("memory-facts").querySelector(`input[data-tier="${tier}"]`)?.focus();
     } catch (error) { showMemoryError(error.message); }
@@ -2623,23 +2671,20 @@ function factSection(tier, title, hint, placeholder, facts, bot) {
   return [heading, list, form];
 }
 
-// Every fact containing the search, in any memory, each labeled with whose it is.
+// Every fact containing the search, each with all its tags.
 function renderMemoryHits(query) {
-  const data = memoryView.data;
   const lower = query.toLowerCase();
-  const stores = [{ facts: [...data.profile, ...data.log] }, ...data.bots.map((own) => ({ bot: own.id, facts: [...own.profile, ...own.log] }))];
-  const hits = stores.flatMap(({ bot, facts }) => facts.filter((fact) => fact.text.toLowerCase().includes(lower)).map((fact) => ({ fact, bot })));
-  const whose = (bot) => bot === undefined ? el("span", "whose", "Every bot") : el("span", "whose own", state.bots.find((b) => b.id === bot)?.name ?? "A removed bot");
+  const hits = allFacts().filter((fact) => fact.text.toLowerCase().includes(lower));
   $("memory-title").textContent = `${hits.length} ${hits.length === 1 ? "match" : "matches"}`;
-  const list = el("ul", "hits");
-  list.append(...(hits.length > 0 ? hits.map(({ fact, bot }) => factRow(fact, bot, whose(bot), el("span", "when", factDate(fact.date)))) : [el("li", "none", "No fact matches.")]));
+  const list = el("ul");
+  list.append(...(hits.length > 0 ? hits.map((fact) => factRow(fact)) : [el("li", "none", "No fact matches.")]));
   $("memory-facts").replaceChildren(el("p", "note", "Searching every memory."), list);
   $("memory-file").hidden = true;
 }
 
 // Swaps a fact's text for a box in place. Enter or clicking away saves; a failed save stays open under the
 // error banner. Escape puts the text back.
-function editFact(row, shown, pen, fact, bot) {
+function editFact(row, shown, pen, fact) {
   const box = el("textarea");
   Object.assign(box, { value: fact.text, maxLength: 500, rows: 1 });
   box.setAttribute("aria-label", "Edit fact");
@@ -2651,7 +2696,7 @@ function editFact(row, shown, pen, fact, bot) {
     if (box.value.trim() === fact.text) { close(); return; }
     settled = true;
     try {
-      await request("POST", "/api/memory/edit", { fact: fact.text, to: box.value, tier: fact.tier, ...(bot === undefined ? {} : { bot }) });
+      await request("POST", "/api/memory/edit", { fact: fact.text, to: box.value, tier: fact.tier });
       await loadMemory();
     } catch (error) { showMemoryError(error.message); settled = false; }
   };
@@ -2668,9 +2713,59 @@ function editFact(row, shown, pen, fact, bot) {
   box.focus();
 }
 
-// A fact, what goes beside it, its edit pencil, and its forget ✕. `bot` is set for a bot's own fact, so changing
-// it leaves the shared memory alone.
-function factRow(fact, bot, ...asides) {
+// A fact's checklist of tags, opened under its + Tag button. Each tick saves at once, in order; closing redraws.
+function openTagPicker(fact, anchor) {
+  const picker = el("div", "tag-picker");
+  picker.popover = "auto";
+  const chosen = new Set(fact.tags.filter((tag) => tagNamed(tag)));
+  let saving = Promise.resolve();
+  let changed = false;
+  const option = (tag) => {
+    const label = el("label");
+    const box = el("input");
+    Object.assign(box, { type: "checkbox", checked: chosen.has(tag.slug) });
+    box.addEventListener("change", () => {
+      if (box.checked) chosen.add(tag.slug); else chosen.delete(tag.slug);
+      changed = true;
+      const tags = [...chosen];
+      saving = saving.then(() => request("POST", "/api/memory/retag", { fact: fact.text, tier: fact.tier, tags })).catch((error) => showMemoryError(error.message));
+    });
+    label.append(box, tag.name);
+    return label;
+  };
+  const groups = ["every", "custom", "bot"].map((kind) => tagsOfKind(kind)).filter((tags) => tags.length > 0);
+  picker.append(...groups.flatMap((tags, index) => [...(index > 0 ? [el("hr")] : []), ...tags.map(option)]));
+  picker.addEventListener("toggle", async (event) => {
+    if (event.newState !== "closed") return;
+    picker.remove();
+    if (!changed) { anchor.focus(); return; }
+    await saving;
+    await loadMemory();
+  });
+  document.body.append(picker);
+  picker.showPopover();
+  const spot = anchor.getBoundingClientRect();
+  const below = spot.bottom + 4 + picker.offsetHeight <= innerHeight;
+  picker.style.left = `${Math.min(spot.left, innerWidth - picker.offsetWidth - 8)}px`;
+  picker.style.top = `${below ? spot.bottom + 4 : Math.max(8, spot.top - picker.offsetHeight - 4)}px`;
+  picker.querySelector("input")?.focus();
+}
+
+// The fact's tags, leaving out the one whose page this is, and its + Tag button.
+function tagChips(fact) {
+  const chips = el("div", "tag-chips");
+  const shown = fact.tags.filter((tag) => tag !== memoryView.tag || memoryQuery() !== "");
+  chips.append(...shown.map((slug) => el("span", "tag-chip " + (tagNamed(slug)?.kind ?? ""), tagNamed(slug)?.name ?? slug)));
+  const add = el("button", "tag-chip tag-add", "+ Tag");
+  add.type = "button";
+  add.setAttribute("aria-label", "Change tags: " + fact.text);
+  add.addEventListener("click", () => openTagPicker(fact, add));
+  chips.append(add);
+  return chips;
+}
+
+// A fact, its tags, its date, its edit pencil, and its forget ✕.
+function factRow(fact) {
   const pen = el("button", "x pen");
   pen.type = "button";
   pen.setAttribute("aria-label", "Edit: " + fact.text);
@@ -2683,14 +2778,111 @@ function factRow(fact, bot, ...asides) {
   forget.append(icon("i-x"));
   forget.addEventListener("click", async () => {
     forget.disabled = true;
-    try { await request("POST", "/api/memory/forget", { fact: fact.text, ...(bot === undefined ? {} : { bot }) }); await loadMemory(); }
+    try { await request("POST", "/api/memory/forget", { fact: fact.text }); await loadMemory(); }
     catch (error) { showMemoryError(error.message); forget.disabled = false; }
   });
   const row = el("li");
   const shown = marked(fact.text, memoryQuery());
-  pen.addEventListener("click", () => editFact(row, shown, pen, fact, bot));
-  row.append(shown, ...asides, pen, forget);
+  pen.addEventListener("click", () => editFact(row, shown, pen, fact));
+  const body = el("div");
+  body.append(shown, tagChips(fact));
+  row.append(body, el("span", "when", factDate(fact.date)), pen, forget);
   return row;
+}
+
+/* ---------- memory tags (Settings) ---------- */
+function showTagsError(message) { $("tags-error").textContent = message; $("tags-error").hidden = !message; }
+
+async function loadTags() {
+  try {
+    memoryView.data = await request("GET", "/api/memory");
+    showTagsError("");
+    renderTags();
+  } catch (error) { showTagsError(error.message); }
+}
+
+// Runs one change to the owner's tags, then redraws from what the server has, which also puts back a refused edit.
+async function changeTags(method, path, payload) {
+  try {
+    await request(method, path, payload);
+    await loadTags();
+  } catch (error) {
+    await loadTags();
+    showTagsError(error.message);
+  }
+}
+
+const tagPath = (tag) => "/api/memory/tags/" + encodeURIComponent(tag.slug);
+
+// The name box of a tag row. Enter or clicking away saves it through `save`; Escape puts it back.
+function tagNameBox(value, save) {
+  const box = el("input", "name");
+  Object.assign(box, { value, autocomplete: "off", placeholder: "Tag name" });
+  box.setAttribute("aria-label", "Tag name");
+  box.addEventListener("keydown", (event) => {
+    if (event.isComposing) return;
+    if (event.key === "Enter") box.blur();
+    else if (event.key === "Escape") { box.value = value; box.blur(); }
+  });
+  box.addEventListener("blur", () => save(box.value.trim()));
+  return box;
+}
+
+function tagRow(tag) {
+  const row = el("div", "tag-row");
+  const name = tagNameBox(tag.name, (value) => {
+    if (value !== tag.name && value !== "") changeTags("PUT", tagPath(tag), { name: value, bots: tag.bots });
+    else name.value = tag.name;
+  });
+  const pills = el("div", "tag-pills");
+  pills.append(...tagsOfKind("bot").map((bot) => {
+    const id = bot.bots[0];
+    const member = tag.bots.includes(id);
+    const pill = el("button", "tag-pill", bot.name);
+    pill.type = "button";
+    pill.setAttribute("aria-pressed", String(member));
+    pill.addEventListener("click", () => changeTags("PUT", tagPath(tag), { name: tag.name, bots: member ? tag.bots.filter((other) => other !== id) : [...tag.bots, id] }));
+    return pill;
+  }));
+  const remove = el("button", "x");
+  remove.type = "button";
+  remove.title = "Delete tag";
+  remove.setAttribute("aria-label", "Delete tag " + tag.name);
+  remove.append(icon("i-x"));
+  remove.addEventListener("click", () => {
+    const only = allFacts().filter((fact) => fact.tags.length === 1 && fact.tags[0] === tag.slug).length;
+    const moved = only > 0 ? ` ${only} ${only === 1 ? "fact has" : "facts have"} no other tag and will move to Untagged in Memory, where no bot sees ${only === 1 ? "it" : "them"}.` : "";
+    if (window.confirm(`Delete ${tag.name}?${moved}`)) changeTags("DELETE", tagPath(tag));
+  });
+  row.append(name, pills, remove);
+  return row;
+}
+
+function renderTags() {
+  const tags = tagsOfKind("custom");
+  $("tag-rows").replaceChildren(...(tags.length > 0 ? tags.map(tagRow) : [el("p", "note", "No tags of your own yet. Make one to share facts with a group of bots.")]));
+}
+
+$("tag-new").addEventListener("click", () => {
+  const row = el("div", "tag-row");
+  const name = tagNameBox("", (value) => {
+    if (value === "") row.remove();
+    else changeTags("POST", "/api/memory/tags", { name: value, bots: [] });
+  });
+  row.append(name);
+  $("tag-rows").querySelector(".note")?.remove();
+  $("tag-rows").append(row);
+  name.focus();
+});
+
+// Called when the bot list changes, which can rename, add, or remove a tag; a busy bot changing nothing here redraws nothing.
+let taggedBots = "";
+function refreshBotTags() {
+  const names = state.bots.map((bot) => `${bot.id}:${bot.name}`).join("\n");
+  if (names === taggedBots) return;
+  taggedBots = names;
+  if (place.view === "memory") loadMemory();
+  else if (place.view === "settings" && place.tab === "tags") loadTags();
 }
 
 // The text with the first match of `query` highlighted.
@@ -2814,6 +3006,7 @@ $("routine-form").addEventListener("submit", async (event) => {
 
 /* ---------- start ---------- */
 const start = readPlace();
+memoryView.tag = start.tag;
 showView(start.view, start.tab);
 loadBots().then(() => { selectBot(start.bot ?? mainId()); loadView(); });
 playLive();

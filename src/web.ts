@@ -14,7 +14,7 @@ import type { Autostart } from "./autostart.ts";
 import { BotError, type BotInput, type Bots } from "./bots.ts";
 import type { Chat, ChatImage } from "./chat.ts";
 import type { Connections } from "./connections.ts";
-import { type Memory, MemoryError } from "./memory.ts";
+import { type Memory, MemoryError, type TagView } from "./memory.ts";
 import { DATA_DIR } from "./log.ts";
 import type { InputEvent, LiveScreen } from "./live-screen.ts";
 import type { ModelSettings } from "./model-settings.ts";
@@ -116,10 +116,10 @@ export type BotServerDeps = {
 	context: Context;
 	/** Enables /api/bots* and /api/chat*. Absent in tests that only exercise routines. */
 	bots?: Bots;
-	/** Enables /api/memory*: the shared memory. */
+	/** Enables /api/memory*: the tagged memory. */
 	memory?: Memory;
-	/** Every bot's own memory, for /api/memory: GET lists them all, and a POST with a bot goes to that bot's. */
-	botMemories?: () => { id: number; memory: Memory }[];
+	/** The bots, to say who holds which memory tag. */
+	memoryBots?: () => { id: number; name: string }[];
 	/** Enables /api/approvals* and approval events on the chat stream. Absent when Executor is not configured. */
 	approvals?: Approvals;
 	/** Fits pasted chat images to the model's limits, converting formats it does not take. Without it, images pass as they are. */
@@ -512,59 +512,97 @@ async function routeModel(req: IncomingMessage, res: ServerResponse, deps: BotSe
 	sendJson(res, 200, state);
 }
 
-function factInput(body: unknown): { fact: string; tier: "profile" | "log"; bot?: number } {
+function factInput(body: unknown): { fact: string; tier: "profile" | "log" } {
 	const record = body !== null && typeof body === "object" && !Array.isArray(body) ? (body as Record<string, unknown>) : {};
 	if (typeof record.fact !== "string") throw new HttpError(400, "fact must be a string");
 	const tier = record.tier ?? "profile";
 	if (tier !== "profile" && tier !== "log") throw new HttpError(400, "tier must be profile or log");
-	if (record.bot !== undefined && record.bot !== null && !Number.isInteger(record.bot)) throw new HttpError(400, "bot must be a bot id");
-	return { fact: record.fact, tier, ...(typeof record.bot === "number" ? { bot: record.bot } : {}) };
+	return { fact: record.fact, tier };
 }
 
-// The Memory view: list every fact (log newest first) of the shared memory and of each bot's own, under
-// `bots`; add one, or edit or forget one by its text. A POST with `bot` goes to that bot's memory, else the shared one.
+// The body's `tags`, or a 400 unless each one exists.
+function tagsInput(body: unknown, known: TagView[]): string[] {
+	const { tags } = (body ?? {}) as { tags?: unknown };
+	if (!Array.isArray(tags) || !tags.every((tag) => typeof tag === "string")) throw new HttpError(400, "tags must be a list of tags");
+	const missing = tags.find((tag) => !known.some((view) => view.slug === tag));
+	if (missing !== undefined) throw new HttpError(400, `No tag is named ${missing}.`);
+	return tags;
+}
+
+function tagInput(body: unknown): { name: string; bots: number[] } {
+	const { name, bots } = (body ?? {}) as { name?: unknown; bots?: unknown };
+	if (typeof name !== "string") throw new HttpError(400, "name must be a string");
+	if (!Array.isArray(bots) || !bots.every((bot) => Number.isInteger(bot))) throw new HttpError(400, "bots must be a list of bot ids");
+	return { name, bots };
+}
+
+// The Memory view and Settings > Memory tags: list every fact (log newest first) and every tag; add a fact, or
+// edit, retag, or forget one by its text; make, change, or delete one of the owner's tags.
 async function routeMemory(req: IncomingMessage, res: ServerResponse, deps: BotServerDeps, url: URL, method: string) {
-	const shared = deps.memory;
-	if (shared === undefined) throw new HttpError(404, "not found");
-	const ownOf = (bot: number) => {
-		const own = deps.botMemories?.().find((entry) => entry.id === bot)?.memory;
-		if (own === undefined) throw new HttpError(404, "No such bot.");
-		return own;
-	};
-	const listing = async (memory: Memory) => {
-		const { profile, log } = await memory.all();
-		return { profile, log: log.toReversed(), dir: memory.dir };
-	};
+	const memory = deps.memory;
+	if (memory === undefined) throw new HttpError(404, "not found");
+	const tagViews = () => memory.tagViews(deps.memoryBots?.() ?? []);
+	const tagPath = url.pathname.startsWith("/api/memory/tags/") ? decodeURIComponent(url.pathname.slice("/api/memory/tags/".length)) : undefined;
 	try {
 		if (method === "GET" && url.pathname === "/api/memory") {
-			const bots = await Promise.all((deps.botMemories?.() ?? []).map(async ({ id, memory }) => ({ id, ...(await listing(memory)) })));
-			sendJson(res, 200, { ...(await listing(shared)), bots });
+			const { profile, log } = await memory.all();
+			sendJson(res, 200, { profile, log: log.toReversed(), dir: memory.dir, tags: await tagViews() });
 			return;
 		}
 		if (method === "POST" && url.pathname === "/api/memory") {
-			const { fact, tier, bot } = factInput(await readJson(req));
-			const saved = await (bot === undefined ? shared : ownOf(bot)).remember(fact, tier);
-			deps.log?.(`memory (web): ${saved.added ? "added" : "already had"} ${bot === undefined ? "shared" : `bot ${bot}`} ${tier}: ${saved.fact.text}`);
+			const body = await readJson(req);
+			const { fact, tier } = factInput(body);
+			const saved = await memory.remember(fact, tier, tagsInput(body, await tagViews()));
+			deps.log?.(`memory (web): ${saved.added ? "added" : "already had"} ${tier} [${saved.fact.tags.join(", ")}]: ${saved.fact.text}`);
 			sendJson(res, saved.added ? 201 : 200, saved);
 			return;
 		}
 		if (method === "POST" && url.pathname === "/api/memory/edit") {
 			const body = await readJson(req);
-			const { fact, tier, bot } = factInput(body);
+			const { fact, tier } = factInput(body);
 			const { to } = (body ?? {}) as { to?: unknown };
 			if (typeof to !== "string") throw new HttpError(400, "to must be a string");
-			const edited = await (bot === undefined ? shared : ownOf(bot)).edit(fact, to, tier);
+			const edited = await memory.edit(fact, to, tier);
 			if (edited === undefined) throw new HttpError(404, "no saved fact matches that text");
-			deps.log?.(`memory (web): edited ${bot === undefined ? "shared" : `bot ${bot}`} ${tier}: ${fact} -> ${edited.text}`);
+			deps.log?.(`memory (web): edited ${tier}: ${fact} -> ${edited.text}`);
 			sendJson(res, 200, { fact: edited });
 			return;
 		}
+		if (method === "POST" && url.pathname === "/api/memory/retag") {
+			const body = await readJson(req);
+			const { fact, tier } = factInput(body);
+			const retagged = await memory.retag(fact, tier, tagsInput(body, await tagViews()));
+			if (retagged === undefined) throw new HttpError(404, "no saved fact matches that text");
+			deps.log?.(`memory (web): tagged ${tier} [${retagged.tags.join(", ")}]: ${retagged.text}`);
+			sendJson(res, 200, { fact: retagged });
+			return;
+		}
 		if (method === "POST" && url.pathname === "/api/memory/forget") {
-			const { fact, bot } = factInput(await readJson(req));
-			const removed = await (bot === undefined ? shared : ownOf(bot)).forget(fact);
+			const { fact } = factInput(await readJson(req));
+			const removed = await memory.forget(fact);
 			if (removed.length === 0) throw new HttpError(404, "no saved fact matches that text");
-			deps.log?.(`memory (web): forgot ${removed.length}${bot === undefined ? "" : ` from bot ${bot}`}: ${fact}`);
+			deps.log?.(`memory (web): forgot ${removed.length}: ${fact}`);
 			sendJson(res, 200, { removed });
+			return;
+		}
+		if (method === "POST" && url.pathname === "/api/memory/tags") {
+			const { name, bots } = tagInput(await readJson(req));
+			const tag = await memory.createTag(name, bots);
+			deps.log?.(`memory (web): made tag ${tag.slug}`);
+			sendJson(res, 201, { tag });
+			return;
+		}
+		if (method === "PUT" && tagPath !== undefined) {
+			const tag = await memory.updateTag(tagPath, tagInput(await readJson(req)));
+			if (tag === undefined) throw new HttpError(404, "no such tag");
+			deps.log?.(`memory (web): changed tag ${tagPath} -> ${tag.slug}, bots ${tag.bots.join(", ")}`);
+			sendJson(res, 200, { tag });
+			return;
+		}
+		if (method === "DELETE" && tagPath !== undefined) {
+			if (!(await memory.deleteTag(tagPath))) throw new HttpError(404, "no such tag");
+			deps.log?.(`memory (web): deleted tag ${tagPath}`);
+			res.writeHead(204).end();
 			return;
 		}
 	} catch (error) {

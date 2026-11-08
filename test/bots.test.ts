@@ -13,7 +13,7 @@ import type { Message } from "@earendil-works/pi-ai";
 import { createModels } from "@earendil-works/pi-ai/models";
 import { fauxAssistantMessage, fauxProvider, fauxText, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
 import { type AgentChange, type ConversationId, createRegistry, Harness, MemoryStorage } from "@earendil-works/pi-durable";
-import { botMemories, type BotView, createBots, createBotsExtension, defaultAvatar, readBots } from "../src/bots.ts";
+import { type BotView, createBots, createBotsExtension, defaultAvatar, readBots } from "../src/bots.ts";
 import { type ChatItem, SEND_MESSAGE } from "../src/chat.ts";
 import { createModelSettings } from "../src/model-settings.ts";
 import { bindRoutines, createRoutinesExtension, deleteRoutine, removeBotRoutines, type RoutineView, syncRoutines } from "../src/routines.ts";
@@ -59,13 +59,17 @@ async function open() {
 	bindRoutines({ harness, root, dir, legacyFile });
 	harness.resume();
 	const agent: AgentChange = { model: MODEL };
+	const renames: [number, string, string][] = [];
 	const bots = await createBots({
 		harness,
 		root,
 		context,
 		agent: () => agent,
 		dir,
-		renamed: () => syncRoutines(context),
+		renamed: (id, before, after) => {
+			renames.push([id, before, after]);
+			return syncRoutines(context);
+		},
 		removing: (id) => removeBotRoutines(id, context),
 		sent: (bot, text) => replies.push([bot.name, text]),
 	});
@@ -78,6 +82,7 @@ async function open() {
 	return {
 		base: `http://127.0.0.1:${address.port}`,
 		agent,
+		renames,
 		bots,
 		harness,
 		prompts,
@@ -279,7 +284,7 @@ test("bots are added, renamed, and deleted over HTTP; the main bot stays", { tim
 	}
 });
 
-test("each bot's folder holds its agent file and memory, and follows it through hand edits, a rename, and a delete", { timeout: 20_000 }, async () => {
+test("each bot's folder holds its agent file and follows it through hand edits, a rename, and a delete", { timeout: 20_000 }, async () => {
 	const bot = await open();
 	try {
 		assert.equal(await readFile(join(bot.dir, "cua-bot", "agent.md"), "utf8"), "", "the main bot gets an empty agent file");
@@ -301,21 +306,12 @@ test("each bot's folder holds its agent file and memory, and follows it through 
 		const mainPrompt = bot.prompts.find((prompt) => prompt.includes("ask scout")) ?? "";
 		assert.ok(mainPrompt.includes(`Scout (id ${scout.id}): Book trains`), "teammates are described by their first line that isn't a heading");
 
-		const memories = botMemories(bot.dir);
-		await memories.of(scout).remember("Prefers window seats", "profile");
-		assert.ok(existsSync(join(bot.dir, "scout", "memory", "profile.md")));
-
 		await mkdir(join(bot.dir, "taken"));
 		assert.equal((await send(bot.base, "PUT", `/api/bots/${scout.id}`, { name: "Taken", instructions: "" })).status, 400, "a rename never lands on a folder already there");
 		await send(bot.base, "PUT", `/api/bots/${scout.id}`, { name: "Travel", instructions: "Plan trips." });
 		assert.equal(existsSync(join(bot.dir, "scout")), false);
 		assert.equal(await readFile(join(bot.dir, "travel", "agent.md"), "utf8"), "Plan trips.\n", "the folder follows the rename");
-		const travel = { id: scout.id, name: "Travel" };
-		assert.deepEqual(
-			(await memories.of(travel).all()).profile.map((fact) => fact.text),
-			["Prefers window seats"],
-			"with the bot's memory",
-		);
+		assert.deepEqual(bot.renames, [[scout.id, "Scout", "Travel"]], "memory hears the old and new name, to move the bot's tag");
 
 		assert.equal((await send(bot.base, "DELETE", `/api/bots/${scout.id}`)).status, 204);
 		assert.equal(existsSync(join(bot.dir, "travel")), false, "a deleted bot's folder goes with it");

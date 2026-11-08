@@ -13,10 +13,11 @@ The URL hash keeps your place, so a reload, Back, or a copied link lands in the 
 | Key | Values | When absent |
 | --- | --- | --- |
 | `view` | `routines`, `memory`, `settings` | The chat |
-| `tab` | `model`, `connections`, `startup` | Settings' Chat tab |
+| `tab` | `model`, `connections`, `startup`, `tags` | Settings' Chat tab |
+| `tag` | A memory tag, in Memory | Every bot |
 | `bot` | A bot id | The main bot |
 
-For example `#view=settings&tab=connections` or `#view=memory&bot=3`. Each new view or tab is a history entry; switching bots replaces the entry. Old links of the form `#bot=<id>` still open that bot's chat.
+For example `#view=settings&tab=connections` or `#view=memory&tag=job-bots`. Each new view or tab is a history entry; switching bots replaces the entry. Old links of the form `#bot=<id>` still open that bot's chat.
 
 ## Bots
 
@@ -84,13 +85,13 @@ A new routine goes to the bot whose chat you had open unless you pick another; a
 
 ## Memory
 
-The sidebar lists Every bot (the shared memory), then each bot's own memory with its fact count. Picking a bot opens its chat too.
+The sidebar lists tags with their fact counts: Every bot, the ones you made in [Memory tags](#memory-tags), one per bot, and Untagged while any fact reaches no bot.
 
-The open memory shows its lasting facts, then its dated ones, newest first. Each section ends in an add line, so where you type decides who sees the fact and its kind. The pencil rewords a fact in place and keeps its date: Enter or clicking away saves, Escape cancels. Forget a fact with its ✕. The search box finds facts in every memory at once and labels each with whose it is.
+The open tag shows its lasting facts, then its dated ones, newest first. Each section ends in an add line that saves under that tag. Under each fact are its other tags and a **+ Tag** button, whose checklist saves each tick at once. The pencil rewords a fact in place and keeps its date and tags: Enter or clicking away saves, Escape cancels. Forget a fact with its ✕. The search box finds facts under every tag at once and shows all their tags.
 
 ## Settings
 
-Settings has four tabs in its own sidebar.
+Settings has five tabs in its own sidebar.
 
 ### Chat
 
@@ -107,6 +108,10 @@ Saved in this browser's `localStorage` (`cua-bot.settings`), so each browser kee
 ### Model
 
 Picks the default model and reasoning effort for the bots ([src/model-settings.ts](../src/model-settings.ts)). A bot can override either in its edit dialog. The list holds each model with a key in `models.json` or a sign-in from `node src/login.ts`, and the efforts follow the picked model. A change saves `CUABOT_MODEL` and `CUABOT_REASONING` to the computer's `.env` and reaches every bot on its default on its next turn, with no restart.
+
+### Memory tags
+
+Your own tags for sharing facts with a group of bots. **New tag** adds one. Click a bot to add it or take it out, and edit the name in place. Deleting a tag warns you when facts would be left with no tag; those move to Untagged in Memory. Every bot and each bot's own tag are always there and aren't listed.
 
 ### Connections
 
