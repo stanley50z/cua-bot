@@ -12,11 +12,13 @@ import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { Type } from "typebox";
 import { createModels } from "@earendil-works/pi-ai/models";
 import { type FauxResponseFactory, type FauxResponseStep, fauxAssistantMessage, fauxProvider, fauxText, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
-import { createRegistry, defineExtension, defineTool, Harness, MemoryStorage } from "@earendil-works/pi-durable";
+import { createRegistry, defineExtension, defineTool, type Extension, Harness, MemoryStorage } from "@earendil-works/pi-durable";
 import { createNodePhotonImages } from "@earendil-works/pi-durable/images/node";
 import type { ImageProcessor } from "@earendil-works/pi-durable/tools";
 import { createBots, createBotsExtension } from "../src/bots.ts";
 import { BOT_MESSAGE, type ChatEvent, type ChatItem, REACTION, reactionText, SEND_MESSAGE, toChatItem } from "../src/chat.ts";
+import { createMemory, messageNote } from "../src/memory.ts";
+import { createPcExtensions } from "../src/pc.ts";
 import { createBotServer } from "../src/web.ts";
 
 const context = BACKGROUND_CONTEXT;
@@ -41,7 +43,7 @@ const SCRIPT: FauxResponseStep[] = [
 	end,
 ];
 
-async function open(responses = SCRIPT, images?: ImageProcessor) {
+async function open(responses = SCRIPT, images?: ImageProcessor, memoryNote?: (bot: number, message: string) => Promise<string | undefined>, options: { extensions?: Extension[]; sent?: (text: string) => void } = {}) {
 	const dir = await mkdtemp(join(tmpdir(), "cua-bot-chat-"));
 	const faux = fauxProvider();
 	const models = createModels();
@@ -49,11 +51,12 @@ async function open(responses = SCRIPT, images?: ImageProcessor) {
 	faux.setResponses(responses);
 	const registry = createRegistry();
 	registry.install(defineExtension({ name: "test", tools: [lookTool] }));
+	for (const extension of options.extensions ?? []) registry.install(extension);
 	registry.install(createBotsExtension({ agent: () => ({ model: MODEL }), dir: join(dir, "bots") }));
 	const harness = await Harness.open(new MemoryStorage(), { models, registry }, context);
 	const root = await harness.root(context, { agent: { model: MODEL } });
 	harness.resume();
-	const bots = await createBots({ harness, root, context, agent: () => ({ model: MODEL }), dir: join(dir, "bots") });
+	const bots = await createBots({ harness, root, context, agent: () => ({ model: MODEL }), dir: join(dir, "bots"), ...(memoryNote === undefined ? {} : { memoryNote }), sent: (_bot, text) => options.sent?.(text) });
 	const server = createBotServer({ say: async (text) => text, bots, context, shotsDir: dir, ...(images === undefined ? {} : { images }) });
 	await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
 	const address = server.address();
@@ -104,6 +107,63 @@ async function collect(base: string, done: (events: ChatEvent[]) => boolean, act
 	abort.abort();
 	return events;
 }
+
+test("send_message called from a codemode script shows in the chat once, notifies the owner, and takes reactions", { timeout: 60_000 }, async () => {
+	const pushed: string[] = [];
+	const code = `try { await tools.send_message({ text: "   " }); } catch {} await tools.send_message({ text: "From a script." });`;
+	const bot = await open([fauxAssistantMessage([fauxToolCall("codemode", { code }, { id: "c1" })], { stopReason: "toolUse" }), end, end], undefined, undefined, {
+		extensions: createPcExtensions(),
+		sent: (text) => pushed.push(text),
+	});
+	const history = async () => (await (await fetch(`${bot.base}/api/chat`)).json()).items as ChatItem[];
+	try {
+		await post(bot.base, "/api/chat", { text: "send from a script" });
+		const deadline = Date.now() + 30_000;
+		while (bot.faux.state.callCount < 2 || !(await history()).some((item) => item.kind === "tool" && item.name === "codemode")) {
+			assert.ok(Date.now() < deadline, "timed out waiting for the script to finish");
+			await new Promise((resolve) => setTimeout(resolve, 50));
+		}
+		const chat = await history();
+		const sent = chat.filter((item) => item.kind === "assistant" && item.text !== "");
+		assert.deepEqual(sent.map((item) => item.kind === "assistant" && item.text), ["From a script."]);
+		assert.ok(chat.some((item) => item.kind === "tool" && item.name === "codemode"), "the script still shows as a tool");
+		assert.deepEqual(pushed, ["From a script."]);
+		assert.equal((await post(bot.base, "/api/chat/react", { entryId: sent[0]?.id, emoji: "👍", on: true })).status, 202);
+	} finally {
+		await bot.close();
+	}
+});
+
+test("an owner message that matches memory reaches the bot with the search result just before it, and the chat doesn't show the result", async () => {
+	const store = await mkdtemp(join(tmpdir(), "cua-bot-chat-memory-"));
+	const memory = createMemory({ dir: store });
+	await memory.remember("Plumber comes Tuesday", "log", ["every-bot"]);
+	const requests: string[][] = [];
+	const record = (step: FauxResponseStep): FauxResponseFactory => (request, ...rest) => {
+		requests.push(request.messages.flatMap((message) => (message.role === "user" && typeof message.content === "string" ? [message.content] : [])));
+		return typeof step === "function" ? step(request, ...rest) : step;
+	};
+	const bot = await open([record(send("Tuesday.")), record(end), record(send("Hello.")), record(end)], undefined, (id, message) => messageNote(memory, message, id, [{ id, name: "cua-bot" }]));
+	try {
+		const events = await collect(bot.base, settled(["user", "assistant"]), async () => {
+			await post(bot.base, "/api/chat", { text: "when is the plumber coming" });
+		});
+		assert.deepEqual(items(events).map((item) => item.kind), ["user", "assistant"]);
+		assert.equal(requests[0]?.length, 2);
+		assert.match(requests[0]?.[0] ?? "", /^\[search_memory\] .*\(plumber\):\n- \(\d{4}-\d{2}-\d{2}\) Plumber comes Tuesday \[every-bot\] \(log\)$/);
+		assert.equal(requests[0]?.[1], "when is the plumber coming");
+
+		await collect(bot.base, settled(["user", "assistant"]), async () => {
+			await post(bot.base, "/api/chat", { text: "hi" });
+		});
+		assert.deepEqual(requests[2]?.slice(1), ["when is the plumber coming", "hi"], "a message that finds nothing adds no note");
+		const history = (await (await fetch(`${bot.base}/api/chat`)).json()).items as ChatItem[];
+		assert.ok(!JSON.stringify(history).includes("search_memory"), "the chat never shows the note");
+	} finally {
+		await bot.close();
+		await rm(store, { recursive: true, force: true });
+	}
+});
 
 const items = (events: ChatEvent[]) => events.flatMap((event) => (event.type === "items" ? event.items : []));
 const settled = (kinds: ChatItem["kind"][]) => (events: ChatEvent[]) => {

@@ -1,6 +1,6 @@
 // Long-term memory about the owner, as plain markdown the owner can read and edit: one store, data/memory/,
 // where each fact's tags say which bots get it. main.ts runs migrateMemory, installs createMemoryExtension
-// so every bot gets remember / forget / recall and sees its facts in every request, and hands the store to
+// so every bot gets remember / forget / search_memory and sees its facts in every request, and hands the store to
 // the web app (GET/POST /api/memory). Layout of the store:
 //   profile.md          enduring facts about the owner ("About the owner")
 //   log/YYYY-MM.md      dated facts, one file per month
@@ -30,7 +30,9 @@ export const botTag = (bot: BotRef) => `@${botFolder(bot)}`;
 
 const MAX_FACT = 500;
 const RECENT_LIMIT = 30;
-const RECALL_LIMIT = 20;
+const SEARCH_LIMIT = 20;
+/** A word in an incoming message is a keyword when at most one in this many of the bot's facts has it, so "the" and "owner" don't count. */
+const KEYWORD_RARITY = 10;
 const TAG = "@?[\\p{L}\\p{N}-]+";
 const FACT_LINE = new RegExp(`^-\\s+\\((\\d{4}-\\d{2}-\\d{2})\\)\\s+(?:\\[(${TAG}(?:,\\s*${TAG})*)\\]\\s+)?(.+?)\\s*$`, "u");
 const PROFILE_HEADER = "# About the owner\n";
@@ -39,8 +41,31 @@ export class MemoryError extends Error {}
 
 const normalize = (text: string) => text.trim().replace(/\s+/g, " ");
 const same = (a: string, b: string) => normalize(a).toLowerCase() === normalize(b).toLowerCase();
-// Words of three or more letters, so "is" and "to" never decide a recall ranking.
-const words = (text: string) => new Set(text.toLowerCase().match(/[\p{L}\p{N}]{3,}/gu) ?? []);
+
+const wordSegmenter = new Intl.Segmenter("zh", { granularity: "word" });
+// A message's distinct words of three letters or more, or two characters in scripts like Chinese.
+const messageWords = (message: string) => [
+	...new Set(
+		[...wordSegmenter.segment(message.toLowerCase())]
+			.filter(({ segment, isWordLike }) => isWordLike && segment.length >= (/^[\p{ASCII}]+$/u.test(segment) ? 3 : 2))
+			.map(({ segment }) => segment),
+	),
+];
+
+// A keyword matches at the start of a word, so "submit" finds "submitted" and "red" skips "offered". Scripts written
+// without spaces, like Chinese, have no word starts to look for, so there it matches anywhere.
+const keywordPattern = (keyword: string) => new RegExp(`(?<![\\p{Script=Latin}\\p{N}])${keyword.replace(/[.*+?^${}()|[\]\\/-]/g, "\\$&")}`, "iu");
+
+// The facts matching the most keywords, newest first among equals.
+function ranked(facts: Fact[], keywords: string[]): Fact[] {
+	const patterns = keywords.map(normalize).filter((keyword) => keyword !== "").map(keywordPattern);
+	return facts
+		.map((fact) => ({ fact, score: patterns.filter((pattern) => pattern.test(fact.text)).length }))
+		.filter((hit) => hit.score > 0)
+		.sort((a, b) => b.score - a.score || b.fact.date.localeCompare(a.fact.date))
+		.slice(0, SEARCH_LIMIT)
+		.map((hit) => hit.fact);
+}
 
 function localDate(date: Date): string {
 	const pad = (n: number) => String(n).padStart(2, "0");
@@ -109,6 +134,11 @@ export function createMemory(options: { dir: string; now?: () => Date }) {
 		const log: Fact[] = [];
 		for (const name of await logFiles()) log.push(...factsIn(await readText(join(logDir, name)), "log", `log/${name}`));
 		return { profile, log };
+	}
+
+	async function visible(seen: ReadonlySet<string>): Promise<Fact[]> {
+		const { profile, log } = await all();
+		return [...profile, ...log].filter((fact) => canSee(fact, seen));
 	}
 
 	// Runs every fact line through `change`, in place: the same fact keeps its line, another replaces it, null removes it.
@@ -212,17 +242,19 @@ export function createMemory(options: { dir: string; now?: () => Date }) {
 				return removed;
 			}),
 
-		/** Facts with one of these tags sharing the most words with the query, best first. */
-		async recall(query: string, seen: ReadonlySet<string>): Promise<Fact[]> {
-			const wanted = words(query);
-			const { profile, log } = await all();
-			return [...profile, ...log]
-				.filter((fact) => canSee(fact, seen))
-				.map((fact) => ({ fact, score: [...words(fact.text)].filter((word) => wanted.has(word)).length }))
-				.filter((hit) => hit.score > 0)
-				.sort((a, b) => b.score - a.score || b.fact.date.localeCompare(a.fact.date))
-				.slice(0, RECALL_LIMIT)
-				.map((hit) => hit.fact);
+		/** Facts with one of these tags matching the most keywords, best first. */
+		search: async (keywords: string[], seen: ReadonlySet<string>) => ranked(await visible(seen), keywords),
+
+		/** The same search with an incoming message as its keywords: its words found in these facts, but not in too many of them. */
+		async searchMessage(message: string, seen: ReadonlySet<string>) {
+			const facts = await visible(seen);
+			const most = Math.ceil(facts.length / KEYWORD_RARITY);
+			const keywords = messageWords(message).filter((word) => {
+				const pattern = keywordPattern(word);
+				const count = facts.filter((fact) => pattern.test(fact.text)).length;
+				return count > 0 && count <= most;
+			});
+			return { keywords, facts: ranked(facts, keywords) };
 		},
 
 		/** The facts with one of these tags, for a system prompt. Changes only when the files change, so the prompt cache holds. */
@@ -237,7 +269,7 @@ export function createMemory(options: { dir: string; now?: () => Date }) {
 			if (profile.length > 0) lines.push("About the owner:", ...profile.map(line));
 			if (recent.length > 0) lines.push("Recently:", ...recent.map(line));
 			const hidden = log.length - recent.length;
-			if (hidden > 0) lines.push(`(${hidden} older ${hidden === 1 ? "fact is" : "facts are"} not shown; use recall to search them.)`);
+			if (hidden > 0) lines.push(`(${hidden} older ${hidden === 1 ? "fact is" : "facts are"} not shown; use search_memory to search them.)`);
 			return lines.join("\n");
 		},
 
@@ -364,6 +396,14 @@ export async function migrateMemory(options: { dir: string; botsDir: string; bac
 const text = (value: string) => ({ output: [{ type: "text" as const, text: value }] });
 const failure = (value: string) => ({ output: [{ type: "text" as const, text: value }], isError: true as const });
 const listed = (facts: Fact[]) => facts.map((fact) => `- (${fact.date}) ${fact.text} [${fact.tags.join(", ")}] (${fact.tier})`).join("\n");
+const seenBy = (me: BotRef | undefined, tags: TagView[]) => new Set(me === undefined ? [EVERY_BOT] : tags.filter((tag) => tag.bots.includes(me.id)).map((tag) => tag.slug));
+
+/** What `search_memory` finds for a message from the owner or another bot to bot `id`, as a note for that bot; undefined when it finds nothing. writeMemoryNote places it before the message. */
+export async function messageNote(memory: Memory, message: string, id: number, bots: BotRef[]): Promise<string | undefined> {
+	const { keywords, facts } = await memory.searchMessage(message, seenBy(bots.find((bot) => bot.id === id), await memory.tagViews(bots)));
+	if (facts.length === 0) return undefined;
+	return `[search_memory] Saved facts matching keywords in the next message (${keywords.join(", ")}):\n${listed(facts)}`;
+}
 
 /**
  * Every bot's memory tools and prompt section. `bots` lists the bots, to resolve who holds which tag and whose
@@ -375,7 +415,7 @@ export function createMemoryExtension(deps: { memory: Memory; bots: (read: Pick<
 		const bots = await deps.bots(read, context);
 		const tags = await memory.tagViews(bots);
 		const me = bots.find((bot) => bot.id === Number(conversationId));
-		return { bots, tags, me, seen: new Set(me === undefined ? [EVERY_BOT] : tags.filter((tag) => tag.bots.includes(me.id)).map((tag) => tag.slug)) };
+		return { bots, tags, me, seen: seenBy(me, tags) };
 	};
 
 	const remember = defineTool({
@@ -408,18 +448,18 @@ export function createMemoryExtension(deps: { memory: Memory; bots: (read: Pick<
 			return removed.length > 0 ? text(`forgot:\n${listed(removed)}`) : failure(`No saved fact matches "${normalize(args.fact)}".`);
 		},
 	});
-	const recall = defineTool({
-		name: "recall",
-		description: "Search the long-term memory you can see, including older facts that are not shown in the prompt.",
-		parameters: Type.Object({ query: Type.String({ description: "Words to look for" }) }),
+	const searchMemory = defineTool({
+		name: "search_memory",
+		description: "Search the long-term memory you can see by keyword, including older facts that are not shown in the prompt. Facts matching the most keywords come first.",
+		parameters: Type.Object({ keywords: Type.Array(Type.String(), { description: "One or more keywords or short phrases, each matched at the start of a word" }) }),
 		execute: async (args, api, context) => {
-			const hits = await memory.recall(args.query, (await viewer(api.conversationId, api, context)).seen);
+			const hits = await memory.search(args.keywords, (await viewer(api.conversationId, api, context)).seen);
 			return text(hits.length > 0 ? listed(hits) : "No saved facts match.");
 		},
 	});
 	return defineExtension({
 		name: "memory",
-		tools: [remember, forget, recall],
+		tools: [remember, forget, searchMemory],
 		sections: [
 			section("memory", async (input, context) => {
 				const { bots, tags, me, seen } = await viewer(input.conversationId, input.read, context);
@@ -430,7 +470,7 @@ export function createMemoryExtension(deps: { memory: Memory; bots: (read: Pick<
 				};
 				return [
 					"Memory: durable facts kept across every conversation. Rely on them instead of asking again.",
-					"When you learn something lasting, save it with remember: tags for the bots that need it, the narrowest that fit; tier profile for enduring facts, tier log for dated events and plans. Just do it and mention it in passing; don't ask permission. Use forget with the exact text when a fact is wrong or outdated, and recall to search older facts.",
+					"When you learn something lasting, save it with remember: tags for the bots that need it, the narrowest that fit; tier profile for enduring facts, tier log for dated events and plans. Just do it and mention it in passing; don't ask permission. Use forget with the exact text when a fact is wrong or outdated, and search_memory to search older facts by keyword.",
 					`Tags you can use: ${tags.map((tag) => `${tag.slug} (${holders(tag)})`).join(", ")}.`,
 					"What you know, each fact followed by its tags:",
 					await memory.render(seen),

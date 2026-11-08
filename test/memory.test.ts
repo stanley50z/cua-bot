@@ -12,7 +12,7 @@ import type { AssistantMessage, Message } from "@earendil-works/pi-ai";
 import { createModels } from "@earendil-works/pi-ai/models";
 import { type FauxResponseFactory, fauxAssistantMessage, fauxProvider, fauxText, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
 import { createRegistry, Harness, type JsonObject, MemoryStorage } from "@earendil-works/pi-durable";
-import { createMemory, createMemoryExtension, type Fact, type Memory, MemoryError, migrateMemory, type TagView } from "../src/memory.ts";
+import { createMemory, createMemoryExtension, type Fact, type Memory, MemoryError, migrateMemory, messageNote, type TagView } from "../src/memory.ts";
 import { createBotServer } from "../src/web.ts";
 
 const context = BACKGROUND_CONTEXT;
@@ -151,7 +151,7 @@ test("forget removes matching facts from any file, or only those a bot can see",
 		assert.deepEqual(await memory.forget("never saved"), []);
 	}));
 
-test("a bot's prompt holds only facts with a tag it has, its newest 30 log facts, and points at recall for the rest", () =>
+test("a bot's prompt holds only facts with a tag it has, its newest 30 log facts, and points at search_memory for the rest", () =>
 	withDir(async (dir) => {
 		const { clock, now } = clockAt("2026-01-01T09:00:00");
 		const memory = createMemory({ dir, now });
@@ -168,7 +168,7 @@ test("a bot's prompt holds only facts with a tag it has, its newest 30 log facts
 		assert.match(job, /Recently:\n- \(2026-01-02\) Job event 2 \[job-bots\]/, "the 30 newest it can see, whatever other bots saved in between");
 		assert.doesNotMatch(job, /Job event 1 /);
 		assert.doesNotMatch(job, /Dev event/);
-		assert.match(job, /\(1 older fact is not shown; use recall to search them\.\)/);
+		assert.match(job, /\(1 older fact is not shown; use search_memory to search them\.\)/);
 		assert.equal(await memory.render(sees("every-bot", "job-bots")), job, "stable while nothing changes, so the prompt cache holds");
 		const everyOnly = await memory.render(sees("every-bot"));
 		assert.doesNotMatch(everyOnly, /OPT/);
@@ -188,22 +188,75 @@ test("exactly 30 visible log facts leave nothing hidden, 31 hide one", () =>
 		assert.match(await memory.render(sees("every-bot")), /\(1 older fact is not shown/);
 	}));
 
-test("recall ranks by shared words, only among facts the bot can see; remember rejects empty and oversized facts", () =>
+test("search ranks by keywords matched, only among facts the bot can see; remember rejects empty and oversized facts", () =>
 	withDir(async (dir) => {
 		const memory = createMemory({ dir, now: () => new Date("2026-10-31T09:00:00") });
 		await memory.remember("Landlord is Mr. Okafor", "profile", everyBot);
 		await memory.remember("Plumber visit Tuesday, landlord arranged it", "log", everyBot);
 		await memory.remember("Landlord plumber secret", "log", ["@dev"]);
 		await memory.remember("Climbing with Dana on Sundays", "log", everyBot);
-		const hits = await memory.recall("when is the plumber coming, ask the landlord", sees("every-bot"));
+		const hits = await memory.search(["plumber", "landlord"], sees("every-bot"));
 		assert.deepEqual(hits.map((fact) => fact.text), ["Plumber visit Tuesday, landlord arranged it", "Landlord is Mr. Okafor"]);
+		assert.deepEqual((await memory.search(["climbing"], sees("every-bot"))).map((fact) => fact.text), ["Climbing with Dana on Sundays"], "one keyword is enough");
 		await assert.rejects(memory.remember("   ", "profile", everyBot), MemoryError);
 		await memory.remember("y".repeat(500), "profile", everyBot);
 		await assert.rejects(memory.remember("y".repeat(501), "profile", everyBot), /at most 500 characters/);
 	}));
 
+test("a keyword matches the start of a word, a phrase, or inside Chinese text", () =>
+	withDir(async (dir) => {
+		const memory = createMemory({ dir, now: () => new Date("2026-10-31T09:00:00") });
+		await memory.remember("Submitted the Techstars office hours form", "log", everyBot);
+		await memory.remember("Red Robot night is Friday", "log", everyBot);
+		await memory.remember("Offered a ride to Dana", "log", everyBot);
+		await memory.remember("申请了电机驱动器实习", "log", everyBot);
+		const found = async (...keywords: string[]) => (await memory.search(keywords, sees("every-bot"))).map((fact) => fact.text);
+		assert.deepEqual(await found("SUBMIT"), ["Submitted the Techstars office hours form"]);
+		assert.deepEqual(await found("red"), ["Red Robot night is Friday"], "not the \"red\" inside Offered");
+		assert.deepEqual(await found("office   hours"), ["Submitted the Techstars office hours form"]);
+		assert.deepEqual(await found("电机驱动"), ["申请了电机驱动器实习"]);
+		assert.deepEqual(await found("  "), []);
+		assert.deepEqual(await found("c++("), [], "a keyword is text, not a pattern");
+	}));
+
 const scout = { id: 3, name: "Scout" };
 const dev = { id: 5, name: "Dev" };
+
+test("a message searches memory for its keywords, skipping words too common among the bot's facts", () =>
+	withDir(async (dir) => {
+		const memory = createMemory({ dir, now: () => new Date("2026-10-31T09:00:00") });
+		for (let i = 1; i <= 15; i++) await memory.remember(`Filler ${i}`, "log", everyBot);
+		// 20 facts this bot can see, so a word may be in 2 of them.
+		await memory.remember("Plumber comes Tuesday", "log", everyBot);
+		await memory.remember("Plumber invoice paid", "log", ["@scout"]);
+		for (const n of ["one", "two", "three"]) await memory.remember(`Weekly chore ${n}`, "log", everyBot);
+		await memory.remember("Plumber secret", "log", ["@dev"]);
+
+		const note = await messageNote(memory, "Any weekly plumber news?", scout.id, [scout, dev]);
+		assert.match(note ?? "", /keywords in the next message \(plumber\)/);
+		assert.match(note ?? "", /Plumber comes Tuesday \[every-bot\] \(log\)/);
+		assert.match(note ?? "", /Plumber invoice paid \[@scout\] \(log\)/);
+		assert.doesNotMatch(note ?? "", /Weekly chore/, "a word in 3 of 20 facts is not a keyword");
+		assert.doesNotMatch(note ?? "", /Plumber secret/, "another bot's fact stays hidden");
+		assert.equal(await messageNote(memory, "zebra", scout.id, [scout, dev]), undefined, "no matching fact, no note");
+		assert.equal(await messageNote(memory, "", scout.id, [scout, dev]), undefined);
+	}));
+
+test("message keywords are words of three letters or more, or two characters of Chinese", () =>
+	withDir(async (dir) => {
+		const memory = createMemory({ dir, now: () => new Date("2026-10-31T09:00:00") });
+		await memory.remember("SMS login only", "profile", everyBot);
+		await memory.remember("Go to bed early", "profile", everyBot);
+		await memory.remember("申请了电机驱动器实习", "log", everyBot);
+		await memory.remember("👍 means yes", "profile", everyBot);
+		for (let i = 1; i <= 6; i++) await memory.remember(`Filler ${i}`, "log", everyBot);
+		assert.equal(await messageNote(memory, "👍", scout.id, [scout]), undefined, "an emoji is not a word");
+		assert.match((await messageNote(memory, "sms", scout.id, [scout])) ?? "", /SMS login only/);
+		assert.equal(await messageNote(memory, "go", scout.id, [scout]), undefined);
+		assert.match((await messageNote(memory, "帮我看看驱动器的事", scout.id, [scout])) ?? "", /申请了电机驱动器实习/);
+		assert.match((await messageNote(memory, "实习", scout.id, [scout])) ?? "", /申请了电机驱动器实习/);
+		assert.equal(await messageNote(memory, "了", scout.id, [scout]), undefined, "one Chinese character is too short");
+	}));
 
 test("every tag: the built-in one, those the owner made, and one per bot, each with who holds it", () =>
 	withDir(async (dir) => {
@@ -322,7 +375,7 @@ test("a bot sees, saves, finds, and forgets facts through its tags, and nothing 
 				{ name: "remember", args: { fact: "Partner is Dana", tags: ["every-bot"], tier: "profile" } },
 				{ name: "remember", args: { fact: "Dana likes orchids", tags: ["@scout"], tier: "profile" } },
 				{ name: "remember", args: { fact: "Lost fact", tags: ["nope"], tier: "profile" } },
-				{ name: "recall", args: { query: "secret rule" } },
+				{ name: "search_memory", args: { keywords: ["secret", "rule"] } },
 				{ name: "forget", args: { fact: "Dev secret rule" } },
 			],
 			(id) => memory.createTag("Job bots", [id]),
@@ -334,8 +387,8 @@ test("a bot sees, saves, finds, and forgets facts through its tags, and nothing 
 		assert.match(prompts[1] ?? "", /Dana likes orchids \[@scout\]/);
 
 		assert.match(results, /No tag is named nope/);
-		assert.match(results, /Job rule \[job-bots\] \(profile\)/, "recall lists what it can see");
-		assert.doesNotMatch(results, /Dev secret rule \[/, "recall skips another bot's fact");
+		assert.match(results, /Job rule \[job-bots\] \(profile\)/, "search_memory lists what it can see");
+		assert.doesNotMatch(results, /Dev secret rule \[/, "search_memory skips another bot's fact");
 		assert.match(results, /No saved fact matches/);
 		const saved = await readFile(join(dir, "profile.md"), "utf8");
 		assert.match(saved, /Dev secret rule/, "a bot can't forget another bot's fact");
@@ -347,7 +400,7 @@ test("a conversation that isn't a bot gets only the facts every bot gets", () =>
 		const memory = createMemory({ dir, now: () => new Date("2026-10-31T09:00:00") });
 		await memory.remember("For everyone", "profile", everyBot);
 		await memory.remember("Job rule", "profile", ["job-bots"]);
-		const { prompts } = await turn(memory, () => [{ id: 99, name: "Dev" }], [{ name: "recall", args: { query: "nothing" } }]);
+		const { prompts } = await turn(memory, () => [{ id: 99, name: "Dev" }], [{ name: "search_memory", args: { keywords: ["nothing"] } }]);
 		assert.match(prompts[0] ?? "", /For everyone/);
 		assert.doesNotMatch(prompts[0] ?? "", /Job rule/);
 	}));

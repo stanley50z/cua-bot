@@ -44,6 +44,10 @@ function sentText(content: readonly { type: string; name?: string; arguments?: R
 		.join("\n\n");
 }
 
+/** Entry kind of a send_message called from inside another tool, such as a codemode script, which leaves no call of its own in the transcript. Its data is a SentMessage. */
+export const SENT_MESSAGE = "cua-bot.sent-message";
+export type SentMessage = { text: string; at: number };
+
 /** Entry kind of a message from another bot (src/bots.ts); its data is a BotMessage. */
 export const BOT_MESSAGE = "cua-bot.bot-message";
 export type BotMessage = { from: number; name: string; text: string };
@@ -55,6 +59,15 @@ export type BotMessage = { from: number; name: string; text: string };
 export const REACTION = "cua-bot.reaction";
 export type Reaction = { target: number; emoji: string; on: boolean };
 const QUOTE_MAX = 80;
+
+/** Entry kind of what a memory search found for a message from the owner or another bot (src/memory.ts). The bot reads it just before that message; the chat doesn't show it. */
+export const MEMORY_NOTE = "cua-bot.memory-note";
+
+/** Put a message's memory search result in the conversation without starting a turn. Call right before submitting the message. */
+export async function writeMemoryNote(conversation: Pick<Conversation, "submit">, note: string | undefined, context: Context) {
+	if (note === undefined) return;
+	await conversation.submit({ type: "write", entry: { kind: MEMORY_NOTE, model: [{ role: "user", content: note, timestamp: Date.now() }] } }, context);
+}
 
 export type ChatTool = { id: string; name: string; args: Record<string, unknown> };
 /** An image in an owner message: base64 data in a format the model takes. */
@@ -100,6 +113,10 @@ function imageCount(content: string | readonly { type: string }[]): number {
 export function toChatItem(entry: EntryRecord): ChatItem | undefined {
 	const id = entry.id as number;
 	const message = entry.model?.[0];
+	if (entry.kind === SENT_MESSAGE) {
+		const data = entry.data as SentMessage;
+		return { id, kind: "assistant", text: data.text, at: data.at, tools: [], aborted: false };
+	}
 	if (entry.kind === BOT_MESSAGE && message?.role === "user") {
 		const data = (entry.data ?? {}) as Partial<BotMessage>;
 		return { id, kind: "bot", from: Number(data.from), name: String(data.name ?? "A bot"), text: String(data.text ?? ""), at: message.timestamp };
@@ -190,7 +207,7 @@ export function toChatLive(live: Readonly<LiveState> | null): ChatLive {
 export type Chat = ReturnType<typeof createChat>;
 
 /** Bind the chat to one bot's conversation. Call close() on shutdown. */
-export function createChat(deps: { harness: Harness; conversation: Conversation; context: Context; computer?: ComputerView }) {
+export function createChat(deps: { harness: Harness; conversation: Conversation; context: Context; computer?: ComputerView; memoryNote?: (message: string) => Promise<string | undefined> }) {
 	const { harness, conversation, context, computer } = deps;
 	const listeners = new Set<(event: ChatEvent) => void>();
 	// Listeners that show the computer pane; only they make the chat read computer snapshots.
@@ -302,6 +319,7 @@ export function createChat(deps: { harness: Harness; conversation: Conversation;
 				images.length === 0
 					? text
 					: [...(text === "" ? [] : [{ type: "text" as const, text }]), ...images.map((image) => ({ type: "image" as const, ...image }))];
+			await writeMemoryNote(conversation, await deps.memoryNote?.(text), context);
 			const submission = await conversation.submit({ type: "input", content, whenBusy: "followUp" }, context);
 			return { submissionId: submission.id as number };
 		},

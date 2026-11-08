@@ -31,7 +31,7 @@ const sendOwner = (text: string) => fauxAssistantMessage([fauxToolCall(SEND_MESS
 
 // The faux model answers by what it is asked, since two bots' requests can interleave in any order.
 // Every request's full prompt is kept in `prompts`.
-async function open() {
+async function open(memoryNote?: (bot: number, message: string) => Promise<string | undefined>) {
 	const faux = fauxProvider({ models: [{ id: "faux-1" }, { id: "faux-2" }] });
 	const models = createModels();
 	models.setProvider(faux.provider);
@@ -50,7 +50,7 @@ async function open() {
 	const temp = await mkdtemp(join(tmpdir(), "cua-bot-bots-"));
 	const dir = join(temp, "bots");
 	const registry = createRegistry();
-	registry.install(createBotsExtension({ agent: () => ({ model: MODEL }), dir }));
+	registry.install(createBotsExtension({ agent: () => ({ model: MODEL }), dir, ...(memoryNote === undefined ? {} : { memoryNote }) }));
 	registry.install(createRoutinesExtension());
 	const harness = await Harness.open(new MemoryStorage(), { models, registry }, context);
 	const root = await harness.root(context, { agent: { model: MODEL } });
@@ -154,6 +154,32 @@ test("a bot's own model and effort override the default, survive a default chang
 		assert.equal((await edit(id, { model: null, thinkingLevel: null })).status, 200);
 		assert.deepEqual(await running(id), ["faux-1", "low"], "null follows the default again");
 		assert.equal(bot.bots.list().find((b) => b.id === id)?.activeModel, "faux-1");
+	} finally {
+		await bot.close();
+	}
+});
+
+test("a bot's message reaches the other bot with a memory search of its text just before it, and that chat doesn't show the result", { timeout: 20_000 }, async () => {
+	const searched: [number, string][] = [];
+	const bot = await open(async (id, message) => {
+		searched.push([id, message]);
+		return message.includes("Tokyo") ? "NOTE: saved Tokyo facts" : undefined;
+	});
+	try {
+		const scout = (await (await send(bot.base, "POST", "/api/bots", { name: "Scout", instructions: "Research travel." })).json()) as BotView;
+		await until(
+			async () => (await (await fetch(`${bot.base}/api/bots`)).json()).bots as BotView[],
+			(list) => list.length === 2,
+		);
+		await send(bot.base, "POST", "/api/chat", { text: "ask scout" });
+		const chat = await until(
+			async () => (await (await fetch(`${bot.base}/api/chat?bot=${scout.id}`)).json()).items as ChatItem[],
+			(list) => list.some((item) => item.kind === "assistant" && item.text === "On it."),
+		);
+		assert.deepEqual(searched, [[scout.id, "Find flights to Tokyo."]], "searched as the receiving bot, without the [bot] header");
+		const prompt = bot.prompts.find((text) => text.includes("[bot] Message from cua-bot")) ?? "";
+		assert.ok(prompt.includes("NOTE: saved Tokyo facts") && prompt.indexOf("NOTE: saved Tokyo facts") < prompt.indexOf("[bot] Message from cua-bot"), "the note comes first");
+		assert.ok(!JSON.stringify(chat).includes("NOTE: saved Tokyo facts"), "the chat never shows the note");
 	} finally {
 		await bot.close();
 	}

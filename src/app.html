@@ -239,12 +239,15 @@ dialog .row .btn.danger { margin-right: auto; }
 .screen .expand svg { width: 13px; height: 13px; }
 
 /* expanded live screen: the pane's canvas moves in here, sized to the video so pointer positions map 1:1 */
-#screen-view { width: 100vw; height: 100vh; max-width: none; max-height: none; margin: 0; padding: 56px 40px 22px; border: 0; border-radius: 0; background: #141414; color: #fff; box-shadow: none; }
-#screen-view[open] { display: flex; flex-direction: column; align-items: center; gap: 16px; }
+#screen-view, #image-view { width: 100vw; height: 100vh; max-width: none; max-height: none; margin: 0; padding: 56px 40px 22px; border: 0; border-radius: 0; background: #141414; color: #fff; box-shadow: none; }
+#screen-view[open], #image-view[open] { display: flex; flex-direction: column; align-items: center; gap: 16px; }
 #screen-view::backdrop { background: #141414; }
-#screen-view .close { position: absolute; top: 10px; right: 12px; width: 38px; height: 38px; border: 0; border-radius: 8px; background: transparent; color: #C9CDD3; cursor: pointer; display: grid; place-items: center; }
-#screen-view .close:hover { background: rgba(255,255,255,.1); color: #fff; }
-#screen-view .close svg { width: 20px; height: 20px; }
+#screen-view .close, #image-view .close { position: absolute; top: 10px; right: 12px; width: 38px; height: 38px; border: 0; border-radius: 8px; background: transparent; color: #C9CDD3; cursor: pointer; display: grid; place-items: center; }
+#screen-view .close:hover, #image-view .close:hover { background: rgba(255,255,255,.1); color: #fff; }
+#screen-view .close svg, #image-view .close svg { width: 20px; height: 20px; }
+#image-view { padding-bottom: 56px; background: transparent; justify-content: center; }
+#image-view::backdrop { background: rgba(20,20,20,.88); }
+#image-view img { max-width: 100%; max-height: 100%; object-fit: contain; border-radius: 4px; }
 .stage { flex: 1; min-height: 0; width: 100%; container-type: size; display: grid; place-items: center; }
 .stage canvas { display: none; width: min(100cqw, 100cqh * var(--ratio, 1.6)); height: auto; aspect-ratio: var(--ratio, 1.6); border-radius: 10px; touch-action: none; }
 .stage.live .wait { display: none; }
@@ -567,6 +570,11 @@ dialog .row { display: flex; gap: 8px; justify-content: flex-end; margin-top: 18
  <textarea class="keys" id="view-keys" aria-label="Keyboard for the computer" autocapitalize="off" autocomplete="off" spellcheck="false"></textarea>
 </dialog>
 
+<dialog id="image-view" aria-label="Image">
+ <button type="button" class="close" aria-label="Close the image" title="Close"><svg aria-hidden="true"><use href="#i-x"/></svg></button>
+ <img id="image-shown" alt="">
+</dialog>
+
 <dialog id="routine-dialog" aria-labelledby="form-h">
  <form id="routine-form" method="dialog">
   <h2 id="form-h">New routine</h2>
@@ -840,7 +848,8 @@ function toolLabel(call) {
     case "cancel_routine": return "Removed a routine";
     case "remember": return "Remembered: " + clip(pick("fact") || "");
     case "forget": return "Forgot: " + clip(pick("fact") || "");
-    case "recall": return "Searched memory: " + clip(pick("query") || "");
+    case "search_memory": return "Searched memory: " + clip([].concat(a.keywords || []).join(", "));
+    case "recall": return "Searched memory: " + clip(pick("query") || ""); // The tool's old name, in chats from before the rename.
     case "message_bot": return "Messaged " + ((botNamed(pick("to")) || {}).name || pick("to") || "a bot");
     case "create_bot": return "Created bot: " + clip(pick("name") || "");
     case "executor_search": return "Looked up: " + clip(pick("query", "namespace") || "connected accounts");
@@ -1043,23 +1052,36 @@ function quoteParts(text) {
     .filter((part) => part.quote || part.text !== "");
 }
 
-// The owner's bubble: its images (`pics` as { src, href }, where `href` opens the full image), then each quote as a
-// grey block, with their text in between. Queued messages use it too.
+// Wraps a chat image in a link that opens it in the image viewer. Being a link, it takes keyboard focus and keeps
+// the browser's own image-saving menu.
+function viewable(img) {
+  const link = el("a");
+  link.href = img.src;
+  link.addEventListener("click", (event) => {
+    event.preventDefault();
+    $("image-shown").src = img.src;
+    $("image-shown").alt = img.alt;
+    $("image-view").showModal();
+  });
+  link.append(img);
+  return link;
+}
+// Any click except on the image itself closes the viewer: the ✕ or the space around it. Escape closes it natively.
+$("image-view").addEventListener("click", (event) => { if (event.target !== $("image-shown")) $("image-view").close(); });
+// Dropping the image keeps it from flashing up when the next one opens.
+$("image-view").addEventListener("close", () => $("image-shown").removeAttribute("src"));
+
+// The owner's bubble: its images (`pics` as URLs), then each quote as a grey block, with their text in between.
+// Queued messages use it too.
 function ownMessage(text, className, pics = []) {
   const node = el("div", className);
   if (pics.length > 0) {
     const row = el("div", "part pics");
-    for (const { src, href } of pics) {
+    for (const src of pics) {
       const img = el("img");
       img.src = src;
       img.alt = "Image you sent";
-      if (!href) { row.append(img); continue; }
-      const link = el("a");
-      link.href = href;
-      link.target = "_blank";
-      link.rel = "noopener";
-      link.append(img);
-      row.append(link);
+      row.append(viewable(img));
     }
     node.append(row);
   }
@@ -1409,10 +1431,7 @@ function renderChat() {
       if (label !== day) { day = label; box.append(el("div", "day", label)); }
     }
     if (item.kind === "user") {
-      const pics = Array.from({ length: item.images }, (_, index) => {
-        const src = `/api/chat/image?bot=${state.bot}&entry=${item.id}&index=${index}`;
-        return { src, href: src };
-      });
+      const pics = Array.from({ length: item.images }, (_, index) => `/api/chat/image?bot=${state.bot}&entry=${item.id}&index=${index}`);
       const node = ownMessage(item.text, "m me", pics);
       node.dataset.key = String(item.id);
       node.append(messageActions(item));
@@ -1446,7 +1465,7 @@ function renderChat() {
     }
   }
   for (const queued of state.queued) {
-    const node = ownMessage(queued.text, "m me queued", queued.images.map((image) => ({ src: imageUrl(image) })));
+    const node = ownMessage(queued.text, "m me queued", queued.images.map(imageUrl));
     node.append(el("span", "note", state.live.busy ? "Queued until the current reply finishes" : "Sending…"));
     box.append(node);
   }
@@ -1515,9 +1534,8 @@ function renderReply(item, results, running, mine, into) {
         const last = below.lastElementChild;
         const thumbs = last && last.classList.contains("thumbs") ? last : el("div", "thumbs");
         for (const shot of result.shots) {
-          const link = el("a"); link.href = "/shots/" + encodeURIComponent(shot); link.target = "_blank"; link.rel = "noopener";
-          const img = el("img"); img.src = link.href; img.alt = "Screenshot from " + toolLabel(call); img.loading = "lazy";
-          link.append(img); thumbs.append(link);
+          const img = el("img"); img.src = "/shots/" + encodeURIComponent(shot); img.alt = "Screenshot from " + toolLabel(call); img.loading = "lazy";
+          thumbs.append(viewable(img));
         }
         below.append(thumbs);
       }
@@ -2314,6 +2332,11 @@ const turnOnPush = () => subscribePush().catch((error) => showChatError("Could n
 $("notify").addEventListener("click", async () => {
   if (await Notification.requestPermission() === "granted") await turnOnPush();
   showNotifyState();
+});
+// A clicked notification names its bot here when a tab is already open (src/sw.js).
+if (pushSupported) navigator.serviceWorker.addEventListener("message", (event) => {
+  goTo("chat");
+  selectBot(event.data.bot);
 });
 
 /* ---------- views and the URL ---------- */

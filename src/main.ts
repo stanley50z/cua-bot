@@ -10,7 +10,7 @@ import { type ConversationId, createRegistry, type Cursor, defineExtension, Harn
 import { createNodePhotonImages } from "@earendil-works/pi-durable/images/node";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { createBots, createBotsExtension, DEFAULT_BOTS_DIR, readBots } from "./bots.ts";
-import { toChatItem } from "./chat.ts";
+import { toChatItem, writeMemoryNote } from "./chat.ts";
 import { createComputerExtension, defaultSpaceId, defaultSpaceLabel, openLiveStream, registrySpaces, screenControl, spacesText } from "./computer.ts";
 import { createConnections, listCuaSpaces, probeTcp } from "./connections.ts";
 import { createLiveScreen } from "./live-screen.ts";
@@ -22,7 +22,7 @@ import { createAutostart } from "./autostart.ts";
 import { connectExecutor, createExecutor, createExecutorExtension } from "./executor.ts";
 import { DATA_DIR, log } from "./log.ts";
 import { createMachines, ownerHosts, resolveSsh } from "./machines.ts";
-import { createMemory, createMemoryExtension, migrateMemory } from "./memory.ts";
+import { createMemory, createMemoryExtension, messageNote, migrateMemory } from "./memory.ts";
 import { createPcExtensions, pcEnv } from "./pc.ts";
 import { createPush } from "./push.ts";
 import { LEGACY_ROUTINE_FILE } from "./routines-file.ts";
@@ -71,7 +71,7 @@ registry.install(
 	}),
 );
 registry.install(traceExtension);
-registry.install(createBotsExtension({ agent: botAgent }));
+registry.install(createBotsExtension({ agent: botAgent, memoryNote }));
 registry.install(createComputerExtension(registry));
 registry.install(createBotToolSearchExtension());
 // Web Push to every browser that turned notifications on in the web app (data/push.json).
@@ -111,7 +111,8 @@ if (executorUrl && executorKey) {
 			const asked = conversationId === undefined ? root : ((await harness.conversation(conversationId as ConversationId, context)) ?? root);
 			return asked.submit({ type: "input", content: text, whenBusy: "followUp" }, context);
 		},
-		filed: (approval) => void push.send({ title: "Approval needed", body: describeApproval(approval), tag: approval.id }),
+		filed: (approval) =>
+			void push.send({ title: "Approval needed", body: describeApproval(approval), tag: approval.id, ...(approval.conversationId === undefined ? {} : { bot: approval.conversationId }) }),
 	});
 	registry.install(createExecutorExtension({ executor, approvals, ...(process.env.OWNER_EMAIL ? { ownerEmail: process.env.OWNER_EMAIL } : {}) }));
 } else {
@@ -133,9 +134,17 @@ log(
 const stopWatching = startRoutineFileWatch(context, logRoutineSyncFailure);
 log(`cua-bot up: model ${botModel().provider}/${botModel().modelId}, reasoning ${botThinking()}, root ${root.id}`);
 
+// Searches memory for a message from the owner or another bot to `bot` and logs what it searched for, so the log shows each automatic search.
+async function memoryNote(bot: number, message: string) {
+	const note = await messageNote(memory, message, bot, bots.list());
+	if (note !== undefined) log(`memory: bot ${bot}: ${note.split("\n")[0]}`);
+	return note;
+}
+
 // Submits one owner message to the root conversation and returns what the bot sent the owner (send_message) by the end of the turn.
 async function say(text: string): Promise<string> {
 	const before = (await root.entries({ order: "descending" }, 1, undefined, context)).items[0]?.id;
+	await writeMemoryNote(root, await memoryNote(Number(root.id), text), context);
 	const submission = await root.submit({ type: "input", content: text }, context);
 	const settled = await submission.wait(context);
 	if (settled.status !== "done" || settled.type !== "input") return `(unanswered: ${settled.reason ?? "unknown"})`;
@@ -169,7 +178,8 @@ const bots = await createBots({
 		if (bot !== undefined) await memory.botRemoved(bot);
 		await removeBotRoutines(id, context);
 	},
-	sent: (bot, text) => void push.send({ title: bot.name, body: text }),
+	sent: (bot, text) => void push.send({ title: bot.name, body: text, bot: bot.id }),
+	memoryNote,
 	computer: (conversation) =>
 		createComputerView({ harness, storage, conversation, shotsDir: join(DATA_DIR, "shots"), context, ...(space === undefined ? {} : { space }) }),
 });

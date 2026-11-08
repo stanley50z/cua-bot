@@ -25,7 +25,7 @@ import {
 	section,
 	type Tx,
 } from "@earendil-works/pi-durable";
-import { BOT_MESSAGE, type BotMessage, type Chat, type ChatItem, createChat, SEND_MESSAGE } from "./chat.ts";
+import { BOT_MESSAGE, type BotMessage, type Chat, type ChatItem, createChat, SEND_MESSAGE, SENT_MESSAGE, type SentMessage, writeMemoryNote } from "./chat.ts";
 import type { ComputerView } from "./computer-view.ts";
 import { parseModelRef, parseThinkingLevel } from "./models.ts";
 
@@ -274,7 +274,7 @@ export function inboundText(from: { id: number; name: string }, text: string): s
 const reply = (text: string, isError = false) => ({ output: [{ type: "text" as const, text }], ...(isError ? { isError: true as const } : {}) });
 
 /** The bots' tools and prompt section. `agent` is the model settings each new bot starts with; `dir` holds the bot folders. */
-export function createBotsExtension(options: { agent: () => AgentChange; dir?: string }): Extension {
+export function createBotsExtension(options: { agent: () => AgentChange; dir?: string; memoryNote?: (bot: number, message: string) => Promise<string | undefined> }): Extension {
 	const dir = options.dir ?? DEFAULT_BOTS_DIR;
 	const sent = new Map<number, number[]>();
 
@@ -302,6 +302,7 @@ export function createBotsExtension(options: { agent: () => AgentChange; dir?: s
 			if (handle === undefined) return reply(`${target.name}'s chat is gone.`, true);
 			const body = text.length > MESSAGE_MAX ? `${text.slice(0, MESSAGE_MAX)}…` : text;
 			const data: BotMessage = { from: self, name: me.name, text: body };
+			await writeMemoryNote(handle, await options.memoryNote?.(target.id, body), context);
 			await handle.submit(
 				{ type: "input", content: inboundText(me, body), whenBusy: "followUp", requestId: `bot:${api.taskId}`, entry: { kind: BOT_MESSAGE, data } },
 				context,
@@ -311,7 +312,8 @@ export function createBotsExtension(options: { agent: () => AgentChange; dir?: s
 		},
 	});
 
-	// The chat shows the text (src/chat.ts) and main.ts pushes it, both from the transcript; the call itself only acknowledges.
+	// The chat shows the text (src/chat.ts) and main.ts pushes it, both from the transcript. A call the model makes is already
+	// there; one made inside another tool, such as a codemode script, isn't (its ID is <parent>/<key>), so it writes an entry.
 	const sendMessage = defineTool({
 		name: SEND_MESSAGE,
 		description:
@@ -319,7 +321,14 @@ export function createBotsExtension(options: { agent: () => AgentChange; dir?: s
 		parameters: Type.Object({
 			text: Type.String({ description: "The message, in Markdown, complete on its own" }),
 		}),
-		execute: async ({ text }) => (text.trim() === "" ? reply("The message is empty.", true) : reply("Sent.")),
+		execute: async ({ text }, api, context) => {
+			if (text.trim() === "") return reply("The message is empty.", true);
+			if (api.callId.includes("/")) {
+				const data: SentMessage = { text, at: api.now() };
+				await api.commit((tx) => tx.appendEntry(api.conversationId, { kind: SENT_MESSAGE, data }), context);
+			}
+			return reply("Sent.");
+		},
 	});
 
 	const createBotTool = defineTool({
@@ -402,6 +411,8 @@ export async function createBots(deps: {
 	removing?: (id: number) => Promise<unknown>;
 	/** Each message a bot sends the owner with send_message, in any bot's chat; main.ts pushes it to the owner's browser. */
 	sent?: (bot: Bot, text: string) => void;
+	/** What memory holds for a message to this bot, for the bot to read before it; main.ts searches. */
+	memoryNote?: (bot: number, message: string) => Promise<string | undefined>;
 }) {
 	const { harness, root, context } = deps;
 	const dir = deps.dir ?? DEFAULT_BOTS_DIR;
@@ -440,7 +451,14 @@ export async function createBots(deps: {
 		const conversation = bot.main ? root : await harness.conversation(bot.id as ConversationId, context);
 		if (conversation === undefined) return;
 		const computer = deps.computer?.(conversation);
-		const chat = createChat({ harness, conversation, context, ...(computer === undefined ? {} : { computer }) });
+		const { memoryNote } = deps;
+		const chat = createChat({
+			harness,
+			conversation,
+			context,
+			...(computer === undefined ? {} : { computer }),
+			...(memoryNote === undefined ? {} : { memoryNote: (message: string) => memoryNote(bot.id, message) }),
+		});
 		const first: ListView = { busy: chat.live.busy };
 		applyPreviews(first, (await chat.history(20)).items);
 		views.set(bot.id, first);

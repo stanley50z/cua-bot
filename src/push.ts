@@ -12,8 +12,8 @@ const TTL_SECONDS = 24 * 60 * 60;
 // Push services cap the payload near 4 KB; a notification shows only the first lines anyway.
 const BODY_MAX = 500;
 
-/** What the service worker (src/sw.js) shows. The same tag replaces an earlier notification. */
-export type PushMessage = { title: string; body?: string; tag?: string };
+/** What the service worker (src/sw.js) shows. The same tag replaces an earlier notification; a click opens the chat of `bot`. */
+export type PushMessage = { title: string; body?: string; tag?: string; bot?: number };
 
 type Keys = { publicKey: string; privateKey: string };
 type Saved = Keys & { subscriptions: PushSubscription[] };

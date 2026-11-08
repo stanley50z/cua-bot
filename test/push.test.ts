@@ -7,8 +7,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
-import { createPush } from "../src/push.ts";
+import { createPush, type PushMessage } from "../src/push.ts";
 import { createBotServer } from "../src/web.ts";
+import { SERVICE_WORKER } from "../src/web-page.ts";
 
 const subscription = (endpoint: string) => ({ endpoint, keys: { p256dh: "BPk", auth: "au" } });
 
@@ -73,6 +74,70 @@ test("the web app serves the push key and service worker and saves a browser's s
 			await new Promise<void>((resolve) => server.close(() => resolve()));
 		}
 	}));
+
+// Runs src/sw.js against a fake browser with a tab open at each of `urls`.
+function runWorker(urls: string[]) {
+	const handlers: Record<string, (event: object) => void> = {};
+	const shown: { data?: unknown }[] = [];
+	const opened: string[] = [];
+	const tabs = urls.map((url) => ({
+		url,
+		focused: false,
+		messages: [] as unknown[],
+		async focus() {
+			this.focused = true;
+		},
+		postMessage(message: unknown) {
+			this.messages.push(message);
+		},
+	}));
+	new Function("self", SERVICE_WORKER)({
+		addEventListener: (type: string, handler: (event: object) => void) => {
+			handlers[type] = handler;
+		},
+		skipWaiting: async () => undefined,
+		registration: { showNotification: async (_title: string, options: { data?: unknown }) => void shown.push(options) },
+		clients: { matchAll: async () => tabs, openWindow: async (url: string) => void opened.push(url) },
+	});
+	const fire = async (type: string, event: object) => {
+		let done: Promise<unknown> | undefined;
+		handlers[type]?.({ ...event, waitUntil: (work: Promise<unknown>) => (done = work) });
+		await done;
+	};
+	return { tabs, opened, shown, fire };
+}
+
+// Sends `message` through push.send() and the worker's push event, then clicks the notification it showed.
+const clickPushed = (message: PushMessage, urls: string[]) =>
+	inTempDir(async (file) => {
+		const payloads: string[] = [];
+		const push = createPush({ file, deliver: async (_to, payload) => void payloads.push(payload) });
+		push.subscribe(subscription("https://fcm.googleapis.com/fcm/send/chrome"));
+		await push.send(message);
+		const worker = runWorker(urls);
+		await worker.fire("push", { data: { json: () => JSON.parse(payloads[0] ?? "") } });
+		await worker.fire("notificationclick", { notification: { close() {}, data: worker.shown[0]?.data } });
+		result = worker;
+	}).then(() => result);
+let result: ReturnType<typeof runWorker>;
+
+test("clicking a bot's notification with the app open focuses that tab and tells it which bot", async () => {
+	const { tabs, opened } = await clickPushed({ title: "Alfred", body: "done", bot: 7 }, ["http://127.0.0.1:3000/other", "http://127.0.0.1:3000/#view=routines"]);
+	assert.deepEqual(opened, []);
+	assert.deepEqual(tabs.map((t) => [t.focused, t.messages]), [[false, []], [true, [{ bot: 7 }]]]);
+});
+
+test("clicking a bot's notification with no tab open opens that bot's chat", async () => {
+	const { opened } = await clickPushed({ title: "Alfred", bot: 7 }, []);
+	assert.deepEqual(opened, ["/#bot=7"]);
+});
+
+test("clicking a notification from no particular bot only brings the app up", async () => {
+	const open = await clickPushed({ title: "Approval needed" }, ["http://127.0.0.1:3000/"]);
+	assert.deepEqual(open.tabs.map((t) => [t.focused, t.messages]), [[true, []]]);
+	const closed = await clickPushed({ title: "Approval needed" }, []);
+	assert.deepEqual(closed.opened, ["/"]);
+});
 
 test("a long body is cut to fit a push", () =>
 	inTempDir(async (file) => {

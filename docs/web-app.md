@@ -31,7 +31,7 @@ The pencil next to the chat title opens the bot's settings: its agent file (with
 
 ## Chat
 
-A bot talks to you only through its `send_message` tool ([src/bots.ts](../src/bots.ts)). Its text between tool calls is private working notes and never shows. Replies from before 2026-11-03 04:05 UTC, when that tool arrived, still show their text.
+A bot talks to you only through its `send_message` tool ([src/bots.ts](../src/bots.ts)), whether it calls the tool directly or from a `codemode` script. Its text between tool calls is private working notes and never shows. Replies from before 2026-11-03 04:05 UTC, when that tool arrived, still show their text.
 
 - Messages stream in as the bot writes them, in a grey bubble.
 - Each message shows its time under it. Hover for the full date.
@@ -39,7 +39,7 @@ A bot talks to you only through its `send_message` tool ([src/bots.ts](../src/bo
 - Enter sends, Shift+Enter adds a line, the stop button ends the current reply.
 - A message sent while the bot is busy waits its turn.
 
-**Tool steps.** With Show tool steps on, each tool the bot used shows as a chip above its reply. Chips from consecutive steps that sent nothing run on in one wrapping row, up to the next message. Click a finished chip for the tool's result; screenshots appear as thumbnails. A turn where nothing needs you shows only its chips. With the setting off (the default), that turn shows nothing.
+**Tool steps.** With Show tool steps on, each tool the bot used shows as a chip above its reply. Chips from consecutive steps that sent nothing run on in one wrapping row, up to the next message. Click a finished chip for the tool's result; screenshots appear as thumbnails, and clicking one opens it in the image viewer. A turn where nothing needs you shows only its chips. With the setting off (the default), that turn shows nothing.
 
 **Routine runs.** With Show routine runs on, each firing shows as a line in the conversation.
 
@@ -49,7 +49,7 @@ A bot talks to you only through its `send_message` tool ([src/bots.ts](../src/bo
 
 Paste an image (a screenshot, or Copy image in a browser) into the message box and it waits there as a thumbnail; its ✕ removes it. Send with or without text, and the bot gets the images after your text.
 
-A paste that also carries plain text, such as spreadsheet cells, pastes the text instead. Your bubble shows the images; click one to open it full size. The box keeps them when you switch bots, but a reload drops them.
+A paste that also carries plain text, such as spreadsheet cells, pastes the text instead. Your bubble shows the images; click one to open it in the image viewer over the chat. Escape, the ✕, or a click outside the image closes it. The box keeps them when you switch bots, but a reload drops them.
 
 ## Quotes, quick replies and reactions
 
@@ -146,6 +146,6 @@ The interpreter is the one `start.py` last ran under (Windows uses `pythonw.exe`
 
 ## Notifications
 
-Click Turn on notifications in the chat header once and allow them. From then on a browser notification pops up for every `send_message` (titled with the bot's name, first 500 characters of the message) and every approval card. It pops up even with every cua-bot tab closed, as long as the browser runs, and even while you look at that chat. Clicking one brings the app to the front.
+Click Turn on notifications in the chat header once and allow them. From then on a browser notification pops up for every `send_message` (titled with the bot's name, first 500 characters of the message) and every approval card. It pops up even with every cua-bot tab closed, as long as the browser runs, and even while you look at that chat. Clicking one opens the chat of the bot that sent it, in the tab you already have open if there is one.
 
 This is Web Push through the browser's push service (FCM for Chrome), so the bot needs internet access. Cua's own `notify_user` tool is turned off for the bots for now (`DISABLED` in [src/cua-mcp.ts](../src/cua-mcp.ts)).

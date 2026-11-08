@@ -131,9 +131,11 @@ Plain markdown in one store, `data/memory/`: `profile.md` for lasting facts and 
 A line with no tag, or only tags that name nothing, reaches no bot and shows under Untagged in the web app. Renaming a bot or one of your tags rewrites its facts. Deleting either takes the tag off; a fact left with no tag stays, under Untagged.
 
 - `remember` saves a fact with `tags`. Saving text a tier already has adds the tags to that fact.
-- `forget` removes a fact and `recall` searches older ones, both only among facts the bot can see.
+- `forget` removes a fact and `search_memory` searches by one or more keywords, both only among facts the bot can see. A keyword matches at the start of a word, or anywhere in text like Chinese that has no spaces.
 
-Every request carries a memory section with the list of tags, every profile fact the bot can see, and the 30 most recent log facts it can see, with no length cap. The files are re-read on every request, so hand edits apply at once. Tags decide what a bot is given and what `recall` returns; they aren't a security boundary, since bots with file tools can read the files.
+Every request carries a memory section with the list of tags, every profile fact the bot can see, and the 30 most recent log facts it can see, with no length cap. The files are re-read on every request, so hand edits apply at once. Tags decide what a bot is given and what `search_memory` returns; they aren't a security boundary, since bots with file tools can read the files.
+
+Each message from the owner or another bot runs the same search automatically, with the message's own words as keywords. A word counts only if at most one in ten of the facts the bot can see contains it, which drops words like "the" and "owner". Matches go in the transcript as a `cua-bot.memory-note` entry just before the message: the bot reads it, the chat doesn't show it, and the log records the keywords. Routine firings aren't searched, since a routine sends the same text every time.
 
 An install from before tags moves over once at startup (`migrateMemory`): shared facts get `every-bot`, each `bots/<folder>/memory/` fact gets `@<folder>`, and the same text in a tier becomes one fact with both tags and the earliest date. The old files are copied to `data/memory-backup-pre-tags/` first.
 
