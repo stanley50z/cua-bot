@@ -58,7 +58,11 @@ A quote lands in the message box as a chip at your caret, so you can alternate: 
 
 The bar over selected text has three rows: quick replies (Yes, No, Explain), the quick emoji, then Add to chat. It opens below the selection when there's no room above. A quick reply or emoji works like Add to chat and also types that reply after the quote, so you can edit it before sending.
 
-On a bot reply, the smiley opens the quick emoji (👍 👎 ❤️ 😂 🎉 😮 unless you change them in Settings). Your reactions show as pills under the reply; click one to take it back. A reaction is a `cua-bot.reaction` entry in the bot's transcript (taking it back is another), so it survives a reload and shows in every open tab. It doesn't start a turn. The bot reads it on its next turn as `[The owner reacted 👍 to your message: "…"]`, or at its next step if it is working.
+On a bot reply, the smiley opens the quick emoji (👍 👎 ❤️ 😂 🎉 😮 unless you change them in Settings). Your reactions show as pills under the reply; click one to take it back. A reaction is a `cua-bot.reaction` entry in the bot's transcript (taking it back is another), so it survives a reload and shows in every open tab.
+
+A reaction wakes the bot. It starts a turn with `[The owner reacted 👍 to your message: "…"]`, so standing instructions like "a 👍 means I submitted it" run right away. Taking one back wakes it too, so it can correct anything it did because of the reaction. When there's nothing to do, the bot ends the turn without calling `send_message` and you hear nothing.
+
+If the bot is working, the change waits for that turn to end, and until then only the tab you clicked in shows it. Undoing a change that is still waiting withdraws it, and the bot sees neither. Stop drops waiting changes the same way it drops queued messages, so the pills go back to how they were.
 
 ## Computer pane
 

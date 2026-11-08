@@ -23,7 +23,7 @@ Every `/api/chat*` route takes `?bot=<id>`, or a `bot` field in the POST body. W
 | `GET /api/chat` | Pages the transcript. |
 | `POST /api/chat` | `{"text", "images"?}` queues a message without waiting. Text or an image is required. |
 | `GET /api/chat/image?entry=<id>&index=<n>` | Serves back one of the owner's images. |
-| `POST /api/chat/react` | `{"entryId", "emoji", "on"}` turns the owner's reaction to a reply on or off. |
+| `POST /api/chat/react` | `{"entryId", "emoji", "on"}` turns the owner's reaction to a reply on or off. Either change starts a turn, or queues behind the current one. |
 | `POST /api/chat/stop` | Stops the current turn. |
 | `GET /api/chat/events` | Server-sent events: the live reply, running tools, new messages, the bot list whenever it changes, and a `control` event when control of the Space's screen changes. |
 | `GET /api/chat/computer` | The computer pane: Space name, newest screenshot, steps of the latest computer-use run ([src/computer-view.ts](../src/computer-view.ts)). |

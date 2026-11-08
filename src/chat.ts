@@ -16,6 +16,7 @@ import {
 	type EntryId,
 	type EntryRecord,
 	type Harness,
+	InboxDoc,
 	LiveDoc,
 	type LiveState,
 	ResetEntry,
@@ -49,7 +50,7 @@ export type BotMessage = { from: number; name: string; text: string };
 
 /**
  * Entry kind of the owner's emoji reaction to a reply; its data is a Reaction. Taking one back is another entry with
- * `on: false`, so the newest entry for a reply and emoji wins. Each carries a user message telling the bot, without a turn.
+ * `on: false`, so the newest entry for a reply and emoji wins. Each carries a user message telling the bot and starts a turn with it.
  */
 export const REACTION = "cua-bot.reaction";
 export type Reaction = { target: number; emoji: string; on: boolean };
@@ -153,13 +154,13 @@ export function toChatItem(entry: EntryRecord): ChatItem | undefined {
 	return undefined;
 }
 
-/** What the bot reads about a reaction on its next turn, quoting the start of the reply it was on. */
+/** The turn a reaction or its take-back starts, quoting the start of the reply it was on. */
 export function reactionText(emoji: string, on: boolean, reply: string): string {
 	const flat = reply.replace(/\s+/g, " ").trim();
 	const quote = flat.length > QUOTE_MAX ? `${flat.slice(0, QUOTE_MAX - 1)}…` : flat;
 	return on
-		? `[The owner reacted ${emoji} to your message: "${quote}". You don't need to reply; act on it only if it's useful.]`
-		: `[The owner took back their ${emoji} reaction to your message: "${quote}".]`;
+		? `[The owner reacted ${emoji} to your message: "${quote}". You don't need to reply. Act on it if your instructions or the message call for that; otherwise end your turn without calling ${SEND_MESSAGE}.]`
+		: `[The owner took back their ${emoji} reaction to your message: "${quote}". You don't need to reply. If you acted on that reaction and it needs correcting, correct it; otherwise end your turn without calling ${SEND_MESSAGE}.]`;
 }
 
 /** Reduce the conversation's live document to what the chat shows while the bot works. */
@@ -252,16 +253,15 @@ export function createChat(deps: { harness: Harness; conversation: Conversation;
 		return items;
 	}
 
-	// Emits entries that no live-doc change announces, such as a reaction written while the bot is idle.
-	function pull(): Promise<void> {
-		if (watching === undefined) return Promise.resolve();
-		const started = watching;
-		pump = pump.then(async () => {
-			await started;
-			const items = await newEntries(context);
-			if (items.length > 0) emit({ type: "items", items });
+	// Withdraws the change a new reaction undoes, if it is still queued behind a turn: the two cancel out. Returns its submission, or undefined when none is left to withdraw.
+	async function withdrawOpposite({ target, emoji, on }: Reaction) {
+		const queued = (await harness.snapshot(InboxDoc, conversation.id, context))?.items.find((item) => {
+			if (item.mode === "write" || item.entry?.kind !== REACTION) return false;
+			const data = item.entry.data as Reaction;
+			return data.target === target && data.emoji === emoji && data.on !== on;
 		});
-		return pump;
+		if (queued === undefined || (await harness.abortSubmission(queued.id, context, conversation.id)) !== "aborted") return undefined;
+		return queued.id as number;
 	}
 
 	async function startWatch(): Promise<void> {
@@ -314,9 +314,9 @@ export function createChat(deps: { harness: Harness; conversation: Conversation;
 			return image === undefined ? undefined : { data: image.data, mimeType: image.mimeType };
 		},
 		/**
-		 * Record the owner's reaction to the reply entry `target`, or take it back with `on: false`. A passive write: it
-		 * starts no turn, and the bot reads it on its next one; while the bot is busy it lands at the next step. Returns
-		 * undefined when `target` is not a reply with text in this chat.
+		 * Record the owner's reaction to the reply entry `target`, or take it back with `on: false`. Either starts a turn,
+		 * or queues behind the current one when the bot is busy. A change that undoes one still queued withdraws it instead,
+		 * so the bot sees neither. Returns undefined when `target` is not a reply with text in this chat.
 		 */
 		async react(target: number, emoji: string, on: boolean) {
 			const id = target as EntryId;
@@ -324,14 +324,15 @@ export function createChat(deps: { harness: Harness; conversation: Conversation;
 			const reply = entry === undefined ? undefined : toChatItem(entry);
 			if (reply?.kind !== "assistant" || reply.text.trim() === "") return undefined;
 			const data: Reaction = { target, emoji, on };
+			const withdrawn = await withdrawOpposite(data);
+			if (withdrawn !== undefined) return { submissionId: withdrawn };
 			const submission = await conversation.submit(
-				{ type: "write", entry: { kind: REACTION, data, model: [{ role: "user", content: reactionText(emoji, on, reply.text), timestamp: Date.now() }] } },
+				{ type: "input", content: reactionText(emoji, on, reply.text), whenBusy: "followUp", entry: { kind: REACTION, data } },
 				context,
 			);
-			await pull();
 			return { submissionId: submission.id as number };
 		},
-		/** Stop the current turn and drop queued messages. Routines keep their schedules. */
+		/** Stop the current turn and drop queued messages and reactions. Routines keep their schedules. */
 		async stop() {
 			await conversation.abort(context);
 		},

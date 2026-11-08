@@ -11,7 +11,7 @@ import { test } from "node:test";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { Type } from "typebox";
 import { createModels } from "@earendil-works/pi-ai/models";
-import { type FauxResponseStep, fauxAssistantMessage, fauxProvider, fauxText, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
+import { type FauxResponseFactory, type FauxResponseStep, fauxAssistantMessage, fauxProvider, fauxText, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
 import { createRegistry, defineExtension, defineTool, Harness, MemoryStorage } from "@earendil-works/pi-durable";
 import { createNodePhotonImages } from "@earendil-works/pi-durable/images/node";
 import type { ImageProcessor } from "@earendil-works/pi-durable/tools";
@@ -225,16 +225,34 @@ test("a reply shows only what it sent; one with only private notes is hidden; on
 	assert.equal(legacy?.kind === "assistant" && legacy.text, "Checking the inbox first.");
 });
 
-test("a reaction lands on its reply without a turn, and the bot reads it on the next one", async () => {
+// The text of each user message the model was given.
+const told = (context: Parameters<FauxResponseFactory>[0]) =>
+	context.messages.flatMap((message) =>
+		message.role === "user" ? [typeof message.content === "string" ? message.content : message.content.map((part) => (part.type === "text" ? part.text : "")).join("")] : [],
+	);
+const notes = fauxAssistantMessage([fauxText("Nothing to do.")]);
+const reactions = async (base: string) =>
+	((await (await fetch(`${base}/api/chat`)).json()).items as ChatItem[]).flatMap((item) => (item.kind === "reaction" ? [[item.target, item.emoji, item.on]] : []));
+
+// Done once the bot has worked and gone idle, having shown exactly these items.
+const woke = (kinds: ChatItem["kind"][]) => (events: ChatEvent[]) => events.some((event) => event.type === "live" && event.live.busy) && settled(kinds)(events);
+
+test("a reaction and taking it back each wake the bot, and a turn with nothing to do sends nothing", async () => {
 	const BOOKED = "Booked the 9:00 train.\nSeat 14A.";
 	let seen: string[] = [];
 	const bot = await open([
 		send(BOOKED),
 		end,
 		(context) => {
-			seen = context.messages.flatMap((message) =>
-				message.role === "user" ? [typeof message.content === "string" ? message.content : message.content.map((part) => (part.type === "text" ? part.text : "")).join("")] : [],
-			);
+			seen = told(context);
+			return notes;
+		},
+		(context) => {
+			seen = told(context);
+			return notes;
+		},
+		(context) => {
+			seen = told(context);
 			return send("Glad it works.");
 		},
 		end,
@@ -246,18 +264,22 @@ test("a reaction lands on its reply without a turn, and the bot reads it on the 
 		const [user, reply] = items(first);
 		assert.ok(user !== undefined && reply?.kind === "assistant");
 
-		const reacted = await collect(bot.base, (events) => items(events).some((item) => item.kind === "reaction"), async () => {
+		const reacted = await collect(bot.base, woke(["reaction"]), async () => {
 			const response = await post(bot.base, "/api/chat/react", { entryId: reply.id, emoji: "👍", on: true });
 			assert.equal(response.status, 202);
 		});
 		const reaction = items(reacted).find((item) => item.kind === "reaction");
 		assert.deepEqual(reaction && { ...reaction, id: 0, at: 0 }, { id: 0, kind: "reaction", target: reply.id, emoji: "👍", on: true, at: 0 });
-		assert.equal((await post(bot.base, "/api/chat/react", { entryId: reply.id, emoji: "👍", on: false })).status, 202);
-		assert.equal(bot.faux.state.callCount, 2, "reacting starts no model call");
+		assert.equal(bot.faux.state.callCount, 3, "the reaction started one model call");
+		assert.deepEqual(seen, ["book it", reactionText("👍", true, BOOKED)]);
 
-		const history = (await (await fetch(`${bot.base}/api/chat`)).json()).items as ChatItem[];
+		await collect(bot.base, woke(["reaction"]), async () => {
+			assert.equal((await post(bot.base, "/api/chat/react", { entryId: reply.id, emoji: "👍", on: false })).status, 202);
+		});
+		assert.equal(bot.faux.state.callCount, 4, "taking it back started one model call");
+		assert.deepEqual(seen, ["book it", reactionText("👍", true, BOOKED), reactionText("👍", false, BOOKED)]);
 		assert.deepEqual(
-			history.flatMap((item) => (item.kind === "reaction" ? [[item.target, item.emoji, item.on]] : [])),
+			await reactions(bot.base),
 			[
 				[reply.id, "👍", true],
 				[reply.id, "👍", false],
@@ -268,6 +290,7 @@ test("a reaction lands on its reply without a turn, and the bot reads it on the 
 		await collect(bot.base, settled(["user", "assistant"]), async () => {
 			await post(bot.base, "/api/chat", { text: "thanks" });
 		});
+		assert.equal(bot.faux.state.callCount, 6, "each reaction change was one turn");
 		assert.deepEqual(seen, [
 			"book it",
 			reactionText("👍", true, BOOKED),
@@ -285,6 +308,86 @@ test("a reaction lands on its reply without a turn, and the bot reads it on the 
 	}
 });
 
+test("a reaction to a busy bot waits for the turn to end, and taking it back in time withdraws it", async () => {
+	const started = Promise.withResolvers<void>();
+	const finish = Promise.withResolvers<void>();
+	let seen: string[] = [];
+	const bot = await open([
+		send("Booked."),
+		end,
+		async () => {
+			started.resolve();
+			await finish.promise;
+			return send("Still on it.");
+		},
+		end,
+		(context) => {
+			seen = told(context);
+			return notes;
+		},
+	]);
+	try {
+		const first = await collect(bot.base, settled(["user", "assistant"]), async () => {
+			await post(bot.base, "/api/chat", { text: "book it" });
+		});
+		const reply = items(first).at(-1);
+		assert.ok(reply?.kind === "assistant");
+
+		await post(bot.base, "/api/chat", { text: "now the hotel" });
+		await started.promise;
+		for (const [emoji, on] of [["👍", true], ["❤️", true], ["❤️", false]] as const) {
+			assert.equal((await post(bot.base, "/api/chat/react", { entryId: reply.id, emoji, on })).status, 202);
+		}
+		assert.deepEqual(await reactions(bot.base), [], "both wait behind the turn");
+
+		const ended = settled(["assistant", "reaction"]);
+		await collect(bot.base, ended, async () => finish.resolve());
+		assert.equal(bot.faux.state.callCount, 5, "the turn, then one more for the reaction still queued");
+		assert.deepEqual(seen, ["book it", "now the hotel", reactionText("👍", true, "Booked.")]);
+		assert.deepEqual(await reactions(bot.base), [[reply.id, "👍", true]], "the withdrawn reaction leaves no entry");
+	} finally {
+		finish.resolve();
+		await bot.close();
+	}
+});
+
+test("reacting again withdraws a take-back still queued behind a turn", async () => {
+	const started = Promise.withResolvers<void>();
+	const finish = Promise.withResolvers<void>();
+	const bot = await open([
+		send("Booked."),
+		end,
+		notes,
+		async () => {
+			started.resolve();
+			await finish.promise;
+			return send("Still on it.");
+		},
+		end,
+	]);
+	try {
+		const first = await collect(bot.base, settled(["user", "assistant"]), async () => {
+			await post(bot.base, "/api/chat", { text: "book it" });
+		});
+		const reply = items(first).at(-1);
+		assert.ok(reply?.kind === "assistant");
+		await collect(bot.base, woke(["reaction"]), async () => {
+			await post(bot.base, "/api/chat/react", { entryId: reply.id, emoji: "👍", on: true });
+		});
+
+		await post(bot.base, "/api/chat", { text: "now the hotel" });
+		await started.promise;
+		for (const on of [false, true]) assert.equal((await post(bot.base, "/api/chat/react", { entryId: reply.id, emoji: "👍", on })).status, 202);
+
+		await collect(bot.base, woke(["assistant"]), async () => finish.resolve());
+		assert.equal(bot.faux.state.callCount, 5, "no turn followed the one in progress");
+		assert.deepEqual(await reactions(bot.base), [[reply.id, "👍", true]], "the withdrawn take-back leaves no entry");
+	} finally {
+		finish.resolve();
+		await bot.close();
+	}
+});
+
 test("reaction entries become reaction items, and a long reply is quoted short", () => {
 	const item = toChatItem({
 		conversationId: 0 as never,
@@ -296,6 +399,8 @@ test("reaction entries become reaction items, and a long reply is quoted short",
 	assert.deepEqual(item, { id: 12, kind: "reaction", target: 10, emoji: "🎉", on: false, at: 7 });
 	const note = reactionText("😂", true, "word ".repeat(40));
 	assert.match(note, /: "(word ){15}word…"\. You don't need to reply/);
+	assert.ok(note.includes(SEND_MESSAGE), "a turn with nothing to do knows to send nothing");
+	assert.ok(reactionText("😂", false, "hi").includes(SEND_MESSAGE), "so does a take-back's");
 });
 
 // A 1x1 PNG, as the browser sends a pasted screenshot: base64 without the data: URL prefix.

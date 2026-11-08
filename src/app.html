@@ -859,7 +859,7 @@ function reactionsOf() {
 }
 
 // Turns the owner's reaction on a reply on or off. It shows at once; POST /api/chat/react records it in the
-// transcript, where the bot reads it on its next turn and other tabs get it as a reaction item.
+// transcript, where it wakes the bot and other tabs get it as a reaction item.
 async function react(target, emoji, on) {
   const key = target + ":" + emoji;
   state.reacting.set(key, { target, emoji, on });
@@ -2193,8 +2193,13 @@ $("input").addEventListener("keydown", (event) => {
 });
 $("stop").addEventListener("click", async () => {
   $("stop").disabled = true;
-  try { await request("POST", "/api/chat/stop?bot=" + state.bot); state.queued = []; renderChat(); }
-  catch (error) { showChatError("Could not stop: " + error.message); }
+  try {
+    await request("POST", "/api/chat/stop?bot=" + state.bot);
+    state.queued = [];
+    // Stop also drops reactions and take-backs still waiting behind the turn; one that already landed comes back as an item.
+    state.reacting.clear();
+    renderChat();
+  } catch (error) { showChatError("Could not stop: " + error.message); }
   finally { $("stop").disabled = false; }
 });
 
