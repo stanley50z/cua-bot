@@ -298,6 +298,10 @@ dialog .row .btn.danger { margin-right: auto; }
 .table td { padding: 11px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
 .table td small { display: block; color: var(--muted); white-space: pre-wrap; overflow-wrap: anywhere; }
 .table .row-acts { white-space: nowrap; text-align: right; }
+.table th, .table td[data-label] { white-space: nowrap; }
+#view-routines:not(.details) td small { display: none; }
+#routines-h { margin-right: auto; }
+#routine-count { margin-left: 0; }
 .btn { border: 1px solid var(--line); background: #fff; border-radius: 7px; padding: 4px 10px; font-size: 12.5px; cursor: pointer; }
 .btn:hover { background: var(--bg); }
 .btn.primary { background: var(--ink); color: #fff; border-color: var(--ink); }
@@ -633,7 +637,7 @@ dialog .row { display: flex; gap: 8px; justify-content: flex-end; margin-top: 18
   </section>
 
   <section class="view" id="view-routines" aria-labelledby="routines-h" hidden>
-   <div class="bar"><h1 id="routines-h">Routines</h1><span class="aside" id="routine-count"></span><button type="button" class="btn primary" id="new-routine">New routine</button></div>
+   <div class="bar"><h1 id="routines-h">Routines</h1><button type="button" class="btn" id="routine-details" aria-expanded="false" aria-controls="routine-rows">Show details</button><span class="aside" id="routine-count"></span><button type="button" class="btn primary" id="new-routine">New routine</button></div>
    <div class="banner" id="routine-error" role="alert" hidden></div>
    <div class="table"><table>
     <thead><tr><th>Routine</th><th>Bot</th><th>When</th><th>Next</th><th>Last ran</th><th><span hidden>Actions</span></th></tr></thead>
@@ -3252,6 +3256,7 @@ async function loadRoutines() {
 
 function renderRoutines() {
   $("routine-count").textContent = routines.length === 1 ? "1 routine" : routines.length + " routines";
+  $("routine-details").hidden = routines.length === 0;
   const rows = $("routine-rows");
   rows.textContent = "";
   if (routines.length === 0) {
@@ -3281,6 +3286,13 @@ function renderRoutines() {
     rows.append(row);
   }
 }
+
+// Shows or hides every routine's prompt. The class sits on the view, so the choice outlasts the rows' 30-second re-render.
+$("routine-details").addEventListener("click", ({ currentTarget }) => {
+  const showing = $("view-routines").classList.toggle("details");
+  currentTarget.textContent = showing ? "Hide details" : "Show details";
+  currentTarget.setAttribute("aria-expanded", showing);
+});
 
 $("routine-rows").addEventListener("click", async (event) => {
   const target = event.target.closest("button[data-action]");
