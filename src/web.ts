@@ -1,7 +1,7 @@
 // The bot's HTTP surface on 127.0.0.1: the web app at GET / with its service worker at /sw.js, its JSON
 // API under /api/ (the bot list and its edits, routines CRUD, each bot's chat history/send/react/stop and the owner's pasted images, a server-sent
-// event stream of one bot's live chat state, Web Push subscriptions, the Connections tab's check, start at sign-in, the bots' model and reasoning effort, and the default Space's live screen with the owner's control of it), screenshots under /shots/, and the original POST /say. Loopback only, no auth; isOwnRequest refuses
-// requests other sites make through the owner's browser.
+// event stream of one bot's live chat state, Web Push subscriptions, the Connections tab's check, start at sign-in, the bots' model and reasoning effort, and the default Space's live screen with the owner's control of it), screenshots under /shots/, and the original POST /say. Listens on loopback only, no auth; an HTTPS proxy such as Tailscale Serve can
+// reach it under a name in allowedHosts. isOwnRequest refuses requests other sites make through the owner's browser.
 // Mutations go through the routines manager and the chat module, so every surface agrees.
 import { readFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
@@ -12,7 +12,7 @@ import { DEFAULT_IMAGE_LIMITS, type ImageProcessor } from "@earendil-works/pi-du
 import { ApprovalError, type Approvals, type EmailEdit } from "./approvals.ts";
 import type { Autostart } from "./autostart.ts";
 import { BotError, type BotInput, type Bots } from "./bots.ts";
-import type { Chat, ChatImage } from "./chat.ts";
+import type { Chat, ChatImage, WhenBusy } from "./chat.ts";
 import type { Connections } from "./connections.ts";
 import { type Memory, MemoryError, type TagView } from "./memory.ts";
 import { DATA_DIR } from "./log.ts";
@@ -137,6 +137,8 @@ export type BotServerDeps = {
 	autostart?: Autostart;
 	/** Enables GET/PUT /api/model: the bots' model and reasoning effort. Also refuses a bot override with no key or sign-in. */
 	modelSettings?: ModelSettings;
+	/** Host names of HTTPS proxies in front of this server, accepted alongside the loopback names. */
+	allowedHosts?: readonly string[];
 	log?: (...parts: unknown[]) => void;
 };
 
@@ -156,12 +158,13 @@ function decodeCursor(text: string | null): Cursor | undefined {
 	}
 }
 
-// POST /api/chat's body: { text, images? }, where each image is { data (base64), mimeType }; it needs text or an image.
-function chatInput(body: unknown): { text: string; images: ChatImage[] } {
+// POST /api/chat's body: { text, images?, whenBusy? }, where each image is { data (base64), mimeType }; it needs text or an image.
+function chatInput(body: unknown): { text: string; images: ChatImage[]; whenBusy: WhenBusy | undefined } {
 	const record = body !== null && typeof body === "object" && !Array.isArray(body) ? (body as Record<string, unknown>) : {};
-	const { text = "", images = [] } = record;
+	const { text = "", images = [], whenBusy } = record;
 	if (typeof text !== "string") throw new HttpError(400, "text must be a string");
 	if (!Array.isArray(images)) throw new HttpError(400, "images must be a list");
+	if (whenBusy !== undefined && whenBusy !== "steer" && whenBusy !== "followUp") throw new HttpError(400, 'whenBusy must be "steer" or "followUp"');
 	const parsed = images.map((image: unknown) => {
 		const { data, mimeType } = (image ?? {}) as Record<string, unknown>;
 		if (typeof data !== "string" || data === "" || typeof mimeType !== "string" || !mimeType.startsWith("image/")) {
@@ -170,7 +173,7 @@ function chatInput(body: unknown): { text: string; images: ChatImage[] } {
 		return { data, mimeType };
 	});
 	if (text.trim() === "" && parsed.length === 0) throw new HttpError(400, "text must be a non-empty string, or send an image");
-	return { text: text.trim() === "" ? "" : text, images: parsed };
+	return { text: text.trim() === "" ? "" : text, images: parsed, whenBusy };
 }
 
 // Each pasted image as the model can take it: through the processor when there is one, else only formats taken inline.
@@ -397,20 +400,24 @@ const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "[::1]"]);
 /**
  * Whether a request came from the web app or a local client such as say.py, rather than from another site
  * open in the owner's browser. Any page can send a simple POST to 127.0.0.1, and DNS rebinding can point a
- * page's own name there, so a non-loopback Host or a foreign Origin is refused. Browsers set both headers,
- * and pages cannot forge them.
+ * page's own name there, so a Host that is neither loopback nor allowed, or a foreign Origin, is refused.
+ * Browsers set both headers, and pages cannot forge them. An allowed name is an HTTPS proxy in front of this
+ * server, such as Tailscale Serve, so its page's origin is https.
  */
-function isOwnRequest(req: IncomingMessage): boolean {
+function isOwnRequest(req: IncomingMessage, allowedHosts: ReadonlySet<string>): boolean {
 	if (req.headers.host === undefined || !URL.canParse(`http://${req.headers.host}`)) return false;
+	const { origin } = req.headers;
 	const host = new URL(`http://${req.headers.host}`);
-	return LOOPBACK_HOSTS.has(host.hostname) && (req.headers.origin === undefined || req.headers.origin === host.origin);
+	if (LOOPBACK_HOSTS.has(host.hostname)) return origin === undefined || origin === host.origin;
+	return allowedHosts.has(host.hostname) && (origin === undefined || origin === new URL(`https://${req.headers.host}`).origin);
 }
 
 /** Build the bot's HTTP server. The caller listens on 127.0.0.1 and owns shutdown. */
 export function createBotServer(deps: BotServerDeps): Server {
+	const allowedHosts = new Set(deps.allowedHosts?.map((name) => name.toLowerCase()));
 	return createServer(async (req, res) => {
 		try {
-			if (!isOwnRequest(req)) throw new HttpError(403, "cross-site request refused");
+			if (!isOwnRequest(req, allowedHosts)) throw new HttpError(403, "cross-site request refused");
 			await route(req, res, deps);
 		} catch (error) {
 			sendError(res, error);
@@ -634,7 +641,7 @@ async function routeChat(req: IncomingMessage, res: ServerResponse, deps: BotSer
 			input.text,
 			...(images.length === 0 ? [] : [`[${images.length} image${images.length === 1 ? "" : "s"}]`]),
 		);
-		sendJson(res, 202, await chat.send(input.text, images));
+		sendJson(res, 202, await chat.send(input.text, images, input.whenBusy));
 		return;
 	}
 	// An image the owner pasted: ?entry=<user item id>&index=<n>. Entries never change, so it caches for good.

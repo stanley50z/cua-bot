@@ -33,6 +33,7 @@ import { createBotServer } from "./web.ts";
 import { createModelSettings } from "./model-settings.ts";
 import { botAgent, botModel, botThinking, createBotModels } from "./models.ts";
 const PORT = Number(process.env.CUABOT_PORT || 43142);
+const ALLOWED_HOSTS = (process.env.CUABOT_ALLOWED_HOSTS ?? "").split(",").map((name) => name.trim()).filter(Boolean);
 const CRASH_DIR = join(DATA_DIR, "crash");
 mkdirSync(CRASH_DIR, { recursive: true });
 
@@ -210,7 +211,7 @@ const images = await createNodePhotonImages();
 const autostart = createAutostart({ startScript: join(import.meta.dirname, "..", "start.py") });
 // Settings > Model: the model and reasoning effort in .env, applied to every bot without a restart.
 const modelSettings = createModelSettings({ models, apply: bots.applyAgent });
-createBotServer({ say, bots, memory, memoryBots: () => bots.list(), images, context, log, control: screenControl, live, push, connections, autostart, modelSettings, ...(approvals === undefined ? {} : { approvals }) }).listen(PORT, "127.0.0.1", () =>
+createBotServer({ say, bots, memory, memoryBots: () => bots.list(), images, context, log, control: screenControl, live, push, connections, autostart, modelSettings, allowedHosts: ALLOWED_HOSTS, ...(approvals === undefined ? {} : { approvals }) }).listen(PORT, "127.0.0.1", () =>
 	log(`listening: web app http://127.0.0.1:${PORT}/ · chat POST http://127.0.0.1:${PORT}/say`),
 );
 

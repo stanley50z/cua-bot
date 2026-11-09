@@ -283,6 +283,34 @@ test("requests from other sites in the owner's browser are refused before they r
 	}
 });
 
+test("a name in allowedHosts works over an HTTPS proxy, and every other name or origin is still refused", { timeout: 20_000 }, async () => {
+	const said: string[] = [];
+	const server = createBotServer({ say: async (text) => (said.push(text), "ok"), context, allowedHosts: ["Portal.Example.ts.net"] });
+	await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+	const address = server.address();
+	assert.ok(address !== null && typeof address === "object");
+	const base = `http://127.0.0.1:${address.port}`;
+	const portal = "portal.example.ts.net";
+	try {
+		// The phone opening the page, then posting from it, on the default port and on another one.
+		assert.equal((await rawRequest(base, "GET", "/", { host: portal })).status, 200);
+		assert.equal((await rawRequest(base, "POST", "/say", { host: portal, origin: `https://${portal}` }, "a")).status, 200);
+		assert.equal((await rawRequest(base, "POST", "/say", { host: `${portal}:8443`, origin: `https://${portal}:8443` }, "b")).status, 200);
+		assert.deepEqual(said, ["a", "b"]);
+
+		// Another site, plain http, and a different port on the same name.
+		assert.equal((await rawRequest(base, "POST", "/say", { host: portal, origin: "https://evil.example" }, "x")).status, 403);
+		assert.equal((await rawRequest(base, "POST", "/say", { host: portal, origin: `http://${portal}` }, "x")).status, 403);
+		assert.equal((await rawRequest(base, "POST", "/say", { host: portal, origin: `https://${portal}:8443` }, "x")).status, 403);
+		// A name that isn't listed, and the listed name's page calling the loopback address.
+		assert.equal((await rawRequest(base, "GET", "/api/bots", { host: "other.example.ts.net" })).status, 403);
+		assert.equal((await rawRequest(base, "POST", "/say", { origin: `https://${portal}` }, "x")).status, 403);
+		assert.deepEqual(said, ["a", "b"]);
+	} finally {
+		await new Promise<void>((resolve) => server.close(() => resolve()));
+	}
+});
+
 test("POST /say still answers plain text", { timeout: 20_000 }, async () => {
 	const session = await open();
 	try {

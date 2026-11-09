@@ -72,6 +72,8 @@ export async function writeMemoryNote(conversation: Pick<Conversation, "submit">
 export type ChatTool = { id: string; name: string; args: Record<string, unknown> };
 /** An image in an owner message: base64 data in a format the model takes. */
 export type ChatImage = { data: string; mimeType: string };
+/** What an owner message does while the bot is busy: join the current turn after the running tool round, or wait for the turn to end. */
+export type WhenBusy = "steer" | "followUp";
 
 export type ChatItem =
 	| { id: number; kind: "user"; text: string; at: number; images: number }
@@ -311,16 +313,16 @@ export function createChat(deps: { harness: Harness; conversation: Conversation;
 			return { items, before: page.next ?? null };
 		},
 		/**
-		 * Queue an owner message, with any pasted images after its text. It runs after the current turn when the bot is
-		 * busy. Does not wait for the answer.
+		 * Submit an owner message, with any pasted images after its text. `whenBusy` says what it does if the bot is busy.
+		 * Does not wait for the answer.
 		 */
-		async send(text: string, images: readonly ChatImage[] = []) {
+		async send(text: string, images: readonly ChatImage[] = [], whenBusy: WhenBusy = "steer") {
 			const content: UserInput =
 				images.length === 0
 					? text
 					: [...(text === "" ? [] : [{ type: "text" as const, text }]), ...images.map((image) => ({ type: "image" as const, ...image }))];
 			await writeMemoryNote(conversation, await deps.memoryNote?.(text), context);
-			const submission = await conversation.submit({ type: "input", content, whenBusy: "followUp" }, context);
+			const submission = await conversation.submit({ type: "input", content, whenBusy }, context);
 			return { submissionId: submission.id as number };
 		},
 		/** Image `index` of the owner's message `entryId`, or undefined when there is no such image. */

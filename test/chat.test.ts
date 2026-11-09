@@ -368,6 +368,129 @@ test("a reaction and taking it back each wake the bot, and a turn with nothing t
 	}
 });
 
+const wentIdle = (events: ChatEvent[]) => {
+	const last = events.at(-1);
+	return events.some((event) => event.type === "live" && event.live.busy) && last?.type === "live" && !last.live.busy;
+};
+
+test("a message sent while the bot works reaches it after the current tool round, in the same turn, right after its memory note", async () => {
+	const started = Promise.withResolvers<void>();
+	const finish = Promise.withResolvers<void>();
+	let seen: string[] = [];
+	const bot = await open(
+		[
+			async () => {
+				started.resolve();
+				await finish.promise;
+				return fauxAssistantMessage([fauxToolCall("look", {}, { id: "call-1" })], { stopReason: "toolUse" });
+			},
+			(context) => {
+				seen = told(context);
+				return send("Using pnpm.");
+			},
+			end,
+			notes,
+		],
+		undefined,
+		async (_bot, message) => (message === "use pnpm" ? "[search_memory] pnpm is the project's package manager" : undefined),
+	);
+	try {
+		const events = await collect(bot.base, wentIdle, async () => {
+			await post(bot.base, "/api/chat", { text: "run the build" });
+			await started.promise;
+			assert.equal((await post(bot.base, "/api/chat", { text: "use pnpm" })).status, 202);
+			finish.resolve();
+		});
+		assert.deepEqual(seen, ["run the build", "[search_memory] pnpm is the project's package manager", "use pnpm"]);
+		assert.deepEqual(items(events).map((item) => item.kind), ["user", "assistant", "tool", "user", "assistant"]);
+		assert.equal(bot.faux.state.callCount, 3, "the message joined the running turn instead of starting another");
+	} finally {
+		finish.resolve();
+		await bot.close();
+	}
+});
+
+test("a message sent with whenBusy followUp waits for the turn to end and gets its own", async () => {
+	const started = Promise.withResolvers<void>();
+	const finish = Promise.withResolvers<void>();
+	let during: string[] = [];
+	let after: string[] = [];
+	const bot = await open([
+		async () => {
+			started.resolve();
+			await finish.promise;
+			return fauxAssistantMessage([fauxToolCall("look", {}, { id: "call-1" })], { stopReason: "toolUse" });
+		},
+		(context) => {
+			during = told(context);
+			return send("Built.");
+		},
+		end,
+		(context) => {
+			after = told(context);
+			return send("Using pnpm next time.");
+		},
+		end,
+	]);
+	try {
+		const events = await collect(bot.base, wentIdle, async () => {
+			await post(bot.base, "/api/chat", { text: "run the build" });
+			await started.promise;
+			assert.equal((await post(bot.base, "/api/chat", { text: "use pnpm", whenBusy: "followUp" })).status, 202);
+			finish.resolve();
+		});
+		assert.deepEqual(during, ["run the build"]);
+		assert.deepEqual(after, ["run the build", "use pnpm"]);
+		assert.deepEqual(items(events).map((item) => item.kind), ["user", "assistant", "tool", "assistant", "user", "assistant"]);
+	} finally {
+		finish.resolve();
+		await bot.close();
+	}
+});
+
+test("a message with an unknown whenBusy is rejected without reaching the bot", async () => {
+	const bot = await open();
+	try {
+		const response = await post(bot.base, "/api/chat", { text: "hi", whenBusy: "later" });
+		assert.equal(response.status, 400);
+		assert.equal(bot.faux.state.callCount, 0);
+	} finally {
+		await bot.close();
+	}
+});
+
+test("a message sent during the bot's last reply still gets a turn", async () => {
+	const started = Promise.withResolvers<void>();
+	const finish = Promise.withResolvers<void>();
+	let seen: string[] = [];
+	const bot = await open([
+		send("Booked."),
+		async () => {
+			started.resolve();
+			await finish.promise;
+			return end;
+		},
+		(context) => {
+			seen = told(context);
+			return send("On it.");
+		},
+		end,
+	]);
+	try {
+		const events = await collect(bot.base, wentIdle, async () => {
+			await post(bot.base, "/api/chat", { text: "book it" });
+			await started.promise;
+			await post(bot.base, "/api/chat", { text: "now the hotel", whenBusy: "steer" });
+			finish.resolve();
+		});
+		assert.deepEqual(seen, ["book it", "now the hotel"]);
+		assert.deepEqual(items(events).map((item) => item.kind), ["user", "assistant", "user", "assistant"]);
+	} finally {
+		finish.resolve();
+		await bot.close();
+	}
+});
+
 test("a reaction to a busy bot waits for the turn to end, and taking it back in time withdraws it", async () => {
 	const started = Promise.withResolvers<void>();
 	const finish = Promise.withResolvers<void>();

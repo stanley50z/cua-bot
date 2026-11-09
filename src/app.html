@@ -517,6 +517,7 @@ dialog .row { display: flex; gap: 8px; justify-content: flex-end; margin-top: 18
      <label class="setting"><span><b>Show messages between bots</b><small>What one bot sends another, in both bots' chats and the bot list.</small></span><input type="checkbox" data-setting="botTalk"></label>
      <label class="setting"><span><b>Show tool steps</b><small>A chip for each tool a bot runs, like space bash or Remembered, that opens its output, plus its screenshots. Repeats share one chip, like space bash ×3.</small></span><input type="checkbox" data-setting="tools"></label>
      <label class="setting"><span><b>Show routine runs</b><small>A line in the bot's chat each time one of its routines starts.</small></span><input type="checkbox" data-setting="routineRuns"></label>
+     <label class="setting field"><span><b>Messages sent while a bot is working</b><small>After its current step puts the message in the turn it's on, so you can correct it mid-task. When it finishes holds the message for a turn of its own. Stop drops a message still waiting either way.</small></span><select id="set-when-busy"><option value="steer">After its current step</option><option value="followUp">When it finishes</option></select></label>
      <label class="setting field"><span><b>Quick replies</b><small>One per line. They show on the bar over text you select in a message; clicking one adds that text to the message box as a quote, with the reply after it.</small></span><textarea id="set-phrases" rows="4" spellcheck="false"></textarea></label>
      <label class="setting field"><span><b>Quick emoji</b><small>The reactions under a reply's smiley, and emoji replies on the bar over selected text, which add that text to the message box as a quote with the emoji after it.</small></span><input type="text" id="set-emoji" spellcheck="false" autocomplete="off"></label>
     </div>
@@ -737,7 +738,7 @@ const view = { owner: false, held: new Map(), queue: [], sending: null, lastMove
 // `emoji` are the quick replies on the selection bar, and `emoji` also fills a reply's reaction picker.
 const SETTINGS_KEY = "cua-bot.settings";
 const QUICK = { phrases: ["Yes", "No", "Explain"], emoji: ["👍", "👎", "❤️", "😂", "🎉", "😮"] };
-const settings = { botTalk: false, tools: false, routineRuns: false, ...QUICK };
+const settings = { botTalk: false, tools: false, routineRuns: false, whenBusy: "steer", ...QUICK };
 try { Object.assign(settings, JSON.parse(localStorage.getItem(SETTINGS_KEY) || "{}")); } catch { /* unreadable: keep the defaults */ }
 for (const key of ["phrases", "emoji"]) {
   if (!Array.isArray(settings[key]) || !settings[key].every((x) => typeof x === "string")) settings[key] = QUICK[key];
@@ -1466,7 +1467,7 @@ function renderChat() {
   }
   for (const queued of state.queued) {
     const node = ownMessage(queued.text, "m me queued", queued.images.map(imageUrl));
-    node.append(el("span", "note", state.live.busy ? "Queued until the current reply finishes" : "Sending…"));
+    node.append(el("span", "note", state.live.busy ? (queued.whenBusy === "steer" ? "Reaches the bot after its current step" : "Queued until the current reply finishes") : "Sending…"));
     box.append(node);
   }
   if (state.live.busy) {
@@ -2208,12 +2209,12 @@ $("b-delete").addEventListener("click", async () => {
 // Sends the owner's message to the open bot with any pasted `images` ({ data, mimeType }), showing it queued until it
 // lands in the chat. Resolves to whether it went; a failure shows in the chat's error line.
 async function sendMessage(text, images = []) {
-  const queued = { text, images };
+  const queued = { text, images, whenBusy: settings.whenBusy };
   state.queued.push(queued);
   renderChat();
   $("msgs").scrollTop = $("msgs").scrollHeight;
   try {
-    await request("POST", "/api/chat", { text, images, bot: state.bot });
+    await request("POST", "/api/chat", { text, images, bot: state.bot, whenBusy: queued.whenBusy });
     showChatError("");
     return true;
   } catch (error) {
@@ -2409,6 +2410,13 @@ document.querySelectorAll("input[data-setting]").forEach((input) => {
     renderBots();
     renderChat();
   });
+});
+
+// What messages sent while a bot works do, as POST /api/chat's whenBusy. A message already sent keeps its own.
+$("set-when-busy").value = settings.whenBusy;
+$("set-when-busy").addEventListener("change", (event) => {
+  settings.whenBusy = event.target.value;
+  localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
 });
 
 // The quick replies and quick emoji save as the owner types. Leaving a field tidies it to what was kept: one phrase

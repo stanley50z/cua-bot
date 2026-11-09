@@ -2,7 +2,23 @@
 
 [Back to README](../README.md)
 
-Open `http://127.0.0.1:43142/`. The page is served on loopback only and has no login, the same trust as `/say`.
+Open `http://127.0.0.1:43142/`. The server listens on loopback only and has no login, the same trust as `/say`.
+
+## Open it from your phone
+
+Put [Tailscale Serve](https://tailscale.com/kb/1312/serve) (Tailscale's HTTPS proxy for your private network) in front of the bot, and name the proxy in `.env`:
+
+```sh
+tailscale serve --bg --https=443 http://127.0.0.1:43142
+```
+
+```sh
+CUABOT_ALLOWED_HOSTS=<machine>.<tailnet>.ts.net
+```
+
+Restart the bot, then open `https://<machine>.<tailnet>.ts.net/` on the phone. `http://<tailscale-ip>:43142` can't work, because nothing listens on that address. Notifications and the live screen also need HTTPS.
+
+Every device on your tailnet can then use the bot without a login, including its computer control. On iPhone, add the page to the Home Screen before turning on notifications.
 
 The layout is three columns: bots on the left, the chat in the middle, the Space's screen on the right. A rail on the far left switches to Routines (clock icon), Memory (page icon) and Settings (gear).
 
@@ -37,7 +53,7 @@ A bot talks to you only through its `send_message` tool ([src/bots.ts](../src/bo
 - Each message shows its time under it. Hover for the full date.
 - While a reply runs, the chat title says Working or Using the computer.
 - Enter sends, Shift+Enter adds a line, the stop button ends the current reply.
-- A message sent while the bot is busy waits its turn.
+- A message sent while the bot is busy reaches it after the tool call it's running, in the same turn, so you can correct it without pressing stop. Settings > Chat can make it wait for the turn to end instead.
 
 **Tool steps.** With Show tool steps on, each tool the bot used shows as a chip above its reply. Chips from consecutive steps that sent nothing run on in one wrapping row, up to the next message. Click a finished chip for the tool's result; screenshots appear as thumbnails, and clicking one opens it in the image viewer. A turn where nothing needs you shows only its chips. With the setting off (the default), that turn shows nothing.
 
@@ -102,6 +118,7 @@ Saved in this browser's `localStorage` (`cua-bot.settings`), so each browser kee
 | Show messages between bots | off | See [Bots](#bots) |
 | Show tool steps | off | See [Chat](#chat) |
 | Show routine runs | off | See [Chat](#chat) |
+| Messages sent while a bot is working | After its current step | After its current step puts the message in the running turn; When it finishes holds it for a turn of its own |
 | Quick replies | Yes, No, Explain | One phrase per line |
 | Quick emoji | 👍 👎 ❤️ 😂 🎉 😮 | Typed or pasted in any spacing; anything that isn't an emoji is dropped when you leave the field. Clearing it hides the smiley. |
 

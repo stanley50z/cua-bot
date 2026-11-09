@@ -63,6 +63,7 @@ Copy `.env.example` to `.env`.
 | `CUABOT_MODEL` | no | `"provider/model"`, overriding `default` in `models.json`. |
 | `CUABOT_REASONING` | no | The bots' reasoning effort: `off`, `minimal`, `low`, `medium`, `high`, `xhigh` or `max`. Defaults to `medium`. A model that doesn't support the effort uses its nearest one. |
 | `CUABOT_PORT` | no | HTTP port. Defaults to `43142`. The server listens on `127.0.0.1` only. |
+| `CUABOT_ALLOWED_HOSTS` | no | Comma-separated host names of HTTPS proxies in front of the web app. See [Open it from your phone](web-app.md#open-it-from-your-phone). |
 
 ## Gmail and Calendar
 

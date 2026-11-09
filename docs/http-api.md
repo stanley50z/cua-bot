@@ -4,7 +4,7 @@
 
 One server on `127.0.0.1:43142` (`CUABOT_PORT` changes the port), loopback only, no login. Routes live in [src/web.ts](../src/web.ts).
 
-Every route answers 403 when the `Host` header isn't `127.0.0.1`, `localhost` or `[::1]`, or when an `Origin` header names any other origin. This stops other sites open in your browser from calling the API. Local clients such as `say.py` and `curl` send no `Origin` and pass.
+Every route answers 403 when the `Host` header isn't `127.0.0.1`, `localhost`, `[::1]` or a name in `CUABOT_ALLOWED_HOSTS`, or when an `Origin` header names any other origin. An allowed name must come with an `https://` origin, because it's an HTTPS proxy. This stops other sites open in your browser from calling the API. Local clients such as `say.py` and `curl` send no `Origin` and pass.
 
 ## Plain text
 
@@ -21,7 +21,7 @@ Every `/api/chat*` route takes `?bot=<id>`, or a `bot` field in the POST body. W
 | Route | Does |
 | --- | --- |
 | `GET /api/chat` | Pages the transcript. |
-| `POST /api/chat` | `{"text", "images"?}` queues a message without waiting. Text or an image is required. |
+| `POST /api/chat` | `{"text", "images"?, "whenBusy"?}` sends a message without waiting for the answer. While the bot is busy, `"steer"` (the default) joins the current turn after the running tool round, and `"followUp"` waits for the turn to end. Text or an image is required. |
 | `GET /api/chat/image?entry=<id>&index=<n>` | Serves back one of the owner's images. |
 | `POST /api/chat/react` | `{"entryId", "emoji", "on"}` turns the owner's reaction to a reply on or off. Either change starts a turn, or queues behind the current one. |
 | `POST /api/chat/stop` | Stops the current turn. |
