@@ -19,6 +19,7 @@ import { createBots, createBotsExtension } from "../src/bots.ts";
 import { BOT_MESSAGE, type ChatEvent, type ChatItem, REACTION, reactionText, SEND_MESSAGE, toChatItem, toChatLive } from "../src/chat.ts";
 import { createMemory, messageNote } from "../src/memory.ts";
 import { createPcExtensions } from "../src/pc.ts";
+import { createScreenControl, type ScreenControl } from "../src/screen-control.ts";
 import { createBotServer } from "../src/web.ts";
 
 const context = BACKGROUND_CONTEXT;
@@ -43,7 +44,7 @@ const SCRIPT: FauxResponseStep[] = [
 	end,
 ];
 
-async function open(responses = SCRIPT, images?: ImageProcessor, memoryNote?: (bot: number, message: string) => Promise<string | undefined>, options: { extensions?: Extension[]; sent?: (text: string) => void } = {}) {
+async function open(responses = SCRIPT, images?: ImageProcessor, memoryNote?: (bot: number, message: string) => Promise<string | undefined>, options: { extensions?: Extension[]; sent?: (text: string) => void; control?: ScreenControl } = {}) {
 	const dir = await mkdtemp(join(tmpdir(), "cua-bot-chat-"));
 	const faux = fauxProvider();
 	const models = createModels();
@@ -57,7 +58,7 @@ async function open(responses = SCRIPT, images?: ImageProcessor, memoryNote?: (b
 	const root = await harness.root(context, { agent: { model: MODEL } });
 	harness.resume();
 	const bots = await createBots({ harness, root, context, agent: () => ({ model: MODEL }), dir: join(dir, "bots"), ...(memoryNote === undefined ? {} : { memoryNote }), sent: (_bot, text) => options.sent?.(text) });
-	const server = createBotServer({ say: async (text) => text, bots, context, shotsDir: dir, ...(images === undefined ? {} : { images }) });
+	const server = createBotServer({ say: async (text) => text, bots, context, shotsDir: dir, ...(images === undefined ? {} : { images }), ...(options.control === undefined ? {} : { control: options.control }) });
 	await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
 	const address = server.address();
 	assert.ok(address !== null && typeof address === "object");
@@ -107,6 +108,21 @@ async function collect(base: string, done: (events: ChatEvent[]) => boolean, act
 	abort.abort();
 	return events;
 }
+
+test("the event stream says when a task runs on the live screen, and a failed task stops counting", { timeout: 30_000 }, async () => {
+	const control = createScreenControl();
+	const bot = await open(SCRIPT, undefined, undefined, { control });
+	const driving = (events: unknown[]) => (events as { type: string; driving?: boolean }[]).filter((event) => event.type === "control").map((event) => event.driving);
+	try {
+		const events = await collect(bot.base, (seen) => driving(seen).length === 3, async () => {
+			await assert.rejects(control.drive(async () => { throw new Error("task failed"); }), /task failed/);
+		});
+		assert.deepEqual(driving(events), [false, true, false]);
+		assert.equal(control.driving, false);
+	} finally {
+		await bot.close();
+	}
+});
 
 test("send_message called from a codemode script shows in the chat once, notifies the owner, and takes reactions", { timeout: 60_000 }, async () => {
 	const pushed: string[] = [];

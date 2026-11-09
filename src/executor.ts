@@ -11,7 +11,7 @@ import type { Context } from "@earendil-works/chord";
 import { Type } from "typebox";
 import { defineExtension, defineTool, section, type Extension } from "@earendil-works/pi-durable";
 import { type CallToolResult, McpClient, McpSessionExpiredError, StreamableHttpTransport, toLlmContent } from "@earendil-works/pi-mcp";
-import { acceptHolds, type Approvals, PAUSED } from "./approvals.ts";
+import { acceptHolds, type Approvals, heldRequest } from "./approvals.ts";
 
 const MAX_TEXT = 30_000;
 // The last path segment names the operation, e.g. gmailUsersMessagesSend or calendarEventsDelete.
@@ -68,6 +68,20 @@ export function onlyToOwner(path: string, input: unknown, ownerEmail: string | u
 	const recipients = [to, cc, bcc].flatMap((list) => (Array.isArray(list) ? list : list == null ? [] : [list]));
 	const address = (value: unknown) => (typeof value === "string" ? (value.match(/<([^>]+)>/)?.[1] ?? value).trim().toLowerCase() : undefined);
 	return Array.isArray(to) && to.length > 0 && recipients.every((recipient) => address(recipient) === owner);
+}
+
+// Gmail's built-in labels do what modify's archive, read, star and trash fields do, so they aren't "just labeling".
+const BUILT_IN_LABEL = /^(INBOX|SPAM|TRASH|UNREAD|STARRED|IMPORTANT|SENT|DRAFT|CATEGORY_.+)$/i;
+
+/**
+ * True for a Gmail thread change that only adds or removes the owner's own labels. executor_call accepts Executor's
+ * hold on these without a card while the owner's setting (approvals.autoLabels) is on.
+ */
+export function onlyLabels(path: string, input: unknown): boolean {
+	if (path !== "tools.google.gmail.modify") return false;
+	const { account, threadIds, addLabels, removeLabels, ...rest } = (input ?? {}) as Record<string, unknown>;
+	const labels = [addLabels ?? [], removeLabels ?? []].flat() as unknown[];
+	return labels.length > 0 && labels.every((label) => typeof label === "string" && !BUILT_IN_LABEL.test(label.trim())) && Object.values(rest).every((value) => value == null);
 }
 
 const text = (value: string) => ({ output: [{ type: "text" as const, text: value }] });
@@ -137,14 +151,15 @@ export function createExecutorExtension(options: { executor: Executor; approvals
 		execute: async (args, api, context) => {
 			const request = { callId: api.callId, conversationId: Number(api.conversationId), path: args.path, input: args.input, ...(args.summary === undefined ? {} : { summary: args.summary }) };
 			const toOwner = onlyToOwner(args.path, args.input, ownerEmail);
+			const preapproved = toOwner || (approvals.autoLabels() && onlyLabels(args.path, args.input));
 			if (sendsOrDeletes(args.path, args.input) && !toOwner) {
 				await approvals.request(request);
 				return text(WAITING);
 			}
 			try {
 				let result = await executor("call", { calls: { path: args.path, input: args.input } }, context.abortSignal);
-				if (toOwner) result = (await acceptHolds((name, input) => executor(name, input, context.abortSignal), result)).result;
-				const paused = PAUSED.exec(toLlmContent(result).flatMap((part) => (part.type === "text" ? [part.text] : [])).join(""))?.[0];
+				if (preapproved) result = (await acceptHolds((name, input) => executor(name, input, context.abortSignal), result)).result;
+				const paused = heldRequest(toLlmContent(result).flatMap((part) => (part.type === "text" ? [part.text] : [])).join(""));
 				if (paused !== undefined) {
 					await approvals.request({ ...request, pausedRequestId: paused });
 					return text(WAITING);

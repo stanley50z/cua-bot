@@ -14,7 +14,7 @@ import { type FauxResponseFactory, fauxAssistantMessage, fauxProvider, fauxText,
 import { createRegistry, Harness, MemoryStorage } from "@earendil-works/pi-durable";
 import type { CallToolResult } from "@earendil-works/pi-mcp";
 import { createApprovals } from "../src/approvals.ts";
-import { createExecutor, createExecutorExtension, sendsOrDeletes } from "../src/executor.ts";
+import { createExecutor, createExecutorExtension, onlyLabels, sendsOrDeletes } from "../src/executor.ts";
 import { type Call, fakeExecutor, rawEmail, textResult } from "./fake-executor.ts";
 
 const context = BACKGROUND_CONTEXT;
@@ -33,7 +33,7 @@ async function setup(dir: string, reply: (call: Call) => CallToolResult) {
 	const fake = fakeExecutor(reply);
 	const executor = createExecutor(fake.connect);
 	const notes: string[] = [];
-	const approvals = createApprovals({ file: join(dir, "approvals.json"), call: (name, args) => executor(name, args), notify: async (text) => notes.push(text) });
+	const approvals = createApprovals({ file: join(dir, "approvals.json"), envFile: join(dir, ".env"), call: (name, args) => executor(name, args), notify: async (text) => notes.push(text) });
 	return { fake, executor, approvals, notes, extension: createExecutorExtension({ executor, approvals, ownerEmail: OWNER }) };
 }
 
@@ -195,6 +195,55 @@ test("send and delete detection reads the operation, not the namespace", () => {
 	assert.equal(sendsOrDeletes("tools.google.gmail.modify", { threadIds: ["t"], trash: true }), true, "modify can move threads to trash");
 	assert.equal(sendsOrDeletes("tools.google.gmail.modify", { threadIds: ["t"], read: true }), false, "marking read is fine");
 });
+
+test("an answer that merely mentions an approval id isn't a hold", () =>
+	withBot(
+		() => textResult('{"status":"completed","execution":{"ok":true,"value":{"snippet":"your code is apr_12345"}}}'),
+		async ({ approvals, extension }) => {
+			const result = await runTurn(extension, [fauxToolCall("executor_call", { path: "tools.google.gmail.readMessage", input: { messageId: "m" } }, { id: "r" })]);
+			assert.match(result("r").text, /apr_12345/);
+			assert.deepEqual(await approvals.list(), []);
+		},
+	));
+
+test("only a change to the owner's own Gmail labels counts as just labeling", () => {
+	const modify = "tools.google.gmail.modify";
+	const threads = { account: "me@x.y", threadIds: ["t"] };
+	assert.equal(onlyLabels(modify, { ...threads, addLabels: ["People & Outreach"], removeLabels: ["Old"], archive: null }), true);
+	assert.equal(onlyLabels("tools.google.gmail.send", { ...threads, addLabels: ["Work"] }), false, "another tool");
+	assert.equal(onlyLabels(modify, threads), false, "no labels");
+	for (const extra of [{ archive: true }, { read: true }, { starred: false }, { trash: true }, { somethingNew: 1 }]) {
+		assert.equal(onlyLabels(modify, { ...threads, addLabels: ["Work"], ...extra }), false, JSON.stringify(extra));
+	}
+	for (const label of ["TRASH", "trash", " Spam", "INBOX", "UNREAD", "STARRED", "CATEGORY_PROMOTIONS"]) {
+		assert.equal(onlyLabels(modify, { ...threads, addLabels: [label] }), false, `add ${label}`);
+		assert.equal(onlyLabels(modify, { ...threads, removeLabels: [label] }), false, `remove ${label}`);
+	}
+});
+
+test("with the setting on, a label change runs without a card; off, or with anything else, it waits", () =>
+	withBot(
+		(call) => textResult(call.name === "call" ? '{"status":"approval-required","requestId":"apr_l"}' : '{"status":"completed","execution":{"ok":true}}'),
+		async ({ fake, approvals, extension }) => {
+			const path = "tools.google.gmail.modify";
+			const input = { threadIds: ["t"], addLabels: ["Work"] };
+			try {
+				assert.match((await runTurn(extension, [fauxToolCall("executor_call", { path, input }, { id: "off" })]))("off").text, /^Waiting for the owner/);
+				assert.equal((await approvals.list()).length, 1);
+
+				approvals.setAutoLabels(true);
+				assert.match((await runTurn(extension, [fauxToolCall("executor_call", { path, input }, { id: "on" })]))("on").text, /"ok":true/);
+				assert.equal((await approvals.list()).length, 1, "no new card");
+				assert.deepEqual(fake.calls.at(-1), { name: "resume", args: { requestId: "apr_l", response: { action: "accept" } } });
+
+				const archive = { ...input, archive: true };
+				assert.match((await runTurn(extension, [fauxToolCall("executor_call", { path, input: archive }, { id: "more" })]))("more").text, /^Waiting for the owner/);
+				assert.equal((await approvals.list()).length, 2);
+			} finally {
+				approvals.setAutoLabels(false);
+			}
+		},
+	));
 
 test("a dropped session reopens on the next call, and an unreachable Executor is a tool error", () =>
 	withBot(

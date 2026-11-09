@@ -34,6 +34,7 @@ function makeStore(dir: string, reply: (call: Call) => CallToolResult) {
 	const open = () =>
 		createApprovals({
 			file: join(dir, "approvals.json"),
+			envFile: join(dir, ".env"),
 			call: async (name, args) => {
 				calls.push({ name, args });
 				return reply({ name, args });
@@ -165,6 +166,78 @@ test("discarding runs nothing, and a failed call is reported as failed", () =>
 		() => textResult('{"status":"completed","execution":{"ok":false,"error":"quota exceeded"}}'),
 	));
 
+test("approving after Executor's hold expired runs the call again and accepts its new hold", () => {
+	const expired = textResult('{"status":"unavailable","requestId":"apr_old","reason":"expired","message":"This request expired before it was answered."}');
+	const held = textResult('{"status":"approval-required","requestId":"apr_new"}');
+	return withStore(
+		async ({ approvals, calls }) => {
+			const input = { threadIds: ["t"], addLabels: ["Work"] };
+			const card = await approvals.request({ callId: "c1", path: "tools.google.api.calendar.calendars.calendarEventsInsert", input, pausedRequestId: "apr_old" });
+			const done = await approvals.approve(card.id);
+			assert.equal(done.status, "done");
+			assert.deepEqual(calls, [
+				{ name: "resume", args: { requestId: "apr_old", response: { action: "accept" } } },
+				{ name: "call", args: { calls: { path: card.path, input } } },
+				{ name: "resume", args: { requestId: "apr_new", response: { action: "accept" } } },
+			]);
+		},
+		({ name, args }) => (name === "call" ? held : args.requestId === "apr_old" ? expired : OK),
+	);
+});
+
+test("a hold Executor already settled fails with Executor's reason and never runs again", () =>
+	withStore(
+		async ({ approvals, calls }) => {
+			const card = await approvals.request({ callId: "c1", path: SEND.replace("MessagesSend", "MessagesTrash"), input: {}, pausedRequestId: "apr_old" });
+			const settled = await approvals.approve(card.id);
+			assert.equal(settled.status, "failed");
+			assert.equal(settled.outcome, "Someone already answered this.");
+			assert.deepEqual(calls.map((call) => call.name), ["resume"]);
+		},
+		() => textResult('{"status":"unavailable","requestId":"apr_old","reason":"answered","message":"Someone already answered this.","pending":[]}'),
+	));
+
+test("a Gmail change with no summary names its emails and what changes, and keeps subjects from the bot", () => {
+	const THREAD = (subject: string) => textResult(JSON.stringify({ status: "completed", execution: { ok: true, value: { ok: true, value: { messages: [{ subject, from: "Ryan <r@x.y>" }] } } } }));
+	return withStore(
+		async ({ approvals, calls, notes, filed }) => {
+			const named = new Promise<void>((resolve) => approvals.subscribe((list) => list[0]?.threads !== undefined && resolve()));
+			const card = await approvals.request({ callId: "c1", path: "tools.google.gmail.modify", input: { account: "me@x.y", threadIds: ["t1", "t2"], addLabels: ["People & Outreach"] }, pausedRequestId: "apr_1" });
+			assert.deepEqual((await approvals.list())[0]?.details, [
+				{ label: "Thread ids", value: "t1, t2" },
+				{ label: "Add labels", value: "People & Outreach" },
+			]);
+			await named;
+			assert.deepEqual((await approvals.list())[0]?.details, [
+				{ label: "Emails", value: "Subject t1, from Ryan <r@x.y>\nSubject t2, from Ryan <r@x.y>" },
+				{ label: "Add labels", value: "People & Outreach" },
+			]);
+			assert.deepEqual(calls[0], { name: "call", args: { calls: { path: "tools.google.gmail.readThread", input: { account: "me@x.y", threadId: "t1" } } } });
+			assert.equal(filed[0]?.id, card.id);
+
+			await approvals.discard(card.id);
+			assert.equal(notes[0], "[approval] The owner discarded: Modify gmail: Thread ids: t1, t2; Add labels: People & Outreach. Don't try it again unless they ask.");
+		},
+		({ name, args }) => (name === "resume" ? OK : THREAD(`Subject ${(args.calls as { input: { threadId: string } }).input.threadId}`)),
+	);
+});
+
+test("a card shows any tool's nested input as readable rows, without the account", () =>
+	withStore(async ({ approvals }) => {
+		await approvals.request({
+			callId: "c1",
+			path: "tools.google.api.calendar.calendars.calendarEventsInsert",
+			input: { accountId: "acc_1", input: { path: { calendarId: "primary" }, body: { summary: "Lunch", start: { dateTime: "2026-11-10T12:00" }, reminders: { useDefault: false, overrides: [] }, attendees: [{ email: "a@x.y" }] } } },
+		});
+		assert.deepEqual((await approvals.list())[0]?.details, [
+			{ label: "Calendar id", value: "primary" },
+			{ label: "Summary", value: "Lunch" },
+			{ label: "Start date time", value: "2026-11-10T12:00" },
+			{ label: "Reminders use default", value: "No" },
+			{ label: "Attendees email", value: "a@x.y" },
+		]);
+	}));
+
 test("waiting requests survive a restart and expire after 7 days", () =>
 	withStore(async ({ approvals, open, clock }) => {
 		const card = await approvals.request({ callId: "c1", path: SEND, input: email(REPLY) });
@@ -186,6 +259,12 @@ test("the web portal lists, approves with edits, and discards", () =>
 		try {
 			const card = await approvals.request({ callId: "c1", path: SEND, input: email(REPLY) });
 			const other = await approvals.request({ callId: "c2", path: SEND, input: email(REPLY) });
+			const setting = (body: unknown) => fetch(`${base}/api/approvals/settings`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+			assert.deepEqual(await (await fetch(`${base}/api/approvals/settings`)).json(), { autoLabels: false });
+			assert.deepEqual(await (await setting({ autoLabels: true })).json(), { autoLabels: true });
+			assert.equal(approvals.autoLabels(), true);
+			assert.equal((await setting({ autoLabels: "yes" })).status, 400);
+			await setting({ autoLabels: false });
 			const listing = await (await fetch(`${base}/api/approvals`)).json();
 			assert.deepEqual(listing.approvals.map((a: { id: string }) => a.id), [card.id, other.id]);
 			assert.equal((await post(`/api/approvals/${card.id}/approve`, { to: "x@y.z", subject: "S", body: "B" })).status, 200);

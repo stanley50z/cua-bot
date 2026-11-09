@@ -25,7 +25,7 @@ Every `/api/chat*` route takes `?bot=<id>`, or a `bot` field in the POST body. W
 | `GET /api/chat/image?entry=<id>&index=<n>` | Serves back one of the owner's images. |
 | `POST /api/chat/react` | `{"entryId", "emoji", "on"}` turns the owner's reaction to a reply on or off. Either change starts a turn, or queues behind the current one. |
 | `POST /api/chat/stop` | Stops the current turn. |
-| `GET /api/chat/events` | Server-sent events: the live reply, running tools, new messages, the bot list whenever it changes, and a `control` event when control of the Space's screen changes. |
+| `GET /api/chat/events` | Server-sent events: the live reply, running tools, new messages, the bot list whenever it changes, and a `control` event (`owner`, `driving`) when control of the Space's screen changes or a bot's computer task starts or ends there. |
 | `GET /api/chat/computer` | The computer pane: Space name, newest screenshot, steps of the latest computer-use run ([src/computer-view.ts](../src/computer-view.ts)). |
 
 `images` are the owner's pasted images as `[{"data": <base64>, "mimeType"}]`. pi-durable's Photon processor fits them to the model's limits.
@@ -73,6 +73,7 @@ Code: [src/approvals.ts](../src/approvals.ts).
 | `GET /api/approvals` | Lists the cards. |
 | `POST /api/approvals/<id>/approve` | Runs the call. Optional JSON `{to, subject, body}` edits an email first. |
 | `POST /api/approvals/<id>/discard` | Drops it. |
+| `GET /api/approvals/settings`, `PUT` with `{autoLabels}` | Whether bots may change your own Gmail labels without a card. |
 
 ## Memory, connections, push, startup, model
 

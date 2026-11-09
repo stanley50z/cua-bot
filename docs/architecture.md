@@ -205,11 +205,11 @@ These Executor calls don't run. Each becomes a card under the bot's reply instea
 - Gmail `modify` with `trash: true`,
 - any call Executor itself pauses for approval.
 
-An email card shows the message decoded from what the bot actually wrote, with To, Subject and body editable before sending. Other actions show the bot's one-line summary and the raw call under Details.
+An email card shows the message decoded from what the bot actually wrote, with To, Subject and body editable before sending. Other actions show the bot's one-line summary if it wrote one, and always a row for each value in the call, read from the call itself. A Gmail `modify` card replaces thread ids with each thread's subject and sender, looked up through Executor after the card appears; those subjects stay out of what the bot is told, since outside parties write them. The raw call is under Details.
 
 Your click runs the call from the server, never from the model. The bot then gets an `[approval]` message with the outcome. When Executor itself holds an approved call, the server accepts the hold, since your click already approved it.
 
-Waiting cards are kept in `data/approvals.json` across restarts and expire after 7 days.
+Waiting cards are kept in `data/approvals.json` across restarts and expire after 7 days. Executor's own hold lasts about 15 minutes, so approving a card after that runs the call again and accepts the new hold. Executor holds a tool before it acts, and an expired hold was never answered, so the action hasn't happened yet. Any other reason a hold is gone fails the card with Executor's message.
 
 ## Email
 
@@ -218,6 +218,7 @@ Executor is the only email path. Bots report to you with `send_message`, which r
 - The bot sends with Executor's `tools.google.gmail.send`, which takes To, Cc, Subject and body as fields and keeps replies in their thread.
 - **Mail to you skips the card.** A `tools.google.gmail.send` or `tools.google.gmail.draft` whose every recipient (To, Cc, Bcc) is `OWNER_EMAIL` runs at once, so a routine you asked to email you works on its own. Executor's Google app still holds both tools for approval (`approval: always()` in its `tools/gmail.ts`); for these calls only, the bot accepts that hold itself.
 - A reply with no To still gets a card, since it goes to the original sender.
+- **Gmail labels can skip the card.** With Settings > Approvals on, a `tools.google.gmail.modify` that only adds or removes your own labels runs at once, and the bot accepts Executor's hold itself. Any other field on the call, or a built-in label such as `TRASH` or `INBOX`, still gets a card, because those move, hide or delete mail.
 - **No attachments.** Executor's Gmail send can't attach files. When an email should carry a screenshot, the bot saves it as a Gmail draft with `tools.google.gmail.draft` and tells you which files under `data/shots/` to attach.
 
 **Known issue (2026-10-31).** The raw Gmail API send (`tools.google.api.gmail…MessagesSend`) fails with HTTP 400, because Executor posts the upload to Gmail's non-upload URL. Cards still decode it, but use the field send.

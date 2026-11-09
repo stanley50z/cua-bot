@@ -207,16 +207,18 @@ function reactionInput(body: unknown): { entryId: number; emoji: string; on: boo
 
 // One SSE client of one bot's chat: a `live` snapshot right away, then every chat event, the full
 // approvals list whenever it changes, the bot list whenever it changes, and who drives the default Space (a `control`
-// event right away and on every change), until the socket closes.
+// event with `owner` and `driving`, right away and on every change), until the socket closes.
 function streamChat(req: IncomingMessage, res: ServerResponse, chat: Chat, bots: Bots, deps: BotServerDeps): void {
 	res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-store", connection: "keep-alive" });
 	const send = (event: unknown) => res.write(`data: ${JSON.stringify(event)}\n\n`);
 	send({ type: "live", live: chat.live });
-	if (deps.control !== undefined) send({ type: "control", owner: deps.control.owner });
+	const { control } = deps;
+	const sendControl = () => control && send({ type: "control", owner: control.owner, driving: control.driving });
+	sendControl();
 	const unsubscribe = chat.subscribe(send);
 	const unwatch = deps.approvals?.subscribe((list) => send({ type: "approvals", approvals: list }));
 	const unwatchBots = bots.subscribe((list) => send({ type: "bots", bots: list }));
-	const unwatchControl = deps.control?.subscribe((owner) => send({ type: "control", owner }));
+	const unwatchControl = control?.subscribe(sendControl);
 	const ping = setInterval(() => res.write(": ping\n\n"), 25_000);
 	req.on("close", () => {
 		clearInterval(ping);
@@ -372,6 +374,16 @@ async function routeApprovals(req: IncomingMessage, res: ServerResponse, deps: B
 	if (approvals === undefined) throw new HttpError(404, "not found");
 	if (method === "GET" && url.pathname === "/api/approvals") {
 		sendJson(res, 200, { approvals: await approvals.list() });
+		return;
+	}
+	if (url.pathname === "/api/approvals/settings") {
+		if (method === "PUT") {
+			const { autoLabels } = ((await readJson(req)) ?? {}) as { autoLabels?: unknown };
+			if (typeof autoLabels !== "boolean") throw new HttpError(400, "autoLabels must be true or false");
+			approvals.setAutoLabels(autoLabels);
+			deps.log?.(`owner (web): turned ${autoLabels ? "on" : "off"} applying Gmail labels without asking`);
+		} else if (method !== "GET") throw new HttpError(404, "not found");
+		sendJson(res, 200, { autoLabels: approvals.autoLabels() });
 		return;
 	}
 	const match = url.pathname.match(/^\/api\/approvals\/([\w-]+)\/(approve|discard)$/);

@@ -22,6 +22,27 @@ Every device on your tailnet can then use the bot without a login, including its
 
 The layout is three columns: bots on the left, the chat in the middle, the Space's screen on the right. A rail on the far left switches to Routines (clock icon), Memory (page icon) and Settings (gear).
 
+## On a phone
+
+A window under 900px wide or 500px tall shows one screen at a time. That covers a phone upright or on its side. The rail becomes a tab bar along the bottom.
+
+- **Chat** opens on the bot list. Tap a bot for its chat, and the arrow at the top left goes back to the list. The tab bar hides while a chat is open, so the message box and the keyboard get the room.
+- **Computer** is the screen button at the top right of a chat. It carries an amber dot while a bot drives the screen. The live screen streams only while this screen or its expanded view is open.
+- **Memory** and **Settings** open on their list of tags or tabs, and a row opens its page the same way.
+- **Routines** shows a card per routine.
+
+Each step is a history entry, so the browser's Back returns the way the arrow does. Opening the page with no hash lands on the bot list. A link that names a place opens that place.
+
+On a touch screen, whatever its size:
+
+- Tap a message for its toolbar (React, Reply). Tap it again, or anywhere else, to put the toolbar away.
+- Hold a finger on a bot to pin it above the list or unpin it, as a right-click does with a mouse.
+- Return starts a new line in the message box, and the arrow button sends.
+- The bar over selected text sits under the selection, clear of the phone's own Copy menu.
+- In the expanded screen with control, taps and drags reach the Space. The keyboard button beside I'm done brings the phone's keyboard up and puts it away. A touch screen can't right-click or scroll the Space's screen.
+
+In the phone layout, Turn on notifications is the bell at the top of the bot list. It goes away once notifications are on.
+
 ## Links and history
 
 The URL hash keeps your place, so a reload, Back, or a copied link lands in the same spot.
@@ -29,11 +50,12 @@ The URL hash keeps your place, so a reload, Back, or a copied link lands in the 
 | Key | Values | When absent |
 | --- | --- | --- |
 | `view` | `routines`, `memory`, `settings` | The chat |
-| `tab` | `model`, `connections`, `startup`, `tags` | Settings' Chat tab |
+| `tab` | `model`, `approvals`, `connections`, `startup`, `tags` | Settings' Chat tab |
 | `tag` | A memory tag, in Memory | Every bot |
 | `bot` | A bot id | The main bot |
+| `pane` | `list`, `computer`; only the [phone layout](#on-a-phone) reads or writes it | The chat, or the page a list row opens |
 
-For example `#view=settings&tab=connections` or `#view=memory&tag=job-bots`. Each new view or tab is a history entry; switching bots replaces the entry. Old links of the form `#bot=<id>` still open that bot's chat.
+For example `#view=settings&tab=connections` or `#view=memory&tag=job-bots`. Each new view or tab is a history entry; switching bots replaces the entry. In the phone layout, opening a bot or a tag from its list adds an entry too. Old links of the form `#bot=<id>` still open that bot's chat.
 
 ## Bots
 
@@ -52,7 +74,7 @@ A bot talks to you only through its `send_message` tool ([src/bots.ts](../src/bo
 - Messages stream in as the bot writes them, in a grey bubble.
 - Each message shows its time under it. Hover for the full date.
 - While a reply runs, the chat title says Working or Using the computer.
-- Enter sends, Shift+Enter adds a line, the stop button ends the current reply.
+- Enter sends, Shift+Enter adds a line, the stop button ends the current reply. A touch keyboard [differs](#on-a-phone).
 - A message sent while the bot is busy reaches it after the tool call it's running, in the same turn, so you can correct it without pressing stop. A running computer-use task also gets the message after its own current step. Settings > Chat can make it wait for the turn to end instead.
 
 **Tool steps.** With Show tool steps on, each tool the bot used shows as a chip above its reply. Chips from consecutive steps that sent nothing run on in one wrapping row, up to the next message. Click a finished chip for the tool's result; screenshots appear as thumbnails, and clicking one opens it in the image viewer. A turn where nothing needs you shows only its chips. With the setting off (the default), that turn shows nothing.
@@ -69,7 +91,7 @@ A paste that also carries plain text, such as spreadsheet cells, pastes the text
 
 ## Quotes, quick replies and reactions
 
-Hover a message for its toolbar. Reply quotes the whole message. To quote part of one, select the text and click Add to chat, or press Ctrl+L.
+Hover a message for its toolbar, or tap it on a touch screen. Reply quotes the whole message. To quote part of one, select the text and click Add to chat, or press Ctrl+L.
 
 A quote lands in the message box as a chip at your caret, so you can alternate: quote, reply, quote, reply. Backspace or the chip's ✕ removes it. Each bot has its own draft, typed text and chips together, kept in this browser across reloads. The bot gets the message in the same order, each quote as markdown `> ` lines with your text between them, separated by blank lines. Your bubble shows the quotes as grey blocks in place.
 
@@ -85,11 +107,11 @@ If the bot is working, the change waits for that turn to end, and until then onl
 
 The right column shows the default Space's screen live, plus each click and keystroke of the most recent computer-use task. When that task ran on another Space, the steps heading names it. The frame turns amber while the bot is driving the Space on screen. While it works on another Space, the frame stays plain and the status above it names that Space.
 
-All open panes share one media session: about 15 fps at the display's native resolution, roughly 100 KB/s on a quiet screen and more when it changes a lot, decoded with WebCodecs. A pane streams only while its tab is visible, unless you have control. The session closes when the last pane closes. If the stream is down, or the browser lacks WebCodecs, the pane stays black. The caption says Connecting… while it retries, or that the browser can't play the live screen.
+All open panes share one media session: about 15 fps at the display's native resolution, roughly 100 KB/s on a quiet screen and more when it changes a lot, decoded with WebCodecs. A pane streams only while its tab is visible and the pane is on screen, unless you have control. The session closes when the last pane closes. If the stream is down, or the browser lacks WebCodecs, the pane stays black. The caption says Connecting… while it retries, or that the browser can't play the live screen.
 
 ### Expanded screen and Take control
 
-Click the live screen (it shows an Expand badge) to fill the window with it. A bar under it shows what the bot is doing, with a Take control button. The Take control button in the pane's header opens the view already in control.
+Click the live screen (it shows an Expand badge) to fill the window with it. If no bot is driving that Space, the click also gives you control. While a bot drives it, you watch, and a bar under the screen shows what the bot is doing, with a Take control button. To always open for watching, turn off Take control when I open the live screen in [Settings](#chat-1). The Take control button in the pane's header always opens the view in control, pausing any bot that's driving.
 
 While you have control, your mouse, wheel and keyboard drive the Space's computer, and the bot's on-screen steps wait until you click I'm done. A running computer task then carries on from where you left the screen. Closing the view with ✕ also hands the screen back, as does closing every cua-bot tab. Escape goes to the Space while you drive, so close with ✕.
 
@@ -107,7 +129,7 @@ The open tag shows its lasting facts, then its dated ones, newest first. Each se
 
 ## Settings
 
-Settings has five tabs in its own sidebar.
+Settings has six tabs in its own sidebar.
 
 ### Chat
 
@@ -118,6 +140,7 @@ Saved in this browser's `localStorage` (`cua-bot.settings`), so each browser kee
 | Show messages between bots | off | See [Bots](#bots) |
 | Show tool steps | off | See [Chat](#chat) |
 | Show routine runs | off | See [Chat](#chat) |
+| Take control when I open the live screen | on | See [Expanded screen and Take control](#expanded-screen-and-take-control) |
 | Messages sent while a bot is working | After its current step | After its current step puts the message in the running turn and any running computer-use task; When it finishes holds it for a turn of its own |
 | Quick replies | Yes, No, Explain | One phrase per line |
 | Quick emoji | 👍 👎 ❤️ 😂 🎉 😮 | Typed or pasted in any spacing; anything that isn't an emoji is dropped when you leave the field. Clearing it hides the smiley. |
@@ -125,6 +148,10 @@ Saved in this browser's `localStorage` (`cua-bot.settings`), so each browser kee
 ### Model
 
 Picks the default model and reasoning effort for the bots ([src/model-settings.ts](../src/model-settings.ts)). A bot can override either in its edit dialog. The list holds each model with a key in `models.json` or a sign-in from `node src/login.ts`, and the efforts follow the picked model. A change saves `CUABOT_MODEL` and `CUABOT_REASONING` to the computer's `.env` and reaches every bot on its default on its next turn, with no restart.
+
+### Approvals
+
+**Apply Gmail labels without asking** (off by default) lets bots add or remove your own Gmail labels with no approval card. Archiving, trashing, marking read or starring, and Gmail's built-in labels such as Trash or Inbox still ask. A change saves `CUABOT_AUTO_APPROVE_GMAIL_LABELS` to the computer's `.env` and applies to the next call, with no restart.
 
 ### Memory tags
 

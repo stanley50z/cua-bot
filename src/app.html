@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>cua-bot</title>
 <!--
  The cua-bot web portal (Workbench layout), served by src/web.ts at GET /. One self-contained document:
@@ -17,7 +17,8 @@
   --ok:#1E7A55; --bad:#B42318; --bad-bg:#FDF1F0; --accent:#27507F; --me:#E8EEF6; --focus:#2F6BFF; --star:#E07B00; }
 * { box-sizing: border-box; }
 html, body { height: 100%; margin: 0; }
-body { background: var(--bg); color: var(--ink); font: 14px/1.5 "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif; }
+/* The side padding keeps a phone held sideways from drawing under its notch. */
+body { background: var(--bg); color: var(--ink); font: 14px/1.5 "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif; padding: 0 env(safe-area-inset-right) 0 env(safe-area-inset-left); }
 button { font: inherit; color: inherit; }
 :focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 .label { font-family: "Bahnschrift", "Segoe UI", sans-serif; letter-spacing: .01em; }
@@ -216,6 +217,8 @@ dialog .row .btn.danger { margin-right: auto; }
 .card .fields { margin: 0 14px; border-top: 1px solid var(--line); }
 .card .row { display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 10px; padding: 7px 0; border-bottom: 1px solid var(--line); font-size: 13.5px; }
 .card .row > span:first-child { color: var(--muted); }
+.card .fields.call .row { grid-template-columns: 104px minmax(0, 1fr); }
+.card .fields.call .row > span:last-child { white-space: pre-wrap; overflow-wrap: anywhere; }
 .card .row input { border: 0; padding: 0; background: transparent; outline: none; width: 100%; font: inherit; color: var(--ink); }
 .card .row:focus-within { border-bottom-color: var(--accent); }
 .card .body { margin: 0 14px; padding: 10px 0 4px; white-space: pre-wrap; font-size: 13.5px; }
@@ -294,7 +297,7 @@ dialog .row .btn.danger { margin-right: auto; }
 .table th { text-align: left; font: 600 12.5px "Bahnschrift", sans-serif; color: var(--muted); padding: 10px 10px 8px; border-bottom: 1px solid var(--line); letter-spacing: .02em; }
 .table td { padding: 11px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
 .table td small { display: block; color: var(--muted); white-space: pre-wrap; overflow-wrap: anywhere; }
-.table .acts { white-space: nowrap; text-align: right; }
+.table .row-acts { white-space: nowrap; text-align: right; }
 .btn { border: 1px solid var(--line); background: #fff; border-radius: 7px; padding: 4px 10px; font-size: 12.5px; cursor: pointer; }
 .btn:hover { background: var(--bg); }
 .btn.primary { background: var(--ink); color: #fff; border-color: var(--ink); }
@@ -314,7 +317,7 @@ dialog .row .btn.danger { margin-right: auto; }
 .facts h2 { font: 600 13px "Bahnschrift", sans-serif; color: var(--muted); margin: 18px 0 2px; display: flex; align-items: baseline; gap: 8px; }
 .facts h2 small { font: 400 12px "Segoe UI Variable Text", "Segoe UI", sans-serif; }
 .facts ul { list-style: none; margin: 0; padding: 0; }
-.facts li { padding: 8px 0; border-bottom: 1px solid var(--line); font-size: 13.5px; display: grid; grid-template-columns: minmax(0, 1fr) auto 28px 28px; gap: 10px; align-items: start; }
+.facts li { padding: 8px 0; border-bottom: 1px solid var(--line); font-size: 13.5px; display: grid; grid-template-columns: minmax(0, 1fr) auto 28px 28px; gap: 10px; align-items: start; overflow-wrap: anywhere; }
 .facts li .when { color: var(--muted); font-size: 12px; white-space: nowrap; padding-top: 1px; }
 .tag-chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
 .tag-chip { font-size: 12px; line-height: 18px; padding: 0 7px; border: 1px solid var(--line); border-radius: 5px; background: var(--panel); color: var(--muted); white-space: nowrap; }
@@ -354,7 +357,7 @@ dialog .row .btn.danger { margin-right: auto; }
 /* settings */
 .settings { padding: 8px 24px 24px; overflow: auto; flex: 1; }
 .setting { display: flex; align-items: center; gap: 24px; max-width: 640px; padding: 14px 0; border-bottom: 1px solid var(--line); cursor: pointer; }
-.setting span { flex: 1; }
+.setting span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .setting b { display: block; font-weight: 600; }
 .setting small { display: block; color: var(--muted); font-size: 12.5px; }
 .setting input[type="checkbox"] { appearance: none; flex: none; position: relative; width: 36px; height: 20px; margin: 0; border-radius: 999px; background: var(--line); cursor: pointer; transition: background .15s; }
@@ -439,7 +442,137 @@ dialog .hint code { background: var(--bg); padding: 0 4px; border-radius: 3px; }
 dialog .row { display: flex; gap: 8px; justify-content: flex-end; margin-top: 18px; }
 
 @media (max-width: 1180px) { .app { grid-template-columns: 64px minmax(0, 1fr) 360px; } .botlist { width: 204px; } }
-@media (max-width: 900px) { .app { grid-template-columns: 56px minmax(0, 1fr); } .side { display: none; } }
+
+/* The phone layout's own controls: its Back arrows, the chat's Computer button, the tab bar's labels and the bot list's bell. */
+.back, .to-computer { position: relative; width: 40px; height: 40px; flex: none; border: 0; border-radius: 9px; background: transparent; color: var(--muted); cursor: pointer; display: none; place-items: center; }
+.back svg, .to-computer svg { width: 20px; height: 20px; }
+.to-computer.drive::after { content: ""; position: absolute; top: 7px; right: 7px; width: 9px; height: 9px; border-radius: 50%; background: var(--drive); box-shadow: 0 0 0 2px var(--panel); }
+.rail button span, #notify-bell { display: none; }
+.pill .icon { border-radius: 50%; }
+
+/* A phone shows one screen at a time. #app's data-pane (see showView) names it: "list" is the view's sidebar (bots,
+   memory tags, settings tabs), "detail" the chat or pane a row of it opens, "computer" the computer pane. The rail
+   lies along the bottom as a tab bar, and makes way for the message box while a chat is open. A phone on its side
+   is wider than some windows but never as tall, so either a narrow or a short window counts. */
+@media (max-width: 900px), (max-height: 500px) {
+  .app { display: flex; flex-direction: column; }
+  .main { flex: 1; border-right: 0; }
+  .rail { order: 1; flex-direction: row; gap: 0; padding: 0 0 env(safe-area-inset-bottom); }
+  .mark { display: none; }
+  .rail button { flex: 1; width: auto; height: 54px; border-radius: 0; align-content: center; row-gap: 2px; font-size: 11px; }
+  .rail button[aria-pressed="true"] { background: transparent; }
+  .rail button span { display: block; }
+  .rail .foot { margin-top: 0; }
+  #app[data-view="chat"]:not([data-pane="list"]) .rail, #app[data-pane="computer"] .main, #app:not([data-pane="computer"]) .side { display: none; }
+  .side { flex: 1; }
+  .botlist { flex: 1; width: auto; border-right: 0; }
+  #app:not([data-pane="list"]) .botlist { display: none; }
+  /* A list screen keeps only the error line of the pane it hides. */
+  #app[data-pane="list"] .view { flex-direction: column; }
+  #app[data-pane="list"] :is(.chatcol, .pane) { display: contents; }
+  #app[data-pane="list"] :is(.chatcol, .pane) > :not(.banner) { display: none; }
+  #app[data-pane="list"] .banner { order: -1; margin-bottom: 8px; }
+
+  .bar, .botlist .bar { gap: 8px; padding: 0 8px 0 14px; }
+  .bar h1 { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .bar .aside { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .bar .search { flex: 1 0 130px; width: auto; }
+  .back, .to-computer, #notify-bell { display: grid; }
+  .back { margin-left: -10px; }
+  .botlist .bar h2 { margin-right: auto; font-size: 16px; color: var(--ink); }
+  .botlist .bar .icon { margin-left: 0; width: 40px; height: 40px; border-color: transparent; background: transparent; }
+  .navrow { min-height: 46px; }
+  .btn { padding: 7px 12px; font-size: 13.5px; }
+  .banner { margin: 8px 12px 0; }
+
+  /* The chat's header: the bot's name over what it is doing, between Back and the two buttons. */
+  .chatcol .bar { display: grid; grid-template-columns: auto auto minmax(0, 1fr) auto auto; align-content: center; }
+  .chatcol .bar > * { grid-row: 1 / span 2; }
+  .chatcol .back { grid-column: 1; }
+  #chat-av { grid-column: 2; }
+  #chat-h { grid-area: 1 / 3; }
+  #chat-h:has(~ #chat-state:empty) { grid-row: 1 / span 2; }
+  #chat-state { grid-area: 2 / 3; display: block; font-size: 12px; line-height: 1.3; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #chat-state::before { display: inline-block; margin-right: 5px; }
+  #chat-state:empty, #model, #notify { display: none; }
+  .to-computer { grid-column: 4; }
+  #edit-bot { grid-column: 5; width: 40px; height: 40px; margin: 0; }
+  #edit-bot svg { width: 18px; height: 18px; }
+  .msgs { padding: 12px 12px 6px; }
+  .m { max-width: 88%; }
+  .composer { margin: 6px 10px calc(10px + env(safe-area-inset-bottom)); padding: 6px 6px 6px 12px; }
+  .composer .input { min-height: 40px; padding: 8px 0; }
+  .composer .icon { width: 40px; height: 40px; }
+
+  .side .bar h1 { flex: 0 1 auto; }
+  /* On a phone's side the full width would be taller than the window, so the pane stops short and the picture fits inside it. */
+  .screen { margin: 12px 12px 0; max-height: 60dvh; }
+  .screen canvas { position: absolute; inset: 0; }
+  .shot-time { margin: 6px 12px 0; }
+  .steps { margin: 12px; }
+  .steps li { grid-template-columns: 22px 84px minmax(0, 1fr) auto; }
+
+  /* Routines: a card each in place of the table's row; data-label names the cells that lost their column heading. */
+  .table { padding: 12px; }
+  .table thead { display: none; }
+  .table table, .table tbody, .table tr, .table td { display: block; }
+  .table tr { margin-bottom: 10px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; }
+  .table td { padding: 0; border: 0; }
+  .table td:nth-child(2) { margin-top: 8px; }
+  .table td[data-label]::before { content: attr(data-label) ": "; color: var(--muted); }
+  .table .row-acts { margin-top: 10px; text-align: left; }
+  /* The note under the routines or a tag's facts scrolls away with them, where a wide window holds it on screen. */
+  #view-routines, #view-memory .pane { overflow-y: auto; }
+  #view-routines > .bar, #view-memory .pane > .bar { position: sticky; top: 0; z-index: 1; background: var(--panel); }
+  .table, .facts { flex: none; overflow: visible; }
+  .file { padding: 0 14px 14px; }
+
+  .facts { padding: 4px 14px 14px; }
+  .facts li { grid-template-columns: minmax(0, 1fr) auto 36px 36px; gap: 6px; }
+  .facts li .x, .tag-row .x { width: 36px; height: 36px; }
+  .settings, .conns { padding: 4px 14px 20px; }
+  .setting { gap: 14px; }
+  .setting.field { flex-direction: column; align-items: stretch; gap: 8px; }
+  .setting.field :is(input, textarea, select) { width: 100%; }
+  .tag-row { grid-template-columns: minmax(0, 1fr) 36px; }
+  .tag-row .tag-pills { grid-area: 2 / 1 / auto / -1; }
+  .space .id { grid-column: 2 / -1; text-align: left; }
+
+  /* Dialogs fill the screen, over the on-screen keyboard's top edge (see fitVisibleArea). */
+  #routine-dialog, #bot-dialog { top: var(--visible-top, 0px); width: 100vw; max-width: none; height: var(--visible-h, 100dvh); max-height: none; margin: 0; border: 0; border-radius: 0; padding: 16px 16px calc(16px + env(safe-area-inset-bottom)); }
+  .av-picker { max-width: calc(100vw - 24px); }
+  .av-shapes { grid-template-columns: repeat(7, minmax(0, 42px)); }
+  .av-shapes button { width: 100%; height: auto; aspect-ratio: 1; }
+  /* The expanded screen and the image viewer give up their wide margins. */
+  #screen-view, #image-view { top: var(--visible-top, 0px); height: var(--visible-h, 100dvh); padding: 52px max(8px, env(safe-area-inset-right)) calc(12px + env(safe-area-inset-bottom)) max(8px, env(safe-area-inset-left)); }
+  .pill { max-width: 100%; border-radius: 16px; }
+  .pill .who { min-width: 0; }
+}
+/* A finger for a pointer: nothing hovers, nothing right-clicks, and focus brings up an on-screen keyboard. */
+@media (pointer: coarse) {
+  html, body { overscroll-behavior: none; }
+  body { touch-action: manipulation; }
+  /* iOS zooms the page when focus lands on a control whose text is under 16px. */
+  input:not([type="checkbox"]), textarea, select, .composer .input { font-size: 16px !important; }
+  /* fitVisibleArea() keeps these two properties at the part of the page the keyboard leaves showing. */
+  .app { height: var(--visible-h, 100%); transform: translateY(var(--visible-top, 0px)); }
+  /* A tap on a message opens its toolbar, under the message (see the click handler after renderQuickReplies). */
+  .acts { display: none; top: 100%; bottom: auto; left: 0; padding: 4px 0 0; }
+  .m.me .acts { left: auto; right: 0; padding: 4px 0 0; }
+  .acts.open { display: block; }
+  .acts button, .acts .picker button { width: 40px; height: 40px; }
+  .acts svg { width: 19px; height: 19px; }
+  .acts .picker { left: 0; flex-wrap: wrap; width: max-content; max-width: 76vw; }
+  .reacts button { height: 30px; padding: 0 11px; }
+  .quote-bar button { height: 36px; }
+  .quote-bar kbd { display: none; }
+  .botrow, .pintile { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
+  .ctxmenu button { padding: 12px 14px; }
+  .chip { padding: 4px 9px; }
+  .tag-row .tag-pill { padding: 5px 11px; }
+  .tag-chip.tag-add { padding: 0 10px; line-height: 26px; }
+  .tag-picker label { padding: 8px; }
+}
 @media (prefers-reduced-motion: reduce) { * { animation: none !important; } }
 </style>
 </head>
@@ -462,28 +595,32 @@ dialog .row { display: flex; gap: 8px; justify-content: flex-end; margin-top: 18
  <symbol id="i-pointer" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M6 3.5l12.5 7.2-5.6 1.4 3.3 5.9-2.6 1.5-3.3-5.9-4.3 3.9z"/></symbol>
  <symbol id="i-screen" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4.5" width="18" height="12" rx="1.5"/><path d="M9 20h6M12 16.5V20"/></symbol>
  <symbol id="i-power" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 3.5v8"/><path d="M7.2 6.4a7.5 7.5 0 1 0 9.6 0"/></symbol>
+ <symbol id="i-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></symbol>
+ <symbol id="i-back" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></symbol>
+ <symbol id="i-bell" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 17v-6a6 6 0 0 1 12 0v6l1.5 2h-15zM10 21.5h4"/></symbol>
+ <symbol id="i-keys" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="6" width="19" height="12" rx="2"/><path d="M6.5 10h.1M10 10h.1M13.9 10h.1M17.4 10h.1M8 14h8"/></symbol>
  <symbol id="i-chip" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="7" y="7" width="10" height="10" rx="1.5"/><path d="M10 3.5V7M14 3.5V7M10 17v3.5M14 17v3.5M3.5 10H7M3.5 14H7M17 10h3.5M17 14h3.5"/></symbol>
  <symbol id="i-edit"viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13 7l4 4"/></symbol>
 </svg>
 
-<div class="app">
+<div class="app" id="app">
  <nav class="rail" aria-label="Sections">
   <div class="mark" aria-hidden="true">cb</div>
-  <button type="button" aria-label="Chat" aria-pressed="true" data-view="chat"><svg><use href="#i-chat"/></svg></button>
-  <button type="button" aria-label="Routines" aria-pressed="false" data-view="routines"><svg><use href="#i-clock"/></svg></button>
-  <button type="button" aria-label="Memory" aria-pressed="false" data-view="memory"><svg><use href="#i-mem"/></svg></button>
-  <button type="button" class="foot" aria-label="Settings" title="Settings" aria-pressed="false" data-view="settings"><svg><use href="#i-gear"/></svg></button>
+  <button type="button" aria-label="Chat" aria-pressed="true" data-view="chat"><svg><use href="#i-chat"/></svg><span aria-hidden="true">Chat</span></button>
+  <button type="button" aria-label="Routines" aria-pressed="false" data-view="routines"><svg><use href="#i-clock"/></svg><span aria-hidden="true">Routines</span></button>
+  <button type="button" aria-label="Memory" aria-pressed="false" data-view="memory"><svg><use href="#i-mem"/></svg><span aria-hidden="true">Memory</span></button>
+  <button type="button" class="foot" aria-label="Settings" title="Settings" aria-pressed="false" data-view="settings"><svg><use href="#i-gear"/></svg><span aria-hidden="true">Settings</span></button>
  </nav>
 
  <main class="main">
   <section class="view" id="view-chat" aria-labelledby="chat-h">
    <nav class="botlist" aria-labelledby="bots-h">
-    <div class="bar"><h2 id="bots-h">Bots</h2><button type="button" class="icon" id="new-bot" aria-label="New bot" title="New bot"><svg><use href="#i-plus"/></svg></button></div>
+    <div class="bar"><h2 id="bots-h">Bots</h2><button type="button" class="icon" id="notify-bell" hidden><svg aria-hidden="true"><use href="#i-bell"/></svg></button><button type="button" class="icon" id="new-bot" aria-label="New bot" title="New bot"><svg><use href="#i-plus"/></svg></button></div>
     <ul class="pins" id="bot-pins" aria-label="Pinned bots" hidden></ul>
     <ul id="bot-rows"></ul>
    </nav>
    <div class="chatcol">
-    <div class="bar"><span id="chat-av"></span><h1 id="chat-h">cua-bot</h1><button type="button" class="edit" id="edit-bot" aria-label="Edit this bot" title="Edit name and agent file"><svg><use href="#i-edit"/></svg></button><span class="state" id="chat-state" aria-live="polite"></span><span class="aside" id="model"></span><button class="btn" id="notify" type="button" hidden>Turn on notifications</button></div>
+    <div class="bar"><span id="chat-av"></span><h1 id="chat-h">cua-bot</h1><button type="button" class="to-computer" id="to-computer" aria-label="Computer" title="Computer"><svg aria-hidden="true"><use href="#i-screen"/></svg></button><button type="button" class="edit" id="edit-bot" aria-label="Edit this bot" title="Edit name and agent file"><svg><use href="#i-edit"/></svg></button><span class="state" id="chat-state" aria-live="polite"></span><span class="aside" id="model"></span><button class="btn" id="notify" type="button" hidden>Turn on notifications</button></div>
     <div class="banner" id="chat-error" role="alert" hidden></div>
     <div class="msgs" id="msgs" aria-live="polite"></div>
     <form class="composer" id="composer">
@@ -522,6 +659,7 @@ dialog .row { display: flex; gap: 8px; justify-content: flex-end; margin-top: 18
     <ul id="settings-tabs">
      <li><button type="button" class="navrow" data-tab="chat" aria-current="page"><svg aria-hidden="true"><use href="#i-chat"/></svg>Chat</button></li>
      <li><button type="button" class="navrow" data-tab="model" aria-current="false"><svg aria-hidden="true"><use href="#i-chip"/></svg>Model</button></li>
+     <li><button type="button" class="navrow" data-tab="approvals" aria-current="false"><svg aria-hidden="true"><use href="#i-check"/></svg>Approvals</button></li>
      <li><button type="button" class="navrow" data-tab="connections" aria-current="false"><svg aria-hidden="true"><use href="#i-screen"/></svg>Connections</button></li>
      <li><button type="button" class="navrow" data-tab="startup" aria-current="false"><svg aria-hidden="true"><use href="#i-power"/></svg>Startup</button></li>
      <li><button type="button" class="navrow" data-tab="tags" aria-current="false"><svg aria-hidden="true"><use href="#i-mem"/></svg>Memory tags</button></li>
@@ -533,6 +671,7 @@ dialog .row { display: flex; gap: 8px; justify-content: flex-end; margin-top: 18
      <label class="setting"><span><b>Show messages between bots</b><small>What one bot sends another, in both bots' chats and the bot list.</small></span><input type="checkbox" data-setting="botTalk"></label>
      <label class="setting"><span><b>Show tool steps</b><small>A chip for each tool a bot runs, like space bash or Remembered, that opens its output, plus its screenshots. Repeats share one chip, like space bash ×3.</small></span><input type="checkbox" data-setting="tools"></label>
      <label class="setting"><span><b>Show routine runs</b><small>A line in the bot's chat each time one of its routines starts.</small></span><input type="checkbox" data-setting="routineRuns"></label>
+     <label class="setting"><span><b>Take control when I open the live screen</b><small>Clicking the live screen takes control right away if no bot is driving it. Off, it opens for watching and you click Take control yourself.</small></span><input type="checkbox" data-setting="controlOnExpand"></label>
      <label class="setting field"><span><b>Messages sent while a bot is working</b><small>After its current step puts the message in the turn it's on, so you can correct it mid-task. A running computer task gets it after its own current step. When it finishes holds the message for a turn of its own. Stop drops a message still waiting either way.</small></span><select id="set-when-busy"><option value="steer">After its current step</option><option value="followUp">When it finishes</option></select></label>
      <label class="setting field"><span><b>Quick replies</b><small>One per line. They show on the bar over text you select in a message; clicking one adds that text to the message box as a quote, with the reply after it.</small></span><textarea id="set-phrases" rows="4" spellcheck="false"></textarea></label>
      <label class="setting field"><span><b>Quick emoji</b><small>The reactions under a reply's smiley, and emoji replies on the bar over selected text, which add that text to the message box as a quote with the emoji after it.</small></span><input type="text" id="set-emoji" spellcheck="false" autocomplete="off"></label>
@@ -544,6 +683,13 @@ dialog .row { display: flex; gap: 8px; justify-content: flex-end; margin-top: 18
     <div class="settings">
      <label class="setting field"><span><b>Default model</b><small>What the bots run on, from their next turn, unless a bot's edit dialog picks its own. Lists the models with a key in models.json or a sign-in from src/login.ts.</small></span><select id="set-model" disabled></select></label>
      <label class="setting field"><span><b>Default reasoning effort</b><small>How long the bots think before answering, on-screen work included. More is slower and uses more of your quota.</small></span><select id="set-reasoning" disabled></select></label>
+    </div>
+   </div>
+   <div class="pane" id="tab-approvals" hidden>
+    <div class="bar"><h1>Approvals</h1><span class="aside">Saved in .env on this computer.</span></div>
+    <div class="banner" id="approvals-error" role="alert" hidden></div>
+    <div class="settings">
+     <label class="setting"><span><b>Apply Gmail labels without asking</b><small>Bots add or remove your own Gmail labels right away, with no approval card. Everything else still asks: archiving, trashing, marking read or starring, and Gmail's built-in labels like Trash or Inbox.</small></span><input type="checkbox" id="set-auto-labels" disabled></label>
     </div>
    </div>
    <div class="pane" id="tab-connections" hidden>
@@ -583,8 +729,8 @@ dialog .row { display: flex; gap: 8px; justify-content: flex-end; margin-top: 18
 <dialog id="screen-view" aria-label="Live screen of the computer">
  <button type="button" class="close" id="view-close" aria-label="Close the live screen" title="Close"><svg aria-hidden="true"><use href="#i-x"/></svg></button>
  <div class="stage" id="stage"><p class="wait" id="view-wait"></p></div>
- <div class="pill"><span class="who" id="view-who"></span><button type="button" class="btn primary" id="view-control">Take control</button></div>
- <textarea class="keys" id="view-keys" aria-label="Keyboard for the computer" autocapitalize="off" autocomplete="off" spellcheck="false"></textarea>
+ <div class="pill"><span class="who" id="view-who"></span><button type="button" class="icon" id="view-keyboard" aria-label="Show or hide the keyboard" title="Keyboard" hidden><svg aria-hidden="true"><use href="#i-keys"/></svg></button><button type="button" class="btn primary" id="view-control">Take control</button></div>
+ <textarea class="keys" id="view-keys" aria-label="Keyboard for the computer" autocapitalize="off" autocomplete="off" autocorrect="off" spellcheck="false"></textarea>
 </dialog>
 
 <dialog id="image-view" aria-label="Image">
@@ -701,6 +847,37 @@ function relative(iso) {
   return `in ${Math.floor(hours / 24)} d ${hours % 24} h`;
 }
 
+/* ---------- phones and touch screens ---------- */
+// `phone` is the one-screen-at-a-time layout, under the same query as its block in the styles. `touch` is a finger
+// for a pointer: nothing hovers or right-clicks there, and focus brings up an on-screen keyboard.
+const phone = matchMedia("(max-width: 900px), (max-height: 500px)"), touch = matchMedia("(pointer: coarse)");
+
+// Whether the chat is scrolled to its newest message, give or take a line or two. True while the chat is off screen.
+function chatAtEnd() {
+  const box = $("msgs");
+  return box.scrollHeight - box.scrollTop - box.clientHeight < 80;
+}
+
+// An on-screen keyboard covers the bottom of the page instead of resizing it, and iOS then slides the page up
+// under the keyboard. So on a touch screen these two properties tell the styles which part still shows, and the
+// app and its dialogs stay inside it, the chat still at its newest message. Pinch-zoom shrinks the same viewport,
+// so the properties clear while the page is zoomed.
+function fitVisibleArea() {
+  const area = window.visualViewport, root = document.documentElement.style, box = $("msgs");
+  const atEnd = chatAtEnd();
+  if (touch.matches && area.scale <= 1.01) {
+    root.setProperty("--visible-h", area.height + "px");
+    root.setProperty("--visible-top", area.offsetTop + "px");
+  } else {
+    root.removeProperty("--visible-h");
+    root.removeProperty("--visible-top");
+  }
+  if (atEnd) box.scrollTop = box.scrollHeight;
+}
+for (const type of ["resize", "scroll"]) window.visualViewport.addEventListener(type, fitVisibleArea);
+touch.addEventListener("change", fitVisibleArea);
+fitVisibleArea();
+
 /* ---------- markdown ---------- */
 // A bot's text as a <div class="text">: full CommonMark and GitHub-flavored markdown, a single newline being a line
 // break as in chat. The bot's text can quote anything it read, so DOMPurify strips scripts and javascript: links.
@@ -716,17 +893,19 @@ function markdown(text) {
 
 /* ---------- chat state ---------- */
 // `bot` is the id of the bot whose chat is open; `bots` is the list from /api/bots. `picking` is the reply whose
-// reaction picker is open; `reacting` holds reactions sent but not yet back as items, by "<reply id>:<emoji>".
-const state = { bot: null, bots: [], items: [], ids: new Set(), before: null, live: { busy: false, partial: "", tools: [] }, queued: [], open: new Set(), computer: { steps: [] }, approvals: [], picking: null, reacting: new Map() };
-// The expanded live screen (see "expanded live screen" below): whether the owner has control of the Space, the
-// keys they hold down there, and their input on its way.
-const view = { owner: false, held: new Map(), queue: [], sending: null, lastMove: 0 };
+// reaction picker is open; `tapped` is the key of the message whose toolbar a tap opened on a touch screen;
+// `reacting` holds reactions sent but not yet back as items, by "<reply id>:<emoji>".
+const state = { bot: null, bots: [], items: [], ids: new Set(), before: null, live: { busy: false, partial: "", tools: [] }, queued: [], open: new Set(), computer: { steps: [] }, approvals: [], picking: null, tapped: null, reacting: new Map() };
+// The expanded live screen (see "expanded live screen" below): whether the owner has control of the Space, whether
+// any bot's task is running on it, the keys they hold down there, and their input on its way.
+const view = { owner: false, driving: false, held: new Map(), queue: [], sending: null, lastMove: 0 };
 // The owner's display choices, kept in this browser. `botTalk` shows the messages bots send each other, `tools` the
-// tool chips and screenshots in replies, `routineRuns` the line each routine firing leaves in its chat. `phrases` and
-// `emoji` are the quick replies on the selection bar, and `emoji` also fills a reply's reaction picker.
+// tool chips and screenshots in replies, `routineRuns` the line each routine firing leaves in its chat,
+// `controlOnExpand` makes clicking an undriven live screen take control. `phrases` and `emoji` are the quick replies
+// on the selection bar, and `emoji` also fills a reply's reaction picker.
 const SETTINGS_KEY = "cua-bot.settings";
 const QUICK = { phrases: ["Yes", "No", "Explain"], emoji: ["👍", "👎", "❤️", "😂", "🎉", "😮"] };
-const settings = { botTalk: false, tools: false, routineRuns: false, whenBusy: "steer", ...QUICK };
+const settings = { botTalk: false, tools: false, routineRuns: false, controlOnExpand: true, whenBusy: "steer", ...QUICK };
 try { Object.assign(settings, JSON.parse(localStorage.getItem(SETTINGS_KEY) || "{}")); } catch { /* unreadable: keep the defaults */ }
 for (const key of ["phrases", "emoji"]) {
   if (!Array.isArray(settings[key]) || !settings[key].every((x) => typeof x === "string")) settings[key] = QUICK[key];
@@ -916,7 +1095,7 @@ function reactionsOf() {
 async function react(target, emoji, on) {
   const key = target + ":" + emoji;
   state.reacting.set(key, { target, emoji, on });
-  state.picking = null;
+  state.picking = state.tapped = null;
   renderChat();
   try {
     await request("POST", "/api/chat/react", { bot: state.bot, entryId: target, emoji, on });
@@ -950,6 +1129,9 @@ function focusInput(range = caretInInput()) {
   selection.removeAllRanges();
   selection.addRange(range);
 }
+// The same when a chat opens, so the owner can just type. Not on a touch screen, where focus would bring the
+// keyboard up over the chat they came to read.
+function focusChat() { if (!touch.matches) focusInput(); }
 
 // A quote's chip for the message box, from text addQuote has already trimmed.
 function quoteChip(clean) {
@@ -1095,9 +1277,9 @@ function ownMessage(text, className, pics = []) {
 }
 
 // The hover toolbar beside a message: Reply quotes the whole message; a bot reply also gets React, which opens the
-// quick picker. `mine` is the reply's reactions from reactionsOf().
+// quick picker. `mine` is the reply's reactions from reactionsOf(). On a touch screen a tap on the message opens it.
 function messageActions(item, mine) {
-  const acts = el("div", "acts" + (state.picking === item.id ? " open" : ""));
+  const acts = el("div", "acts" + (state.picking === item.id || state.tapped === String(item.id) ? " open" : ""));
   const tray = el("div", "tray");
   const button = (label, iconId, onClick) => {
     const b = el("button");
@@ -1128,7 +1310,10 @@ function messageActions(item, mine) {
       acts.append(picker);
     }
   }
-  if (item.text.trim() !== "") button("Reply", "i-reply", () => addQuote(item.text));
+  if (item.text.trim() !== "") button("Reply", "i-reply", () => {
+    addQuote(item.text);
+    if (state.tapped !== null) { state.tapped = null; renderChat(); }
+  });
   acts.prepend(tray);
   return acts;
 }
@@ -1198,18 +1383,19 @@ function renderQuickReplies() {
 renderQuickReplies();
 
 // The floating bar sits above the selection once the mouse is up, or below it when there is no room above, and
-// stays inside the window.
+// stays inside the window. A touch screen puts its own Copy menu above the selection and the selection's handles
+// just under it, so there the bar goes below those.
 let selecting = false;
 function placeQuoteBar() {
   const picked = selecting ? null : selectedQuote();
   const bar = $("quote-bar");
   bar.hidden = !picked;
   if (picked) {
-    const { offsetWidth: width, offsetHeight: height } = bar, gap = 6, margin = 8;
+    const { offsetWidth: width, offsetHeight: height } = bar, gap = touch.matches ? 28 : 6, margin = 8;
     const center = picked.rect.left + picked.rect.width / 2;
     bar.style.left = Math.max(margin, Math.min(window.innerWidth - width - margin, center - width / 2)) + "px";
     const above = picked.rect.top - height - gap;
-    bar.style.top = (above >= margin ? above : picked.rect.bottom + gap) + "px";
+    bar.style.top = (above >= margin && !touch.matches ? above : picked.rect.bottom + gap) + "px";
   }
 }
 document.addEventListener("selectionchange", placeQuoteBar);
@@ -1228,9 +1414,16 @@ document.addEventListener("keydown", (event) => {
     renderChat();
   }
 });
-// A click anywhere but a toolbar closes the reaction picker.
+// A click anywhere but a toolbar closes the reaction picker. On a touch screen, where nothing hovers, a tap on a
+// message opens its toolbar, and a tap on it again or anywhere else closes it.
 document.addEventListener("click", (event) => {
-  if (state.picking !== null && !event.target.closest(".acts")) { state.picking = null; renderChat(); }
+  if (event.target.closest(".acts")) return;
+  const message = touch.matches && !event.target.closest("a, button") ? event.target.closest("#msgs [data-key]") : null;
+  const tapped = message && message.dataset.key !== state.tapped ? message.dataset.key : null;
+  if (state.picking === null && tapped === state.tapped) return;
+  state.picking = null;
+  state.tapped = tapped;
+  renderChat();
 });
 
 // renderChat rebuilds the messages, which drops the selection; these keep it as text offsets in its message.
@@ -1283,10 +1476,11 @@ function approvalWord(a) {
 }
 
 function approvalCard(a) {
+  const version = a.status + JSON.stringify(a.details);
   const cached = cards.get(a.id);
-  if (cached && cached.status === a.status) return cached.node;
+  if (cached && cached.version === version) return cached.node;
   const node = a.status === "waiting" || a.status === "running" ? waitingCard(a) : receipt(a);
-  cards.set(a.id, { node, status: a.status });
+  cards.set(a.id, { node, version });
   return node;
 }
 
@@ -1304,7 +1498,7 @@ async function decide(a, action, edit, buttons) {
 
 function waitingCard(a) {
   const running = a.status === "running";
-  const destructive = !a.email && DESTRUCTIVE.test(a.path.split(".").pop());
+  const destructive = !a.email && (DESTRUCTIVE.test(a.path.split(".").pop()) || a.input?.trash === true);
   const card = el("article", "card" + (destructive ? " delete" : ""));
   card.setAttribute("aria-label", a.title + ", waiting for your approval");
   const head = el("header");
@@ -1350,6 +1544,15 @@ function waitingCard(a) {
     if (a.summary) action.append(el("div", "summary", a.summary));
     action.append(el("div", "path", a.path.replace(/^tools\./, "")));
     card.append(action);
+    if (a.details.length > 0) {
+      const fields = el("div", "fields call");
+      for (const { label, value } of a.details) {
+        const row = el("div", "row");
+        row.append(el("span", "", label), el("span", "", value));
+        fields.append(row);
+      }
+      card.append(fields);
+    }
     const key = "ap:" + a.id;
     if (state.open.has(key)) card.append(el("pre", "result", JSON.stringify(a.input, null, 2)));
   }
@@ -1377,7 +1580,8 @@ function receipt(a) {
   const ok = a.status === "done", bad = a.status === "failed";
   const line = el("div", "receipt" + (ok ? " ok" : bad ? " bad" : ""));
   const to = a.email ? a.email.to || "the original sender" : "";
-  const what = a.email ? `${a.title} to ${to}` : a.summary ? `${a.title}: ${a.summary}` : a.title;
+  const said = a.summary || a.details.map((d) => `${d.label}: ${d.value.replace(/\n/g, ", ")}`).join("; ").slice(0, 200);
+  const what = a.email ? `${a.title} to ${to}` : said ? `${a.title}: ${said}` : a.title;
   const when = a.decidedAt ? ` at ${time(a.decidedAt)}` : "";
   if (ok) line.append(el("b", "", a.email ? "✓ Sent" : "✓ Done"), (a.email ? ` to ${to}` : ` ${what}`) + when + (a.edited ? ", with your edits" : ""));
   else if (bad) line.append(el("b", "", "Failed"), ` ${what}: ${(a.outcome || "").split("\n")[0].slice(0, 160)}`);
@@ -1396,7 +1600,7 @@ function receipt(a) {
 
 function renderChat() {
   const box = $("msgs");
-  const nearBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 80;
+  const nearBottom = chatAtEnd();
   // Re-rendering detaches the card being typed in; put focus and the caret back afterwards.
   const active = box.contains(document.activeElement) ? document.activeElement : null;
   const caret = active && typeof active.selectionStart === "number" ? [active.selectionStart, active.selectionEnd] : null;
@@ -1419,7 +1623,7 @@ function renderChat() {
     const empty = el("div", "empty");
     empty.append(el("b", "", "Ask " + bot.name + " anything"));
     const about = bot.instructions.split("\n").find((line) => line.trim() !== "" && !line.trimStart().startsWith("#"));
-    empty.append(bot.main ? "It can use the computer on the right, check your mail and calendar, email you, run routines on a schedule, and hand work to your other bots."
+    empty.append(bot.main ? "It can use the computer" + (phone.matches ? "" : " on the right") + ", check your mail and calendar, email you, run routines on a schedule, and hand work to your other bots."
       : about || "It has the same tools as your other bots. Tell it what it's for, or give it standing instructions with the pencil next to its name.");
     box.append(empty);
   }
@@ -1603,8 +1807,9 @@ function renderLive() {
   label.className = "state" + (live.retry ? " bad" : driving ? " drive" : live.busy ? " busy" : "");
   label.textContent = live.retry ? `Retrying after an error: ${live.retry.error}` : driving ? "Using the computer" : live.busy ? (live.partial ? "Replying" : "Working") : "";
   $("stop").hidden = !live.busy;
-  // The pane shows only the default Space, so a task on another Space neither drives this screen nor waits for the owner.
-  const onScreen = driving && task.space === state.computer.space;
+  // The pane shows only the default Space, so a task on another Space neither drives this screen nor waits for the
+  // owner. `view.driving` covers every bot's task there; the open bot's own task also counts while it is starting.
+  const onScreen = view.driving || (driving && task.space === state.computer.space);
   const elsewhere = driving && !onScreen ? task.space : undefined;
   // While the owner has control, a running computer task waits for them instead of driving.
   const botDriving = onScreen && !view.owner;
@@ -1613,6 +1818,8 @@ function renderLive() {
   space.textContent = view.owner ? "You're in control" : botDriving ? "Bot is driving" : elsewhere ? `Bot is on ${elsewhere}` : "Idle";
   $("screen").classList.toggle("drive", botDriving);
   $("screen").querySelector(".tag").hidden = !botDriving;
+  $("to-computer").classList.toggle("drive", botDriving);
+  $("view-keyboard").hidden = !(view.owner && touch.matches);
   const who = $("view-who");
   who.className = "who" + (view.owner ? " mine" : botDriving ? " drive" : "");
   who.replaceChildren(icon(view.owner ? "i-pointer" : "i-eye"),
@@ -1650,9 +1857,13 @@ function captionScreen() {
 /* ---------- live screen ---------- */
 // GET /api/computer/live (src/live-screen.ts) streams the default Space's screen as H.264 access units, each a
 // 1-byte flag (1 = keyframe), a 4-byte big-endian length, then Annex-B bytes. WebCodecs decodes them onto
-// the pane's canvas. The pane streams only while this tab is visible, and reconnects with backoff after a
+// the pane's canvas. The pane streams only while it is watched (see watching), and reconnects with backoff after a
 // failure. Without WebCodecs, or while the stream is down, the pane stays black.
 const liveScreen = { playing: false, abort: null, retry: null, delay: 2000 };
+
+// Whether the owner can see the live screen: this tab is visible, and the pane is on screen or the expanded view
+// is open. In the phone layout the pane is a screen of its own.
+const watching = () => !document.hidden && ($("screen-view").open || $("screen").getClientRects().length > 0);
 
 // "avc1.PPCCLL" from the SPS (NAL type 7) that leads each keyframe.
 function avcCodec(data) {
@@ -1672,7 +1883,7 @@ function showLive(playing) {
 }
 
 async function playLive() {
-  if (typeof VideoDecoder === "undefined" || document.hidden || liveScreen.abort) return;
+  if (typeof VideoDecoder === "undefined" || !watching() || liveScreen.abort) return;
   clearTimeout(liveScreen.retry);
   const abort = new AbortController();
   liveScreen.abort = abort;
@@ -1719,21 +1930,25 @@ async function playLive() {
   if (decoder.state !== "closed") decoder.close();
   if (liveScreen.abort === abort) liveScreen.abort = null;
   showLive(false);
-  if (!document.hidden) {
+  if (watching()) {
     liveScreen.retry = setTimeout(playLive, liveScreen.delay);
     liveScreen.delay = Math.min(liveScreen.delay * 2, 30000);
   }
 }
 
-// The stream stays up in a hidden tab while the owner has control: the server hands control back to the bots
-// once no pane watches.
-document.addEventListener("visibilitychange", () => {
-  if (document.hidden) { if (!view.owner) { clearTimeout(liveScreen.retry); liveScreen.abort?.abort(); } }
-  else { liveScreen.delay = 2000; playLive(); }
-});
+// Starts the stream when the live screen comes into view and stops it when it leaves: the tab hides or shows, the
+// window turns into or out of the phone layout, or showView changes screens. The stream stays up out of
+// view while the owner has control: the server hands control back to the bots once no pane watches.
+function syncLive() {
+  if (watching()) { liveScreen.delay = 2000; playLive(); }
+  else if (!view.owner) { clearTimeout(liveScreen.retry); liveScreen.abort?.abort(); }
+}
+document.addEventListener("visibilitychange", syncLive);
+phone.addEventListener("change", syncLive);
 
 /* ---------- expanded live screen ---------- */
-// Clicking the pane's live screen moves its canvas into a full-window view. There the owner can take control
+// Clicking the pane's live screen moves its canvas into a full-window view, and takes control at once if no bot is
+// driving and the `controlOnExpand` setting is on. Otherwise the owner takes control there
 // (POST /api/computer/control): the bots' on-screen steps wait while the owner's mouse and keyboard reach the
 // Space over the live session (POST /api/computer/input). "I'm done", or closing the view, hands it back.
 // Keys map as in cua-spacesd's own viewer: text comes from a focused, hidden textarea, so keyboard layouts,
@@ -1760,11 +1975,12 @@ async function setControl(owner) {
   finally { $("view-control").disabled = false; }
 }
 
-// Also run for the event stream's `control` events, so every tab shows who drives.
+// Also run for the event stream's `control` events, so every tab shows who drives. On a touch screen the keys box
+// takes focus only from the keyboard button (see below), since focus brings up the on-screen keyboard.
 function applyControl(owner) {
   view.owner = owner;
   if (!owner) view.held.clear();
-  if (controlling()) $("view-keys").focus({ preventScroll: true });
+  if (controlling() && !touch.matches) $("view-keys").focus({ preventScroll: true });
   renderLive();
 }
 
@@ -1809,7 +2025,7 @@ function keyInput(event, state) {
   return { ...base, key, modifiers: modifiersOf(event) };
 }
 
-$("screen").addEventListener("click", openScreenView);
+$("screen").addEventListener("click", () => { openScreenView(); if (settings.controlOnExpand && !view.owner && !view.driving) setControl(true); });
 $("take-control").addEventListener("click", () => { openScreenView(); if (!view.owner) setControl(true); });
 $("view-control").addEventListener("click", () => setControl(!view.owner));
 $("view-close").addEventListener("click", () => $("screen-view").close());
@@ -1858,12 +2074,16 @@ keys.addEventListener("compositionend", (event) => {
   keys.value = "";
 });
 keys.addEventListener("blur", releaseKeys);
+// On a touch screen the keys box takes focus only from this button, so the on-screen keyboard comes and goes when
+// the owner asks, not on every tap of the screen. Its mousedown is stopped so the tap leaves focus where it is.
+$("view-keyboard").addEventListener("mousedown", (event) => event.preventDefault());
+$("view-keyboard").addEventListener("click", () => { if (document.activeElement === keys) keys.blur(); else keys.focus({ preventScroll: true }); });
 
 const liveCanvas = $("live-screen");
 liveCanvas.addEventListener("pointerdown", (event) => {
   if (!controlling()) return;
   event.preventDefault();
-  keys.focus({ preventScroll: true });
+  if (!touch.matches) keys.focus({ preventScroll: true });
   liveCanvas.setPointerCapture(event.pointerId);
   sendInput({ kind: "pointer", phase: "down", button: BUTTONS[event.button] ?? "left", ...pointOf(event), modifiers: modifiersOf(event) });
 });
@@ -1928,7 +2148,7 @@ function connect() {
     else if (data.type === "computer") { state.computer = data.computer; renderComputer(); }
     else if (data.type === "approvals") { state.approvals = data.approvals; renderChat(); }
     else if (data.type === "bots") { state.bots = data.bots; renderBots(); refreshBotTags(); }
-    else if (data.type === "control") applyControl(data.owner);
+    else if (data.type === "control") { view.driving = data.driving; applyControl(data.owner); }
   };
 }
 
@@ -1979,18 +2199,36 @@ function renderBots() {
   document.title = bot.main ? "cua-bot" : bot.name + " · cua-bot";
 }
 
-// A bot's row or tile: a click opens its chat, a right-click (or the keyboard's menu key) its menu.
+// A bot's row or tile: a click opens its chat, a right-click (or the keyboard's menu key) its menu. A finger held
+// on it for half a second opens the menu too, since iOS sends no contextmenu for a long press. `longPress` is that
+// wait, and `longPressed` says it ran, so the click that lifting the finger sends doesn't also open the chat.
+let longPress = null, longPressed = false;
 function botButton(bot, className) {
   const button = el("button", className);
   button.type = "button";
   button.setAttribute("aria-current", String(bot.id === state.bot));
   button.setAttribute("aria-haspopup", "menu");
-  button.addEventListener("click", () => selectBot(bot.id));
+  button.addEventListener("click", () => { if (!longPressed) openChat(bot.id); });
   button.addEventListener("contextmenu", (event) => {
     event.preventDefault();
+    clearTimeout(longPress);
     openBotMenu(bot, event, button);
   });
+  button.addEventListener("pointerdown", (event) => {
+    longPressed = false;
+    if (event.pointerType === "touch") longPress = setTimeout(() => { longPressed = true; openBotMenu(bot, event, button); }, 500);
+  });
   return button;
+}
+// Lifting the finger, or the list starting to scroll under it, ends the wait. The list redraws often, so these
+// listen on the document, not on a button that may be gone.
+for (const type of ["pointerup", "pointercancel"]) document.addEventListener(type, () => clearTimeout(longPress));
+
+// Opens a bot's chat from the bot list. On a phone the list is a screen of its own, so this is a step Back undoes.
+function openChat(id) {
+  const fromList = place.pane === "list";
+  if (fromList) showView("chat", place.tab);
+  return selectBot(id, fromList);
 }
 
 // The bot menu sits at the pointer, or under the button when the keyboard opened it. It closes on a pick, Escape,
@@ -2034,23 +2272,24 @@ document.addEventListener("pointerdown", (event) => { if (botMenu && !botMenu.me
 for (const type of ["resize", "blur"]) window.addEventListener(type, () => closeBotMenu(false));
 document.addEventListener("scroll", () => closeBotMenu(false), true);
 
-// Opens a bot's chat: its history, its computer pane, and a fresh event stream. The choice is kept in the URL.
-async function selectBot(id) {
+// Opens a bot's chat: its history, its computer pane, and a fresh event stream. The choice is kept in the URL,
+// as a new history entry when `push` is set.
+async function selectBot(id, push = false) {
   if (!state.bots.some((b) => b.id === id)) id = mainId();
   const switched = id !== state.bot;
   state.bot = id;
-  savePlace(false);
+  savePlace(push);
   renderBots();
   if (!switched && source) return;
   if (switched) { restoreDraft(); renderAttachments(); }
-  Object.assign(state, { items: [], ids: new Set(), before: null, live: { busy: false, partial: "", tools: [] }, queued: [], open: new Set(), computer: { steps: [] }, picking: null, reacting: new Map() });
+  Object.assign(state, { items: [], ids: new Set(), before: null, live: { busy: false, partial: "", tools: [] }, queued: [], open: new Set(), computer: { steps: [] }, picking: null, tapped: null, reacting: new Map() });
   showChatError("");
   renderChat();
   renderComputer();
   connect();
   request("GET", "/api/chat/computer?bot=" + id).then((c) => { if (id === state.bot) { state.computer = c; renderComputer(); } }).catch(() => {});
   await loadHistory().catch((error) => showChatError("Could not load the conversation: " + error.message));
-  if (place.view === "chat") focusInput();
+  if (place.view === "chat") focusChat();
 }
 
 // The bot dialog's avatar: `picked` is what it shows and what Save sends; Reset goes back to `pickDefault`,
@@ -2194,7 +2433,7 @@ $("bot-form").addEventListener("submit", async (event) => {
     const bot = editingBot ? await request("PUT", "/api/bots/" + editingBot.id, payload) : await request("POST", "/api/bots", payload);
     $("bot-dialog").close();
     await loadBots();
-    if (!editingBot) await selectBot(bot.id);
+    if (!editingBot) await openChat(bot.id);
   } catch (error) { $("b-error").textContent = error.message; }
   finally { $("b-save").disabled = false; }
 });
@@ -2304,8 +2543,9 @@ $("composer").addEventListener("submit", async (event) => {
     renderAttachments();
   }
 });
+// Enter sends. On a touch keyboard, which has no Shift+Enter, it starts a new line and the send button sends.
 $("input").addEventListener("keydown", (event) => {
-  if (event.key === "Enter" && !event.shiftKey && !event.isComposing) { event.preventDefault(); $("composer").requestSubmit(); }
+  if (event.key === "Enter" && !event.shiftKey && !event.isComposing && !touch.matches) { event.preventDefault(); $("composer").requestSubmit(); }
 });
 $("stop").addEventListener("click", async () => {
   $("stop").disabled = true;
@@ -2330,6 +2570,12 @@ function showNotifyState() {
   button.textContent = permission === "granted" ? "Notifications on" : permission === "denied" ? "Notifications blocked" : "Turn on notifications";
   button.title = permission === "denied" ? "Allow notifications for this site in the browser's site settings, then reload"
     : "Get a browser notification when the bot pings you or needs an approval, even with this tab closed";
+  // The phone layout has no room for the button's words, so a bell in the bot list stands in until notifications are on.
+  const bell = $("notify-bell");
+  bell.hidden = !pushSupported || permission === "granted";
+  bell.disabled = button.disabled;
+  bell.title = button.title;
+  bell.setAttribute("aria-label", button.textContent);
 }
 const fromBase64url = (text) => Uint8Array.from(atob(text.replace(/-/g, "+").replace(/_/g, "/")), (c) => c.charCodeAt(0));
 // Subscribes this browser with the bot's current key (re-subscribing if the key changed) and saves it on the bot.
@@ -2346,7 +2592,7 @@ async function subscribePush() {
   await request("POST", "/api/push", subscription.toJSON());
 }
 const turnOnPush = () => subscribePush().catch((error) => showChatError("Could not turn on notifications: " + error.message));
-$("notify").addEventListener("click", async () => {
+for (const id of ["notify", "notify-bell"]) $(id).addEventListener("click", async () => {
   if (await Notification.requestPermission() === "granted") await turnOnPush();
   showNotifyState();
 });
@@ -2360,13 +2606,16 @@ if (pushSupported) navigator.serviceWorker.addEventListener("message", (event) =
 // The URL's hash keeps the owner's place, so a reload, Back, or a copied link lands there again: `view` (routines,
 // memory, settings; the chat when absent), `tab` (Settings' model, connections, startup or tags; its chat tab when absent), `tag` (the
 // memory tag open in Memory; Every bot when absent), and `bot` (the open bot; the main bot when absent). #bot=<id> links from before views had URLs still open that bot's chat.
-const VIEWS = ["chat", "routines", "memory", "settings"], TABS = ["chat", "model", "connections", "startup", "tags"];
-let place = { view: "chat", tab: "chat" };
+// `pane` is which of a view's screens the phone layout shows (see its styles): the detail when absent, or `list`
+// or `computer`. A wide window shows them side by side and never writes it.
+const VIEWS = ["chat", "routines", "memory", "settings"], TABS = ["chat", "model", "approvals", "connections", "startup", "tags"];
+const PANES = ["detail", "list", "computer"];
+let place = { view: "chat", tab: "chat", pane: "detail" };
 
 function readPlace() {
   const hash = new URLSearchParams(location.hash.slice(1));
   const pick = (key, names) => (names.includes(hash.get(key)) ? hash.get(key) : names[0]);
-  return { view: pick("view", VIEWS), tab: pick("tab", TABS), bot: Number(hash.get("bot")) || undefined, tag: hash.get("tag") ?? EVERY_BOT };
+  return { view: pick("view", VIEWS), tab: pick("tab", TABS), pane: pick("pane", PANES), bot: Number(hash.get("bot")) || undefined, tag: hash.get("tag") ?? EVERY_BOT };
 }
 
 // A new view or tab is a new history entry, so Back returns to the last one; a bot switch replaces the entry.
@@ -2375,16 +2624,25 @@ function savePlace(push) {
   if (place.view !== "chat") hash.set("view", place.view);
   if (place.view === "settings" && place.tab !== "chat") hash.set("tab", place.tab);
   if (place.view === "memory" && memoryView.tag !== EVERY_BOT) hash.set("tag", memoryView.tag);
+  if (place.pane !== "detail") hash.set("pane", place.pane);
   if (state.bot !== null && state.bot !== mainId()) hash.set("bot", state.bot);
   const next = hash.size > 0 ? "#" + hash : "";
   if (next === location.hash) return;
   history[push ? "pushState" : "replaceState"](null, "", next || location.pathname + location.search);
 }
 
-function showView(view, tab = place.tab) {
-  place = { view, tab };
+// Shows a view, a Settings tab, and in the phone layout one of the view's screens. A chat that left the screen at
+// its newest message comes back at its newest, past whatever arrived meanwhile; `chatLeftAtEnd` remembers that.
+let chatLeftAtEnd = true;
+function showView(view, tab = place.tab, pane = "detail") {
+  const box = $("msgs");
+  if (box.getClientRects().length > 0) chatLeftAtEnd = chatAtEnd();
+  place = { view, tab, pane };
+  Object.assign($("app").dataset, { view, pane });
   document.querySelectorAll(".rail button[data-view]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.view === view)));
   for (const name of VIEWS) $("view-" + name).hidden = view !== name;
+  if (chatLeftAtEnd) box.scrollTop = box.scrollHeight;
+  syncLive();
   document.querySelectorAll("#settings-tabs button[data-tab]").forEach((b) => b.setAttribute("aria-current", b.dataset.tab === tab ? "page" : "false"));
   for (const name of TABS) $("tab-" + name).hidden = tab !== name;
 }
@@ -2394,23 +2652,40 @@ function loadView() {
   if (place.view === "routines") loadRoutines();
   else if (place.view === "memory") loadMemory();
   else if (place.view === "settings" && place.tab === "model") loadModelSettings();
+  else if (place.view === "settings" && place.tab === "approvals") loadApprovalSettings();
   else if (place.view === "settings" && place.tab === "connections") loadConnections();
   else if (place.view === "settings" && place.tab === "startup") loadAutostart();
   else if (place.view === "settings" && place.tab === "tags") loadTags();
-  else if (place.view === "chat") focusInput();
+  else if (place.view === "chat") focusChat();
 }
 
-function goTo(view, tab) {
-  showView(view, tab);
+function goTo(view, tab, pane) {
+  showView(view, tab, pane);
   savePlace(true);
   loadView();
 }
-document.querySelectorAll(".rail button[data-view]").forEach((button) => button.addEventListener("click", () => goTo(button.dataset.view)));
+// On a phone a section opens at its list. Routines has none.
+document.querySelectorAll(".rail button[data-view]").forEach((button) => button.addEventListener("click", () =>
+  goTo(button.dataset.view, undefined, phone.matches && button.dataset.view !== "routines" ? "list" : "detail")));
 document.querySelectorAll("#settings-tabs button[data-tab]").forEach((button) => button.addEventListener("click", () => goTo("settings", button.dataset.tab)));
+// The phone layout's Back arrows, one at the head of every screen a list opens, and of the computer's, which the
+// chat's Computer button opens. Wide windows hide them all.
+function backArrow(bar, pane, label) {
+  const button = el("button", "back");
+  button.type = "button";
+  button.title = label;
+  button.setAttribute("aria-label", label);
+  button.append(icon("i-back"));
+  button.addEventListener("click", () => goTo(place.view, place.tab, pane));
+  bar.prepend(button);
+}
+for (const bar of document.querySelectorAll(".chatcol > .bar, .pane > .bar")) backArrow(bar, "list", "Back to " + bar.closest(".view").querySelector(".botlist h2").textContent);
+backArrow(document.querySelector(".side > .bar"), "detail", "Back to the chat");
+$("to-computer").addEventListener("click", () => goTo("chat", place.tab, "computer"));
 window.addEventListener("popstate", () => {
   const next = readPlace();
   memoryView.tag = next.tag;
-  showView(next.view, next.tab);
+  showView(next.view, next.tab, next.pane);
   selectBot(next.bot ?? mainId());
   loadView();
 });
@@ -2451,6 +2726,21 @@ for (const { input, key, parse, join } of quickFields) {
   });
   input.addEventListener("change", () => { input.value = settings[key].join(join); });
 }
+
+/* ---------- approval settings ---------- */
+// The server decides whether a call needs a card (src/executor.ts), so this toggle reads and writes /api/approvals/settings.
+function showApprovalsError(message) { $("approvals-error").textContent = message; $("approvals-error").hidden = !message; }
+function showApprovalSettings({ autoLabels }) { $("set-auto-labels").checked = autoLabels; $("set-auto-labels").disabled = false; }
+async function loadApprovalSettings() {
+  try { showApprovalSettings(await request("GET", "/api/approvals/settings")); showApprovalsError(""); }
+  catch (error) { showApprovalsError("Could not read the approval settings: " + error.message); }
+}
+$("set-auto-labels").addEventListener("change", async () => {
+  const input = $("set-auto-labels"), wanted = input.checked;
+  input.disabled = true;
+  try { showApprovalSettings(await request("PUT", "/api/approvals/settings", { autoLabels: wanted })); showApprovalsError(""); }
+  catch (error) { input.checked = !wanted; input.disabled = false; showApprovalsError("Could not change it: " + error.message); }
+});
 
 /* ---------- startup ---------- */
 // Start at sign-in lives on the bot's computer (src/autostart.ts), not in this browser, so the toggle reads and
@@ -2631,10 +2921,13 @@ async function loadMemory() {
   } catch (error) { showMemoryError(error.message); }
 }
 
+// Opens a tag from the sidebar. On a phone the sidebar is a screen of its own, so this is a step Back undoes.
 function openMemory(tag) {
   memoryView.tag = tag;
   $("memory-search").value = "";
-  savePlace(false);
+  const fromList = place.pane === "list";
+  if (fromList) showView("memory", place.tab);
+  savePlace(fromList);
   renderMemory();
 }
 
@@ -2975,7 +3268,9 @@ function renderRoutines() {
     const when = el("td", "", r.label); when.title = r.cron;
     const next = el("td", "", relative(r.nextFire)); next.title = shortDate(r.nextFire);
     const last = el("td", "", r.lastFiredAt ? shortDate(r.lastFiredAt) : "Never");
-    const acts = el("td", "acts");
+    // The phone layout's cards have no column headings, so these two cells carry theirs.
+    next.dataset.label = "Next"; last.dataset.label = "Last ran";
+    const acts = el("td", "row-acts");
     for (const [label, action, cls] of [["Run now", "run", ""], ["Edit", "edit", ""], ["Delete", "delete", " danger"]]) {
       const b = el("button", "btn" + cls, label);
       b.type = "button"; b.dataset.action = action; b.dataset.id = r.id;
@@ -3053,15 +3348,16 @@ $("routine-form").addEventListener("submit", async (event) => {
 
 /* ---------- start ---------- */
 const start = readPlace();
+// A phone opens on the bot list, unless the link names a place.
+if (phone.matches && location.hash === "") start.pane = "list";
 memoryView.tag = start.tag;
-showView(start.view, start.tab);
+showView(start.view, start.tab, start.pane);
 loadBots().then(() => { selectBot(start.bot ?? mainId()); loadView(); });
-playLive();
 loadApprovals();
 showNotifyState();
 if (pushSupported && Notification.permission === "granted") turnOnPush();
 setInterval(() => { if (!$("view-routines").hidden) loadRoutines(); }, 30000);
-if (start.view === "chat") focusInput();
+if (start.view === "chat") focusChat();
 </script>
 </body>
 </html>

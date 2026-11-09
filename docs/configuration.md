@@ -62,6 +62,7 @@ Copy `.env.example` to `.env`.
 | `CUA_MCP_COMMAND` | no | The `cua` CLI to run `cua mcp` with. Defaults to the Cua Spaces app's bundled `cua.exe` on Windows, else `cua` on PATH. |
 | `CUABOT_MODEL` | no | `"provider/model"`, overriding `default` in `models.json`. |
 | `CUABOT_REASONING` | no | The bots' reasoning effort: `off`, `minimal`, `low`, `medium`, `high`, `xhigh` or `max`. Defaults to `medium`. A model that doesn't support the effort uses its nearest one. |
+| `CUABOT_AUTO_APPROVE_GMAIL_LABELS` | no | `on` lets bots add or remove your own Gmail labels without an approval card. Defaults to off. Settings > Approvals changes it. |
 | `CUABOT_PORT` | no | HTTP port. Defaults to `43142`. The server listens on `127.0.0.1` only. |
 | `CUABOT_ALLOWED_HOSTS` | no | Comma-separated host names of HTTPS proxies in front of the web portal. See [Open it from your phone](web-portal.md#open-it-from-your-phone). |
 

@@ -7,7 +7,7 @@ import type { ModelThinkingLevel } from "@earendil-works/pi-ai";
 import { clampThinkingLevel, getSupportedThinkingLevels, type Models } from "@earendil-works/pi-ai/models";
 import { botModel, botThinking, ModelsConfigError, parseThinkingLevel } from "./models.ts";
 
-const ENV_FILE = join(import.meta.dirname, "..", ".env");
+export const ENV_FILE = join(import.meta.dirname, "..", ".env");
 
 export type ModelSettings = ReturnType<typeof createModelSettings>;
 

@@ -297,7 +297,7 @@ export const screenControl = createScreenControl();
 // Bots that share a Space share its screen, so computer_use runs one task at a time on each Space.
 const screens = new Map<string, Promise<unknown>>();
 function onScreen<T>(id: string, work: () => Promise<T>): Promise<T> {
-	const run = (screens.get(id) ?? Promise.resolve()).then(work);
+	const run = (screens.get(id) ?? Promise.resolve()).then(() => (id === defaultSpaceId() ? screenControl.drive(work) : work()));
 	screens.set(id, run.catch(() => undefined));
 	return run;
 }

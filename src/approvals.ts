@@ -3,16 +3,31 @@
 // under the bot's reply; the owner's click calls approve() or discard(), which runs (or drops) the
 // Executor call from here, never from the model, and then tells the bot the outcome through notify.
 // Requests live in data/approvals.json, so a waiting card survives a restart. main.ts builds one store.
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { readFile, rename, writeFile } from "node:fs/promises";
 import type { CallToolResult } from "@earendil-works/pi-mcp";
 import { type EmailView, readRaw, writeRaw } from "./mime.ts";
+import { ENV_FILE, withEnvValues } from "./model-settings.ts";
 
 const EXPIRES_MS = 7 * 24 * 60 * 60 * 1000;
-/** Executor's id for a call it holds until someone approves it. */
-export const PAUSED = /\bapr_[A-Za-z0-9_-]+/;
 const KEEP_DECIDED = 200;
 
 export type ExecutorCall = (name: string, args: Record<string, unknown>) => Promise<CallToolResult>;
+
+// Executor's answer as JSON: `approval-required` with a requestId, `unavailable` with a reason, `completed`, and so on.
+function statusOf(text: string): { status?: string; requestId?: string; reason?: string } {
+	try {
+		return (JSON.parse(text) as { status?: string; requestId?: string; reason?: string } | null) ?? {};
+	} catch {
+		return {};
+	}
+}
+
+/** The id of the request when this answer says Executor is holding the call for approval; undefined for any other answer. */
+export function heldRequest(text: string): string | undefined {
+	const { status, requestId } = statusOf(text);
+	return status === "approval-required" ? requestId : undefined;
+}
 
 /**
  * Accepts Executor's own holds on `result`, up to three in a row, and returns the last answer, which may still be
@@ -21,7 +36,7 @@ export type ExecutorCall = (name: string, args: Record<string, unknown>) => Prom
 export async function acceptHolds(call: ExecutorCall, result: CallToolResult) {
 	let answer = textOf(result);
 	for (let hop = 0; hop < 3; hop++) {
-		const held = PAUSED.exec(answer)?.[0];
+		const held = heldRequest(answer);
 		if (held === undefined) break;
 		result = await call("resume", { requestId: held, response: { action: "accept" } });
 		answer = textOf(result);
@@ -39,9 +54,11 @@ export type Approval = {
 	path: string;
 	input: unknown;
 	title: string;
-	/** The bot's one-line description, for actions other than email. */
+	/** The bot's one-line description, for actions other than email. Optional, so the card can't depend on it; see ApprovalView.details. */
 	summary?: string;
 	email?: EmailView;
+	/** The emails a Gmail thread change touches, in the order of its threadIds. Filled in shortly after filing. */
+	threads?: ThreadView[];
 	/** Set when Executor itself paused the call; approving resumes it. */
 	pausedRequestId?: string;
 	status: "waiting" | "running" | "done" | "failed" | "discarded" | "expired";
@@ -52,9 +69,59 @@ export type Approval = {
 	outcome?: string;
 };
 
+export type ThreadView = { subject: string; from: string };
+export type Detail = { label: string; value: string };
+/** An approval as the portal receives it: `details` are the rows a card shows for anything other than an email. */
+export type ApprovalView = Approval & { details: Detail[] };
+
 export type EmailEdit = { to: string; subject: string; body: string };
 
 export class ApprovalError extends Error {}
+
+// Settings > Approvals; "on" lets a bot change the owner's own Gmail labels without a card. Off when unset.
+const AUTO_LABELS = "CUABOT_AUTO_APPROVE_GMAIL_LABELS";
+const GMAIL_MODIFY = "tools.google.gmail.modify";
+const GMAIL_READ_THREAD = "tools.google.gmail.readThread";
+// Which account runs the call, and transport details, say nothing about what it does.
+const NOT_SHOWN = new Set(["account", "accountId", "userId", "contentType"]);
+// Executor's API tools nest their fields under these; a row reads better without them.
+const WRAPPERS = new Set(["input", "path", "query", "body"]);
+
+// A tool's input as label and value rows, e.g. { addLabels: ["Work"] } → "Add labels": "Work". Works for any tool.
+function inputDetails(value: unknown, label = ""): Detail[] {
+	if (value === null || value === undefined || value === "") return [];
+	if (Array.isArray(value)) {
+		return value.every((item) => typeof item !== "object") ? inputDetails(value.join(", "), label) : value.flatMap((item) => inputDetails(item, label));
+	}
+	if (typeof value === "object") {
+		return Object.entries(value).flatMap(([key, child]) => {
+			if (NOT_SHOWN.has(key)) return [];
+			const words = key.replace(/[A-Z]/g, (letter) => ` ${letter.toLowerCase()}`);
+			return inputDetails(child, WRAPPERS.has(key) && typeof child === "object" ? label : `${label} ${words}`.trim());
+		});
+	}
+	return [{ label: label.charAt(0).toUpperCase() + label.slice(1), value: typeof value === "boolean" ? (value ? "Yes" : "No") : String(value) }];
+}
+
+// The rows on a card, read from the call itself, with thread ids swapped for the emails once they are known.
+function detailsOf(approval: Approval): Detail[] {
+	if (approval.email !== undefined) return [];
+	const { threads } = approval;
+	return inputDetails(approval.input).map((detail) =>
+		detail.label === "Thread ids" && threads !== undefined ? { label: "Emails", value: threads.map((thread) => `${thread.subject}, from ${thread.from}`).join("\n") } : detail,
+	);
+}
+
+const view = (approval: Approval): ApprovalView => ({ ...approval, details: detailsOf(approval) });
+
+// Reads a thread's first message through Executor. Throws when the answer has no message.
+async function readThread(call: ExecutorCall, account: string | null | undefined, threadId: string): Promise<ThreadView> {
+	const result = await call("call", { calls: { path: GMAIL_READ_THREAD, input: { ...(account == null ? {} : { account }), threadId } } });
+	const answer = JSON.parse(textOf(result)) as { execution?: { value?: { value?: { messages?: { subject?: string; from?: string }[] } } } };
+	const first = answer.execution?.value?.value?.messages?.[0];
+	if (first === undefined) throw new Error(`No messages in thread ${threadId}`);
+	return { subject: first.subject || "(no subject)", from: first.from || "unknown sender" };
+}
 
 // gmailUsersMessagesTrash → "Trash gmail messages", calendar.events.delete → "Delete calendar events".
 export function titleFor(path: string): string {
@@ -150,21 +217,27 @@ function readable(text: string): string {
 }
 
 const textOf = (result: CallToolResult) => result.content.flatMap((part) => (part.type === "text" ? [part.text] : [])).join("\n");
-const failed = (result: CallToolResult, text: string) => result.isError === true || /"ok"\s*:\s*false/.test(text);
+const failed = (result: CallToolResult, text: string) => result.isError === true || /"ok"\s*:\s*false/.test(text) || statusOf(text).status === "unavailable";
 const clip = (text: string, max: number) => (text.length > max ? `${text.slice(0, max)}…` : text);
 
 /** One line for a request, e.g. `Send email to a@b.c: "Lunch"`. Used in messages to the bot and in push notifications. */
 export function describeApproval(approval: Approval): string {
 	const email = approval.email;
 	if (email !== undefined) return `${approval.title} to ${email.to || "the original sender"}: "${email.subject || "Re: the original subject"}"`;
-	return approval.summary === undefined ? approval.title : `${approval.title}: ${approval.summary}`;
+	if (approval.summary !== undefined) return `${approval.title}: ${approval.summary}`;
+	// The call only, never approval.threads: this text reaches the bot, and outside parties write email subjects.
+	const details = inputDetails(approval.input)
+		.map((detail) => `${detail.label}: ${detail.value}`)
+		.join("; ");
+	return details === "" ? approval.title : `${approval.title}: ${clip(details, 200)}`;
 }
 
 export type Approvals = ReturnType<typeof createApprovals>;
 
-/** `filed` hears of each new request after it is saved; main.ts pushes a notification for it. */
+/** `filed` hears of each new request after it is saved; main.ts pushes a notification for it. `envFile` is for tests. */
 export function createApprovals(options: {
 	file: string;
+	envFile?: string;
 	call: ExecutorCall;
 	/** Tells the bot that filed the request; `conversationId` is undefined for the main bot's older cards. */
 	notify: (text: string, conversationId: number | undefined) => Promise<unknown>;
@@ -172,7 +245,7 @@ export function createApprovals(options: {
 	now?: () => number;
 }) {
 	const now = options.now ?? Date.now;
-	const listeners = new Set<(approvals: Approval[]) => void>();
+	const listeners = new Set<(approvals: ApprovalView[]) => void>();
 	let loaded: Promise<Approval[]> | undefined;
 	let queue = Promise.resolve();
 
@@ -193,7 +266,7 @@ export function createApprovals(options: {
 			all.splice(0, all.length, ...kept);
 			await writeFile(`${options.file}.tmp`, JSON.stringify(all, null, "\t"), "utf8");
 			await rename(`${options.file}.tmp`, options.file);
-			for (const listener of listeners) listener(all.map((a) => ({ ...a })));
+			for (const listener of listeners) listener(all.map(view));
 			return result;
 		});
 		queue = run.then(
@@ -217,12 +290,43 @@ export function createApprovals(options: {
 		return approval;
 	};
 
+	const lookedUp = new Set<string>();
+
+	// Names the emails a waiting Gmail thread change touches, once per card and process so a failure isn't retried on
+	// every read. It runs beside the card, because the card already shows the thread ids and a slow Executor shouldn't delay it.
+	const lookUpThreads = async (approval: Approval) => {
+		if (approval.status !== "waiting" || approval.path !== GMAIL_MODIFY || approval.threads !== undefined || lookedUp.has(approval.id)) return;
+		lookedUp.add(approval.id);
+		try {
+			const { account, threadIds } = approval.input as { account?: string | null; threadIds: string[] };
+			const threads = await Promise.all(threadIds.map((id) => readThread(options.call, account, id)));
+			await change((all) => {
+				const current = all.find((a) => a.id === approval.id);
+				if (current !== undefined) current.threads = threads;
+			});
+		} catch {
+			// The card keeps its thread ids.
+		}
+	};
+
 	return {
+		/** Whether a bot may change the owner's own Gmail labels without a card. */
+		autoLabels: () => process.env[AUTO_LABELS] === "on",
+
+		/** Saves the setting to .env, where a hand edit changes the same line, and applies it to the next call. */
+		setAutoLabels(enabled: boolean) {
+			const envFile = options.envFile ?? ENV_FILE;
+			const value = enabled ? "on" : "off";
+			writeFileSync(envFile, withEnvValues(existsSync(envFile) ? readFileSync(envFile, "utf8") : "", { [AUTO_LABELS]: value }));
+			process.env[AUTO_LABELS] = value;
+		},
+
 		/** Every request, newest last. Waiting ones older than 7 days read as expired. */
-		async list(): Promise<Approval[]> {
+		async list(): Promise<ApprovalView[]> {
 			const all = await load();
 			if (all.some((a) => a.status === "waiting" && now() - a.createdAt > EXPIRES_MS)) await change(expire);
-			return all.map((a) => ({ ...a }));
+			for (const approval of all) void lookUpThreads(approval);
+			return all.map(view);
 		},
 
 		/** File a request for the owner. Called by the executor extension instead of running the call. */
@@ -247,6 +351,7 @@ export function createApprovals(options: {
 				return { ...approval };
 			}).then((approval) => {
 				options.filed?.(approval);
+				void lookUpThreads(approval);
 				return approval;
 			}),
 
@@ -273,14 +378,14 @@ export function createApprovals(options: {
 			let status: Approval["status"];
 			let outcome: string;
 			try {
+				const runCall = () => options.call("call", { calls: { path: started.path, input: started.input } });
+				let first = started.pausedRequestId === undefined ? await runCall() : await options.call("resume", { requestId: started.pausedRequestId, response: { action: "accept" } });
+				// Executor drops a hold after about 15 minutes, but a card waits 7 days. An expired hold never ran, so run the call again.
+				const { status: resumed, reason } = statusOf(textOf(first));
+				if (resumed === "unavailable" && reason === "expired") first = await runCall();
 				// Executor may hold the call for its own approval. The owner's click is that approval.
-				const { result, answer } = await acceptHolds(
-					options.call,
-					started.pausedRequestId === undefined
-						? await options.call("call", { calls: { path: started.path, input: started.input } })
-						: await options.call("resume", { requestId: started.pausedRequestId, response: { action: "accept" } }),
-				);
-				const stillHeld = PAUSED.test(answer);
+				const { result, answer } = await acceptHolds(options.call, first);
+				const stillHeld = heldRequest(answer) !== undefined;
 				status = stillHeld || failed(result, answer) ? "failed" : "done";
 				outcome = stillHeld ? "Executor is still holding it for approval; finish it at executor.sh." : status === "failed" ? readable(answer) : answer;
 			} catch (error) {
@@ -318,7 +423,7 @@ export function createApprovals(options: {
 		},
 
 		/** Receive the full list after every change, until the returned function is called. */
-		subscribe(listener: (approvals: Approval[]) => void) {
+		subscribe(listener: (approvals: ApprovalView[]) => void) {
 			listeners.add(listener);
 			return () => listeners.delete(listener);
 		},
