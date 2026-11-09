@@ -65,6 +65,7 @@ Copy `.env.example` to `.env`.
 | `CUABOT_AUTO_APPROVE_GMAIL_LABELS` | no | `on` lets bots add or remove your own Gmail labels without an approval card. Defaults to off. Settings > Approvals changes it. |
 | `CUABOT_PORT` | no | HTTP port. Defaults to `43142`. The server listens on `127.0.0.1` only. |
 | `CUABOT_ALLOWED_HOSTS` | no | Comma-separated host names of HTTPS proxies in front of the web portal. See [Open it from your phone](web-portal.md#open-it-from-your-phone). |
+| `TYPESAFE_API_KEY` | no | A [TypeSafe AI](https://docs.typesafe.ai/) key. With it, Jev decides which older saved facts and which lines of the receiving bot's `work-log.md` each incoming message brings up, in place of keyword search. Each incoming message, those facts and that work log are then sent to `api.typesafe.ai`. See [Memory](architecture.md#memory). |
 
 ## Gmail and Calendar
 

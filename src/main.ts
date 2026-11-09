@@ -20,6 +20,7 @@ import { createComputerView } from "./computer-view.ts";
 import { type Approvals, createApprovals, describeApproval } from "./approvals.ts";
 import { createAutostart } from "./autostart.ts";
 import { connectExecutor, createExecutor, createExecutorExtension } from "./executor.ts";
+import { createJevRelevance } from "./jev.ts";
 import { DATA_DIR, log } from "./log.ts";
 import { createMachines, ownerHosts, resolveSsh } from "./machines.ts";
 import { createMemory, createMemoryExtension, messageNote, migrateMemory } from "./memory.ts";
@@ -97,8 +98,12 @@ registry.install(machines.extension);
 if (await migrateMemory({ dir: join(DATA_DIR, "memory"), botsDir: DEFAULT_BOTS_DIR, backupDir: join(DATA_DIR, "memory-backup-pre-tags") })) {
 	log(`memory: moved to tags, backup in ${join(DATA_DIR, "memory-backup-pre-tags")}`);
 }
-const memory = createMemory({ dir: join(DATA_DIR, "memory") });
-registry.install(createMemoryExtension({ memory, bots: readBots }));
+// With TYPESAFE_API_KEY set, Jev judges which older facts and which lines of the receiving bot's work log each
+// incoming message brings up; without it, keywords pick the facts and work logs are left to the bots.
+const jev = Boolean(process.env.TYPESAFE_API_KEY?.trim());
+const memory = createMemory({ dir: join(DATA_DIR, "memory"), botsDir: DEFAULT_BOTS_DIR, log, ...(jev ? { relevance: createJevRelevance() } : {}) });
+log(`memory: what a message brings up is picked by ${jev ? "Jev, from older facts and work logs (TYPESAFE_API_KEY)" : "keyword search, from older facts"}`);
+registry.install(createMemoryExtension({ memory, bots: readBots, log }));
 const executorUrl = process.env.EXECUTOR_MCP_URL?.trim();
 const executorKey = process.env.EXECUTOR_API_KEY?.trim();
 let approvals: Approvals | undefined;

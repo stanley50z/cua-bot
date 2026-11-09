@@ -154,6 +154,8 @@ test("an owner message that matches memory reaches the bot with the search resul
 	const store = await mkdtemp(join(tmpdir(), "cua-bot-chat-memory-"));
 	const memory = createMemory({ dir: store });
 	await memory.remember("Plumber comes Tuesday", "log", ["every-bot"]);
+	// Thirty newer log facts fill the bot's memory section, so the plumber is left to the search.
+	for (let i = 1; i <= 30; i++) await memory.remember(`Newer event ${i}`, "log", ["every-bot"]);
 	const requests: string[][] = [];
 	const record = (step: FauxResponseStep): FauxResponseFactory => (request, ...rest) => {
 		requests.push(request.messages.flatMap((message) => (message.role === "user" && typeof message.content === "string" ? [message.content] : [])));

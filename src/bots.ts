@@ -249,7 +249,7 @@ export function botSection(bots: Bot[], self: number): string | undefined {
 	];
 	if (me.instructions !== "") lines.push(`The owner's standing instructions for you, from your agent file ${me.file}:\n${me.instructions}`);
 	lines.push(
-		`Your folder ${me.folder}/ holds your agent file and your routines (routines.json); other bots have theirs. The owner edits them in the web portal.`,
+		`Your folder ${me.folder}/ holds your agent file and your routines (routines.json), which the owner edits in the web portal, and the files you keep for your own work; other bots have theirs.`,
 	);
 	if (others.length === 0) lines.push("There are no other bots yet. When the owner asks for one, make it with create_bot.");
 	else {

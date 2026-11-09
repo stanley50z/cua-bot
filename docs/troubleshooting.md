@@ -17,8 +17,9 @@ Start with `node --env-file-if-exists=.env src/preflight.ts` while the bot is st
 | Path | Contents |
 | --- | --- |
 | `data/cua-bot.sqlite` | Harness database: every bot's transcript, the bot list, sleeping routines and their last-fired times. |
-| `bots/<folder>/` | Each bot's `agent.md` and `routines.json` (only when it has routines). Edit them directly or in the web portal; the bot syncs from them. |
+| `bots/<folder>/` | Each bot's `agent.md` and `routines.json` (only when it has routines). Edit them directly or in the web portal; the bot syncs from them. A bot also keeps the files for its own work here: `work-log.md`, its record of what it did and what you decided, one dated line each, and any lists it tracks. |
 | `data/memory/` | Memory for every bot, each fact tagged with the bots that get it: `profile.md`, `log/YYYY-MM.md`, and your tags in `tags.json`. |
+| `data/memory-backups/` | One dated folder per `change_memory` call, each a full copy of `data/memory/` from just before the main bot changed facts. To restore, stop the bot and copy a folder's contents back over `data/memory/`. Nothing prunes them; delete old ones when you like. |
 | `data/memory-backup-pre-tags/` | A copy of the shared memory and each bot's `memory/` from before tags, made once by the move at startup. Safe to delete once you're happy with the result. |
 | `data/shots/` | Screenshots taken during computer use. |
 | `data/approvals.json` | Waiting approval cards, plus the last 200 decided with Executor's answer. |

@@ -8,7 +8,7 @@
   "scripts": {
     "start": "node --env-file-if-exists=.env src/main.ts",
     "check": "tsc --noEmit",
-    "test": "node --test test/bots.test.ts test/cron.test.ts test/routines.test.ts test/routines-file.test.ts test/web.test.ts test/chat.test.ts test/computer-view.test.ts test/memory.test.ts test/models.test.ts test/model-settings.test.ts test/executor.test.ts test/approvals.test.ts test/today.test.ts test/computer.test.ts test/tool-search.test.ts test/cua-mcp.test.ts test/push.test.ts test/autostart.test.ts test/live-screen.test.ts test/pc.test.ts test/machines.test.ts test/connections.test.ts"
+    "test": "node --test test/bots.test.ts test/cron.test.ts test/routines.test.ts test/routines-file.test.ts test/web.test.ts test/chat.test.ts test/computer-view.test.ts test/memory.test.ts test/models.test.ts test/model-settings.test.ts test/executor.test.ts test/approvals.test.ts test/today.test.ts test/computer.test.ts test/tool-search.test.ts test/cua-mcp.test.ts test/push.test.ts test/autostart.test.ts test/live-screen.test.ts test/pc.test.ts test/machines.test.ts test/connections.test.ts test/jev.test.ts"
   },
   "engines": {
     "node": ">=22.19.0"
@@ -21,6 +21,7 @@
     "@earendil-works/pi-env": "^1.5.0",
     "@earendil-works/pi-mcp": "^1.5.0",
     "@trycua/cua": "^0.9.0",
+    "@typesafe-ai/sdk": "^0.7.0",
     "croner": "^11.0.0",
     "dompurify": "^3.4.17",
     "marked": "^18.1.3",

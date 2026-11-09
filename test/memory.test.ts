@@ -23,6 +23,7 @@ async function withDir(run: (dir: string) => Promise<void>) {
 		await run(dir);
 	} finally {
 		await rm(dir, { recursive: true, force: true });
+		await rm(`${dir}-backups`, { recursive: true, force: true });
 	}
 }
 
@@ -222,34 +223,214 @@ test("a keyword matches the start of a word, a phrase, or inside Chinese text", 
 const scout = { id: 3, name: "Scout" };
 const dev = { id: 5, name: "Dev" };
 
-test("a message searches memory for its keywords, skipping words too common among the bot's facts", () =>
+// Saves 30 log facts for every bot, which pushes the log facts saved before them out of the memory section.
+async function fillRecent(memory: Memory) {
+	for (let i = 1; i <= 30; i++) await memory.remember(`Filler ${i}`, "log", everyBot);
+}
+
+test("a message searches the log facts older than its memory section shows, skipping words too common among the bot's facts", () =>
 	withDir(async (dir) => {
 		const memory = createMemory({ dir, now: () => new Date("2026-10-31T09:00:00") });
-		for (let i = 1; i <= 15; i++) await memory.remember(`Filler ${i}`, "log", everyBot);
-		// 20 facts this bot can see, so a word may be in 2 of them.
-		await memory.remember("Plumber comes Tuesday", "log", everyBot);
+		for (const n of ["comes Tuesday", "called back", "sent a quote"]) await memory.remember(`Plumber ${n}`, "log", everyBot);
 		await memory.remember("Plumber invoice paid", "log", ["@scout"]);
-		for (const n of ["one", "two", "three"]) await memory.remember(`Weekly chore ${n}`, "log", everyBot);
 		await memory.remember("Plumber secret", "log", ["@dev"]);
+		for (const n of ["one", "two", "three", "four", "five"]) await memory.remember(`Weekly chore ${n}`, "log", everyBot);
+		// With these, Scout can see 39 facts, so a word may be in 4 of them.
+		await fillRecent(memory);
 
 		const note = await messageNote(memory, "Any weekly plumber news?", scout.id, [scout, dev]);
-		assert.match(note ?? "", /keywords in the next message \(plumber\)/);
+		assert.match(note ?? "", /^\[search_memory\] Older saved facts, not in your memory section, matching keywords in the next message \(plumber\):\n/);
 		assert.match(note ?? "", /Plumber comes Tuesday \[every-bot\] \(log\)/);
-		assert.match(note ?? "", /Plumber invoice paid \[@scout\] \(log\)/);
-		assert.doesNotMatch(note ?? "", /Weekly chore/, "a word in 3 of 20 facts is not a keyword");
+		assert.match(note ?? "", /Plumber invoice paid \[@scout\] \(log\)/, "a word in 4 of 39 facts is a keyword");
+		assert.doesNotMatch(note ?? "", /Weekly chore/, "a word in 5 of 39 facts is not a keyword");
 		assert.doesNotMatch(note ?? "", /Plumber secret/, "another bot's fact stays hidden");
 		assert.equal(await messageNote(memory, "zebra", scout.id, [scout, dev]), undefined, "no matching fact, no note");
 		assert.equal(await messageNote(memory, "", scout.id, [scout, dev]), undefined);
 	}));
 
+test("a note leaves out the facts the memory section already shows", () =>
+	withDir(async (dir) => {
+		const memory = createMemory({ dir, now: () => new Date("2026-10-31T09:00:00") });
+		await memory.remember("Dana likes orchids", "profile", everyBot);
+		await memory.remember("Orchid show tickets booked", "log", everyBot);
+		await memory.remember("Tulip bulbs ordered", "log", everyBot);
+		for (let i = 1; i <= 27; i++) await memory.remember(`Filler ${i}`, "log", everyBot);
+		await memory.remember("Orchid repotted", "log", everyBot);
+		await memory.remember("Tulip festival is in May", "log", everyBot);
+
+		const section = await memory.render(sees("every-bot"));
+		assert.match(section, /Dana likes orchids/);
+		assert.match(section, /Orchid repotted/);
+		assert.match(section, /Tulip bulbs ordered/, "the 30th newest log fact is the oldest one shown");
+		assert.doesNotMatch(section, /Orchid show tickets booked/);
+		const note = (await messageNote(memory, "any orchid or tulip news?", scout.id, [scout])) ?? "";
+		assert.deepEqual(note.split("\n").slice(1), ["- (2026-10-31) Orchid show tickets booked [every-bot] (log)"], "only the fact the section doesn't show");
+		assert.match(note, /in the next message \(orchid\):\n/, "a word that only finds facts in the section is not a keyword");
+		assert.equal(await messageNote(memory, "any tulip news?", scout.id, [scout]), undefined, "every match is already in the section, so no note");
+		assert.deepEqual((await memory.search(["orchid"], sees("every-bot"))).length, 3, "search_memory still searches everything the bot can see");
+	}));
+
+test("with a relevance judge, a note holds the older facts it scores 0.7 or higher, best first, and keywords play no part", () =>
+	withDir(async (dir) => {
+		const asked: [string, string[]][] = [];
+		const scores: Record<string, number> = { "Orchid show tickets booked": 0.7, "Sink repaired by Joe": 0.95, "Tulip bulbs ordered": 0.69, "Dev secret": 1 };
+		const memory = createMemory({
+			dir,
+			now: () => new Date("2026-10-31T09:00:00"),
+			relevance: async (message, facts) => {
+				asked.push([message, facts]);
+				return facts.map((fact) => scores[fact] ?? 0);
+			},
+		});
+		await memory.remember("Joe is the plumber", "profile", everyBot);
+		for (const fact of ["Orchid show tickets booked", "Sink repaired by Joe", "Tulip bulbs ordered"]) await memory.remember(fact, "log", everyBot);
+		await memory.remember("Dev secret", "log", ["@dev"]);
+		await fillRecent(memory);
+
+		assert.equal(
+			await messageNote(memory, "who can fix a leak?", scout.id, [scout, dev]),
+			"[search_memory] Older saved facts, not in your memory section, that bear on the next message:\n- (2026-10-31) Sink repaired by Joe [every-bot] (log)\n- (2026-10-31) Orchid show tickets booked [every-bot] (log)",
+		);
+		assert.deepEqual(asked, [["who can fix a leak?", ["Orchid show tickets booked", "Sink repaired by Joe", "Tulip bulbs ordered"]]], "the judge gets only this bot's facts that its section doesn't show");
+		assert.equal(await messageNote(memory, "   ", scout.id, [scout, dev]), undefined);
+		assert.equal(asked.length, 1, "an empty message is not judged");
+	}));
+
+test("the relevance judge is not asked when the memory section already shows every fact", () =>
+	withDir(async (dir) => {
+		let asked = 0;
+		const memory = createMemory({
+			dir,
+			now: () => new Date("2026-10-31T09:00:00"),
+			relevance: async (_message, facts) => {
+				asked++;
+				return facts.map(() => 1);
+			},
+		});
+		await memory.remember("Joe is the plumber", "profile", everyBot);
+		await fillRecent(memory);
+		assert.equal(await messageNote(memory, "who is the plumber?", scout.id, [scout]), undefined);
+		assert.equal(asked, 0);
+	}));
+
+test("when the relevance judge fails, the message gets no note, keywords don't step in, and the log says why", () =>
+	withDir(async (dir) => {
+		const logged: string[] = [];
+		const memory = createMemory({
+			dir,
+			now: () => new Date("2026-10-31T09:00:00"),
+			relevance: async () => {
+				throw new Error("offline");
+			},
+			log: (line) => logged.push(line),
+		});
+		await memory.remember("Orchid show tickets booked", "log", everyBot);
+		await fillRecent(memory);
+		assert.equal(await messageNote(memory, "any orchid news?", scout.id, [scout]), undefined);
+		assert.deepEqual(logged, ["memory: no note for this message, the relevance check failed: offline"]);
+	}));
+
+// A relevance judge that answers from `scores` by text, 0 for anything else, and records what it was asked.
+function judgeBy(scores: Record<string, number>) {
+	const asked: [string, string[]][] = [];
+	const relevance = async (message: string, texts: string[]) => {
+		asked.push([message, texts]);
+		return texts.map((text) => scores[text] ?? 0);
+	};
+	return { asked, relevance };
+}
+
+test("with a relevance judge, the lines of a bot's work log that bear on a message come with it, after the facts", () =>
+	withDir(async (root) => {
+		const botsDir = join(root, "bots");
+		await mkdir(join(botsDir, "scout"), { recursive: true });
+		await mkdir(join(botsDir, "dev"), { recursive: true });
+		await writeFile(
+			join(botsDir, "scout", "work-log.md"),
+			"# Work log\n\nRecords of my work.\n\n- (2026-10-30) the owner dropped Hack The Nest; don't resurface\n- (2026-10-31) Alfred relayed a workshop\n-  a line without a date \n- \n-not a record\n\r\n- (2026-11-01) registered for Hacksgiving\r\n",
+		);
+		await writeFile(join(botsDir, "dev", "work-log.md"), "- (2026-10-30) Dev's own record\n");
+		const { asked, relevance } = judgeBy({
+			"Hackathon team is Jacob and Sida": 0.8,
+			"(2026-10-30) the owner dropped Hack The Nest; don't resurface": 0.7,
+			"(2026-10-31) Alfred relayed a workshop": 0.69,
+			"(2026-11-01) registered for Hacksgiving": 0.9,
+			"(2026-10-30) Dev's own record": 1,
+		});
+		const memory = createMemory({ dir: join(root, "memory"), botsDir, now: () => new Date("2026-10-31T09:00:00"), relevance });
+		await memory.remember("Hackathon team is Jacob and Sida", "log", everyBot);
+		await fillRecent(memory);
+
+		assert.equal(
+			await messageNote(memory, "any hackathons coming up?", scout.id, [scout, dev]),
+			[
+				"[search_memory] Older saved facts, not in your memory section, that bear on the next message:",
+				"- (2026-10-31) Hackathon team is Jacob and Sida [every-bot] (log)",
+				"Lines of your work log, work-log.md in your folder, that bear on the next message:",
+				"- (2026-11-01) registered for Hacksgiving",
+				"- (2026-10-30) the owner dropped Hack The Nest; don't resurface",
+			].join("\n"),
+		);
+		assert.deepEqual(
+			asked,
+			[
+				[
+					"any hackathons coming up?",
+					["Hackathon team is Jacob and Sida", "(2026-10-30) the owner dropped Hack The Nest; don't resurface", "(2026-10-31) Alfred relayed a workshop", "a line without a date", "(2026-11-01) registered for Hacksgiving"],
+				],
+			],
+			"one request holds the older facts, then every line of this bot's work log that starts with a dash",
+		);
+	}));
+
+test("a work log is judged even with no older facts, and only for the bot whose folder holds it", () =>
+	withDir(async (root) => {
+		const botsDir = join(root, "bots");
+		await mkdir(join(botsDir, "scout"), { recursive: true });
+		await writeFile(join(botsDir, "scout", "work-log.md"), "- (2026-10-30) the owner dropped Hack The Nest\n");
+		const { asked, relevance } = judgeBy({ "(2026-10-30) the owner dropped Hack The Nest": 1 });
+		const memory = createMemory({ dir: join(root, "memory"), botsDir, relevance });
+		assert.equal(
+			await messageNote(memory, "hack the nest?", scout.id, [scout, dev]),
+			"[search_memory] Lines of your work log, work-log.md in your folder, that bear on the next message:\n- (2026-10-30) the owner dropped Hack The Nest",
+		);
+		assert.equal(await messageNote(memory, "hack the nest?", dev.id, [scout, dev]), undefined, "Dev has no work log");
+		assert.equal(await messageNote(memory, "hack the nest?", 77, [scout, dev]), undefined, "a conversation that isn't a bot has no folder");
+		assert.equal(asked.length, 1, "and neither made a request");
+	}));
+
+test("a judged note holds at most the 20 most likely lines of a work log", () =>
+	withDir(async (root) => {
+		const botsDir = join(root, "bots");
+		await mkdir(join(botsDir, "scout"), { recursive: true });
+		const records = Array.from({ length: 21 }, (_, index) => `(2026-10-30) record ${index}`);
+		await writeFile(join(botsDir, "scout", "work-log.md"), `${records.map((record) => `- ${record}`).join("\n")}\n`);
+		// record 0 is the least likely at 0.75, record 20 the most likely at 0.95.
+		const { relevance } = judgeBy(Object.fromEntries(records.map((record, index) => [record, 0.75 + index / 100])));
+		const memory = createMemory({ dir: join(root, "memory"), botsDir, relevance });
+		const lines = ((await messageNote(memory, "what happened?", scout.id, [scout])) ?? "").split("\n").slice(1);
+		assert.equal(lines.length, 20);
+		assert.equal(lines[0], "- (2026-10-30) record 20");
+		assert.equal(lines[19], "- (2026-10-30) record 1", "record 0 is the one left out");
+	}));
+
+test("without a relevance judge, work logs are left to the bot to read", () =>
+	withDir(async (root) => {
+		const botsDir = join(root, "bots");
+		await mkdir(join(botsDir, "scout"), { recursive: true });
+		await writeFile(join(botsDir, "scout", "work-log.md"), "- (2026-10-30) the owner dropped Hack The Nest\n");
+		const memory = createMemory({ dir: join(root, "memory"), botsDir });
+		assert.equal(await messageNote(memory, "hack the nest?", scout.id, [scout]), undefined);
+	}));
+
 test("message keywords are words of three letters or more, or two characters of Chinese", () =>
 	withDir(async (dir) => {
 		const memory = createMemory({ dir, now: () => new Date("2026-10-31T09:00:00") });
-		await memory.remember("SMS login only", "profile", everyBot);
-		await memory.remember("Go to bed early", "profile", everyBot);
+		await memory.remember("SMS login only", "log", everyBot);
+		await memory.remember("Go to bed early", "log", everyBot);
 		await memory.remember("申请了电机驱动器实习", "log", everyBot);
-		await memory.remember("👍 means yes", "profile", everyBot);
-		for (let i = 1; i <= 6; i++) await memory.remember(`Filler ${i}`, "log", everyBot);
+		await memory.remember("👍 means yes", "log", everyBot);
+		await fillRecent(memory);
 		assert.equal(await messageNote(memory, "👍", scout.id, [scout]), undefined, "an emoji is not a word");
 		assert.match((await messageNote(memory, "sms", scout.id, [scout])) ?? "", /SMS login only/);
 		assert.equal(await messageNote(memory, "go", scout.id, [scout]), undefined);
@@ -329,16 +510,21 @@ test("a broken tags.json says so instead of quietly dropping the owner's tags", 
 		await assert.rejects(memory.tagViews([scout]), /tags\.json/);
 	}));
 
-// Runs one turn of a bot that makes `calls`, returning the memory section of each request and what the tools answered.
+// Runs one turn of a bot that makes `calls`, returning the memory section of each request, what the tools answered
+// (`results` as JSON, `answers` as each call's text in order), and the lines the memory tools logged.
 async function turn(memory: Memory, botsOf: (rootId: number) => { id: number; name: string; main?: boolean }[], calls: { name: string; args: JsonObject }[], before?: (rootId: number) => Promise<unknown>) {
 	const prompts: string[] = [];
+	const logged: string[] = [];
 	let results = "";
+	let answers: string[] = [];
 	let rootId = 0;
 	const memorySection = (messages: readonly Message[]) =>
 		messages.reduce((latest, message) => (message.role === "system" && typeof message.sections?.memory === "string" ? message.sections.memory : latest), "");
 	const record = (step: () => AssistantMessage): FauxResponseFactory => (request) => {
 		prompts.push(memorySection(request.messages));
-		results = JSON.stringify(request.messages.filter((message) => message.role === "toolResult"));
+		const toolResults = request.messages.filter((message) => message.role === "toolResult");
+		results = JSON.stringify(toolResults);
+		answers = toolResults.map((message) => message.content.map((part) => (part.type === "text" ? part.text : "")).join(""));
 		return step();
 	};
 	const faux = fauxProvider();
@@ -349,7 +535,7 @@ async function turn(memory: Memory, botsOf: (rootId: number) => { id: number; na
 		record(() => fauxAssistantMessage([fauxText("Noted.")])),
 	]);
 	const registry = createRegistry();
-	registry.install(createMemoryExtension({ memory, bots: async () => botsOf(rootId) }));
+	registry.install(createMemoryExtension({ memory, bots: async () => botsOf(rootId), log: (line) => logged.push(line) }));
 	const harness = await Harness.open(new MemoryStorage(), { models, registry }, context);
 	try {
 		const root = await harness.root(context, { agent: { model: { provider: "faux", modelId: "faux-1" } } });
@@ -360,7 +546,7 @@ async function turn(memory: Memory, botsOf: (rootId: number) => { id: number; na
 	} finally {
 		await harness.close(context);
 	}
-	return { prompts, results };
+	return { prompts, results, answers, logged };
 }
 
 test("a bot sees, saves, finds, and forgets facts through its tags, and nothing else", () =>
@@ -408,41 +594,225 @@ test("a conversation that isn't a bot gets only the facts every bot gets", () =>
 const alfredAndDev = (id: number) => [{ id, name: "Alfred", main: true }, { id: 99, name: "Dev" }];
 const scoutAndDev = (id: number) => [{ id, name: "Scout", main: false }, { id: 99, name: "Dev" }];
 
-test("the main bot reads and changes every fact, and is still only given its own", () =>
+// Thirty facts, so a word counts toward similarity while at most 3 of them have it.
+async function similarityStore(memory: Memory) {
+	const facts = [
+		"Alpha bravo charlie delta echo",
+		"Alpha bravo charlie foxtrot golf hotel",
+		"India juliet kilo lima",
+		"India juliet mike november",
+		"Oscar papa",
+		"Oscar papa quebec",
+		"Romeo",
+		"Romeo sierra",
+		"Tango uniform",
+		"Tango uniform victor",
+		"Uniform whiskey yankee zulu",
+		"Xray zebra",
+		"Xray zebra apple",
+		"Zebra banana cherry date",
+		"Zebra elder fig grape",
+	];
+	for (const fact of facts) await memory.remember(fact, "profile", everyBot);
+	for (let i = 1; i <= 15; i++) await memory.remember(`Filler ${i}`, "profile", everyBot);
+}
+
+test("facts are similar when they share at least 60% of the rarer words of the shorter one, and at least two", () =>
 	withDir(async (dir) => {
 		const memory = createMemory({ dir, now: () => new Date("2026-10-31T09:00:00") });
+		await similarityStore(memory);
+		assert.deepEqual((await memory.similarGroups()).map((group) => group.map((fact) => fact.text)), [
+			["Alpha bravo charlie delta echo", "Alpha bravo charlie foxtrot golf hotel"], // 3 of 5 words
+			["Oscar papa", "Oscar papa quebec"], // 2 of 2
+			["Tango uniform", "Tango uniform victor"], // uniform is in 3 of the 30 facts, so it still counts
+		]);
+		// Left out: India juliet (2 of 4 words), Romeo (1 shared word), Xray zebra (zebra is in 4 facts, which leaves 1), the fillers.
+	}));
+
+test("a group holds every fact similar to another in it, and facts of both tiers", () =>
+	withDir(async (dir) => {
+		const memory = createMemory({ dir, now: () => new Date("2026-10-31T09:00:00") });
+		for (let i = 1; i <= 27; i++) await memory.remember(`Filler ${i}`, "profile", everyBot);
+		await memory.remember("Kiwi lemon mango", "profile", everyBot);
+		await memory.remember("Lemon mango nectarine olive", "log", ["@dev"]);
+		await memory.remember("Nectarine olive peach", "profile", everyBot);
+		assert.deepEqual((await memory.similarGroups()).map((group) => group.map((fact) => [fact.text, fact.tier])), [
+			[["Kiwi lemon mango", "profile"], ["Nectarine olive peach", "profile"], ["Lemon mango nectarine olive", "log"]],
+		]);
+	}));
+
+test("the facts similar to one fact are those a bot can see, or all of them for the owner and the main bot", () =>
+	withDir(async (dir) => {
+		const memory = createMemory({ dir, now: () => new Date("2026-10-31T09:00:00") });
+		await similarityStore(memory);
+		await memory.remember("Oscar papa rest", "log", ["@dev"]);
+		for (let i = 1; i <= 20; i++) await memory.remember(`Other ${i}`, "log", ["@dev"]);
+		const similar = async (text: string, seen?: ReadonlySet<string>) => (await memory.similar({ text, tier: "profile" }, seen)).map((fact) => fact.text);
+		assert.deepEqual(await similar("Oscar papa quebec"), ["Oscar papa", "Oscar papa rest"]);
+		assert.deepEqual(await similar("oscar PAPA quebec", sees("every-bot")), ["Oscar papa"]);
+		assert.deepEqual(await similar("Oscar papa quebec", sees("@dev")), ["Oscar papa rest"], "the fact itself counts even when the bot can't see it");
+		assert.deepEqual(await similar("Romeo sierra"), []);
+		assert.deepEqual(await similar("Never saved"), []);
+		await memory.remember("Tango uniform victor", "log", ["@dev"]);
+		assert.deepEqual(
+			(await memory.similar({ text: "Tango uniform victor", tier: "log" })).map((fact) => [fact.text, fact.tier]),
+			[["Tango uniform", "profile"], ["Tango uniform victor", "profile"]],
+			"the same words in the other tier are another fact",
+		);
+	}));
+
+test("remember tells the bot which facts it can see are similar to the one it saved", () =>
+	withDir(async (dir) => {
+		const memory = createMemory({ dir, now: () => new Date("2026-10-31T09:00:00") });
+		for (let i = 1; i <= 40; i++) await memory.remember(`Filler ${i}`, "log", everyBot);
+		await memory.remember("Anker account uses SMS login with a Chinese phone number", "profile", everyBot);
+		await memory.remember("Anker account uses SMS login and a secret dev password", "profile", ["@dev"]);
+		const scout = await turn(memory, scoutAndDev, [
+			{ name: "remember", args: { fact: "Anker account uses SMS login, not a password", tags: ["@scout"], tier: "profile" } },
+			{ name: "remember", args: { fact: "Dana likes orchids", tags: ["@scout"], tier: "profile" } },
+		]);
+		assert.equal(
+			scout.answers[0],
+			"remembered (@scout, profile): Anker account uses SMS login, not a password\nSimilar facts already saved; when one says the same thing or is now wrong, forget the one that should go:\n- (2026-10-31) Anker account uses SMS login with a Chinese phone number [every-bot] (profile)",
+		);
+		assert.equal(scout.answers[1], "remembered (@scout, profile): Dana likes orchids");
+		const alfred = await turn(memory, alfredAndDev, [{ name: "remember", args: { fact: "Anker account uses SMS login only", tags: ["every-bot"], tier: "profile" } }]);
+		assert.match(alfred.answers[0] ?? "", /secret dev password \[@dev\] \(profile\)/, "the main bot is told about every bot's facts");
+	}));
+
+test("the main bot reads every fact, with similar ones grouped, and is still only given its own", () =>
+	withDir(async (dir) => {
+		const memory = createMemory({ dir, now: () => new Date("2026-10-31T09:00:00") });
+		for (let i = 1; i <= 20; i++) await memory.remember(`Filler ${i}`, "log", ["@dev"]);
+		await memory.remember("Dev secret rule", "profile", ["@dev"]);
+		await memory.remember("Oscar papa", "profile", ["@dev"]);
+		await memory.remember("Oscar papa quebec", "log", everyBot);
+		const { prompts, answers } = await turn(memory, alfredAndDev, [{ name: "list_memory", args: {} }]);
+		assert.doesNotMatch(prompts[0] ?? "", /Dev secret/, "managing a fact doesn't put it in the prompt");
+		assert.match(answers[0] ?? "", /^- \(2026-10-31\) Dev secret rule \[@dev\] \(profile\)\n- \(2026-10-31\) Oscar papa \[@dev\] \(profile\)\n- \(2026-10-31\) Filler 1 \[@dev\] \(log\)\n/);
+		assert.match(
+			answers[0] ?? "",
+			/\n- \(2026-10-31\) Oscar papa quebec \[every-bot\] \(log\)\n\nSimilar facts, likely the same fact twice or two that conflict:\n- \(2026-10-31\) Oscar papa \[@dev\] \(profile\)\n- \(2026-10-31\) Oscar papa quebec \[every-bot\] \(log\)$/,
+		);
+	}));
+
+test("the main bot changes many facts in one call, after the store is backed up", () =>
+	withDir(async (dir) => {
+		const memory = createMemory({ dir, now: () => new Date("2026-10-31T09:00:00.007") });
 		await memory.remember("Dev secret rule", "profile", ["@dev"]);
 		await memory.remember("Dev typo fcat", "profile", ["@dev"]);
 		await memory.remember("Dev wrong owner", "log", ["@dev"]);
 		await memory.remember("Dev stale plan", "log", ["@dev"]);
 		await memory.remember("Dev old trip", "log", ["@dev"]);
-		const { prompts, results } = await turn(memory, alfredAndDev, [
-			{ name: "list_memory", args: {} },
-			{ name: "edit_memory", args: { fact: "Dev typo fcat", to: "Dev typo fact", tier: "profile" } },
-			{ name: "retag_memory", args: { fact: "Dev wrong owner", tags: ["every-bot", "@alfred"], tier: "log" } },
-			{ name: "forget", args: { fact: "Dev stale plan" } },
+		await memory.remember("Dev in both tiers", "log", ["@dev"]);
+		await memory.remember("Dev in both tiers", "profile", ["@dev"]);
+		const profileBefore = await readFile(join(dir, "profile.md"), "utf8");
+		const logBefore = await readFile(join(dir, "log", "2026-10.md"), "utf8");
+		const { answers, logged } = await turn(memory, alfredAndDev, [
+			{
+				name: "change_memory",
+				args: {
+					changes: [
+						{ fact: "Dev in both tiers", tier: "log", forget: true },
+						{ fact: "dev TYPO fcat", tier: "profile", to: "Dev typo fact" },
+						{ fact: "Dev wrong owner", tier: "log", tags: ["every-bot", "@alfred"] },
+						{ fact: "Dev secret rule", tier: "profile", to: "Dev rule", tags: ["every-bot"] },
+						{ fact: "Dev stale plan", tier: "log", forget: true },
+						{ fact: "Dev stale plan", tier: "log", forget: true },
+						{ fact: "Dev missing", tier: "profile", to: "Anything" },
+						{ fact: "Dev missing", tier: "log", tags: ["every-bot"] },
+						{ fact: "Dev typo fact", tier: "profile", to: "Dev rule" },
+						{ fact: "Dev old trip", tier: "log" },
+						{ fact: "Dev old trip", tier: "log", forget: true, to: "Dev new trip" },
+						{ fact: "Dev old trip", tier: "log", forget: true, tags: [] },
+					],
+				},
+			},
 		]);
-		assert.doesNotMatch(prompts[0] ?? "", /Dev secret/, "managing a fact doesn't put it in the prompt");
-		assert.match(results, /\(2026-10-31\) Dev secret rule \[@dev\] \(profile\)/);
-		assert.match(results, /\(2026-10-31\) Dev old trip \[@dev\] \(log\)/);
-		assert.equal(await readFile(join(dir, "profile.md"), "utf8"), "# About the owner\n- (2026-10-31) [@dev] Dev secret rule\n- (2026-10-31) [@dev] Dev typo fact\n");
+		const backup = join(`${dir}-backups`, "2026-10-31-090000-007");
+		assert.deepEqual((answers[0] ?? "").split("\n"), [
+			`Backed up to ${backup}.`,
+			"forgot (log): Dev in both tiers [@dev]",
+			"changed (profile): Dev typo fact [@dev]",
+			"changed (log): Dev wrong owner [every-bot, @alfred]",
+			"changed (profile): Dev rule [every-bot]",
+			"forgot (log): Dev stale plan [@dev]",
+			'not changed: No saved log fact matches "Dev stale plan".',
+			'not changed: No saved profile fact matches "Dev missing".',
+			'not changed: No saved log fact matches "Dev missing".',
+			'not changed: "Dev rule" is already saved.',
+			'not changed: "Dev old trip" needs forget, or to, tags, or both.',
+			'not changed: "Dev old trip" needs forget, or to, tags, or both.',
+			'not changed: "Dev old trip" needs forget, or to, tags, or both.',
+		]);
+		assert.equal(await readFile(join(dir, "profile.md"), "utf8"), "# About the owner\n- (2026-10-31) [every-bot] Dev rule\n- (2026-10-31) [@dev] Dev typo fact\n- (2026-10-31) [@dev] Dev in both tiers\n", "a forget takes the fact from the tier named only");
 		assert.equal(await readFile(join(dir, "log", "2026-10.md"), "utf8"), "# 2026-10\n- (2026-10-31) [every-bot, @alfred] Dev wrong owner\n- (2026-10-31) [@dev] Dev old trip\n");
+		assert.equal(await readFile(join(backup, "profile.md"), "utf8"), profileBefore);
+		assert.equal(await readFile(join(backup, "log", "2026-10.md"), "utf8"), logBefore);
+		assert.deepEqual(logged, (answers[0] ?? "").split("\n").map((line) => `memory (Alfred): ${line}`), "the log keeps what the call did");
 	}));
 
-test("only the main bot can list, edit, or retag every fact", () =>
+test("only the main bot can list or change every fact", () =>
 	withDir(async (dir) => {
 		const memory = createMemory({ dir, now: () => new Date("2026-10-31T09:00:00") });
 		await memory.remember("Dev secret rule", "profile", ["@dev"]);
 		const before = await readFile(join(dir, "profile.md"), "utf8");
 		const { results } = await turn(memory, scoutAndDev, [
 			{ name: "list_memory", args: {} },
-			{ name: "edit_memory", args: { fact: "Dev secret rule", to: "Changed", tier: "profile" } },
-			{ name: "retag_memory", args: { fact: "Dev secret rule", tags: ["every-bot"], tier: "profile" } },
+			{ name: "change_memory", args: { changes: [{ fact: "Dev secret rule", tier: "profile", forget: true }] } },
 			{ name: "forget", args: { fact: "Dev secret rule" } },
 		]);
-		assert.equal(results.match(/Only the main bot/g)?.length, 3);
+		assert.equal(results.match(/Only the main bot/g)?.length, 2);
 		assert.doesNotMatch(results, /Dev secret rule \[/);
 		assert.equal(await readFile(join(dir, "profile.md"), "utf8"), before);
+		assert.equal(existsSync(`${dir}-backups`), false);
+	}));
+
+test("a change naming a tag that doesn't exist stops the whole call before the backup", () =>
+	withDir(async (dir) => {
+		const memory = createMemory({ dir, now: () => new Date("2026-10-31T09:00:00") });
+		await memory.remember("First fact", "profile", ["@dev"]);
+		await memory.remember("Second fact", "profile", ["@dev"]);
+		const before = await readFile(join(dir, "profile.md"), "utf8");
+		const { answers } = await turn(memory, alfredAndDev, [
+			{ name: "change_memory", args: { changes: [{ fact: "First fact", tier: "profile", forget: true }, { fact: "Second fact", tier: "profile", tags: ["@dev", "nope"] }] } },
+		]);
+		assert.match(answers[0] ?? "", /^No tag is named nope\. Tags: every-bot, @alfred, @dev\.$/);
+		assert.equal(await readFile(join(dir, "profile.md"), "utf8"), before);
+		assert.equal(existsSync(`${dir}-backups`), false);
+	}));
+
+test("when the backup fails, a batch of changes changes nothing", () =>
+	withDir(async (dir) => {
+		const memory = createMemory({ dir, now: () => new Date("2026-10-31T09:00:00") });
+		await memory.remember("Keep me", "profile", everyBot);
+		const before = await readFile(join(dir, "profile.md"), "utf8");
+		await writeFile(`${dir}-backups`, "a file where the backup folder goes");
+		await assert.rejects(memory.change([{ fact: "Keep me", tier: "profile", forget: true }]));
+		assert.equal(await readFile(join(dir, "profile.md"), "utf8"), before);
+	}));
+
+test("a file error stops a batch of changes; only a change that can't apply is reported and skipped", () =>
+	withDir(async (dir) => {
+		const memory = createMemory({ dir, now: () => new Date("2026-10-31T09:00:00") });
+		await memory.remember("Keep me", "profile", everyBot);
+		// The store writes through profile.md.tmp, so a folder there makes the write fail.
+		await mkdir(join(dir, "profile.md.tmp"));
+		await assert.rejects(memory.change([{ fact: "Keep me", tier: "profile", to: "Changed" }]), /EISDIR|EPERM|EACCES/);
+	}));
+
+test("each batch of changes gets its own backup", () =>
+	withDir(async (dir) => {
+		const { clock, now } = clockAt("2026-10-31T09:00:00.000");
+		const memory = createMemory({ dir, now });
+		await memory.remember("First fact", "profile", everyBot);
+		const first = await memory.change([{ fact: "First fact", tier: "profile", to: "Second fact" }]);
+		clock.now = new Date("2026-10-31T09:00:00.001");
+		const second = await memory.change([{ fact: "Second fact", tier: "profile", to: "Third fact" }]);
+		assert.match(await readFile(join(first.backup, "profile.md"), "utf8"), /First fact/);
+		assert.match(await readFile(join(second.backup, "profile.md"), "utf8"), /Second fact/);
+		await assert.rejects(memory.change([{ fact: "Third fact", tier: "profile", forget: true }]), "a backup never overwrites an earlier one");
+		assert.match(await readFile(join(dir, "profile.md"), "utf8"), /Third fact/, "and the change it guards doesn't happen");
 	}));
 
 test("forget can take a fact out of one tier, so a log fact can move to the profile", () =>
@@ -460,24 +830,6 @@ test("forget can take a fact out of one tier, so a log fact can move to the prof
 		assert.equal(await readFile(join(dir, "log", "2026-10.md"), "utf8"), "# 2026-10\n");
 	}));
 
-test("the main bot's edits and retags report what went wrong", () =>
-	withDir(async (dir) => {
-		const memory = createMemory({ dir, now: () => new Date("2026-10-31T09:00:00") });
-		await memory.remember("First fact", "profile", ["@dev"]);
-		await memory.remember("Second fact", "profile", ["@dev"]);
-		const before = await readFile(join(dir, "profile.md"), "utf8");
-		const { results } = await turn(memory, alfredAndDev, [
-			{ name: "edit_memory", args: { fact: "Missing fact", to: "Anything", tier: "profile" } },
-			{ name: "edit_memory", args: { fact: "First fact", to: "Second fact", tier: "profile" } },
-			{ name: "retag_memory", args: { fact: "Missing fact", tags: ["@dev"], tier: "profile" } },
-			{ name: "retag_memory", args: { fact: "First fact", tags: ["nope"], tier: "profile" } },
-		]);
-		assert.equal(results.match(/No saved profile fact matches/g)?.length, 2);
-		assert.match(results, /is already saved/);
-		assert.match(results, /No tag is named nope/);
-		assert.equal(await readFile(join(dir, "profile.md"), "utf8"), before);
-	}));
-
 test("list_memory returns every fact of a memory larger than a normal tool result", () =>
 	withDir(async (dir) => {
 		const memory = createMemory({ dir, now: () => new Date("2026-10-31T09:00:00") });
@@ -487,6 +839,7 @@ test("list_memory returns every fact of a memory larger than a normal tool resul
 		assert.match(results, /Fact number 0 x/);
 		assert.match(results, /Fact number 150 x/);
 		assert.match(results, /Fact number 299 x/);
+		assert.doesNotMatch(results, /Similar facts/, "no heading when no facts are similar");
 	}));
 
 test("list_memory says when nothing is saved", () =>
