@@ -4,7 +4,7 @@
 // marked `once` does not rearm: the firing removes it, whether or not the turn it posted has finished.
 // Each bot's definitions live in its folder as bots/<bot-name>/routines.json (see routines-file.ts and
 // botFolder in bots.ts); a bot without routines has no file. The manager below syncs those files into each bot's
-// Durable doc and sleeper tasks; the chat tools and the web UI both go through it, so hand edits, GUI
+// Durable doc and sleeper tasks; the chat tools and the web portal both go through it, so hand edits, GUI
 // edits, and model edits converge. The host calls bindRoutines({harness, root}) after Harness.open,
 // then syncRoutines() once at startup.
 import { existsSync, mkdirSync, watch } from "node:fs";
@@ -429,7 +429,7 @@ async function viewFor(b: BoundRoutines, bot: RoutineBot, id: string, ctx: Conte
 	return toView(bot, id, item, b.now());
 }
 
-/** Every bot's routines as the web UI shows them, soonest firing first. */
+/** Every bot's routines as the web portal shows them, soonest firing first. */
 export async function listRoutineViews(ctx: Context): Promise<RoutineView[]> {
 	const b = requireBound();
 	const now = b.now();
@@ -736,7 +736,7 @@ export function createRoutinesExtension(): Extension {
 			section(
 				"routines",
 				() =>
-					"Call schedule for later or repeating work: cron is a 5-field cron string, a nickname like @daily, or @every 30m, optionally prefixed CRON_TZ=Area/City. Prefer weekday daytime schedules like '30 7 * * 1-5'; never use bare @hourly. Use run_routine to fire one now. For one-off work, pass once: true with a cron naming the slot, like '0 12 9 11 *' for Nov 9 at 12:00; it fires one time and removes itself, so never call cancel_routine for it afterward. Your routines are your own: schedule, run_routine, and cancel_routine act only on them, and each fires as a turn in your chat. The owner can also add, edit, and remove them in the web UI or your routines.json without you; list_routines always shows the current set. A user message starting with [routine] is a routine firing: nobody is waiting, so carry out the standing instruction and send_message the owner only if the outcome needs them.",
+					"Call schedule for later or repeating work: cron is a 5-field cron string, a nickname like @daily, or @every 30m, optionally prefixed CRON_TZ=Area/City. Prefer weekday daytime schedules like '30 7 * * 1-5'; never use bare @hourly. Use run_routine to fire one now. For one-off work, pass once: true with a cron naming the slot, like '0 12 9 11 *' for Nov 9 at 12:00; it fires one time and removes itself, so never call cancel_routine for it afterward. Your routines are your own: schedule, run_routine, and cancel_routine act only on them, and each fires as a turn in your chat. The owner can also add, edit, and remove them in the web portal or your routines.json without you; list_routines always shows the current set. A user message starting with [routine] is a routine firing: nobody is waiting, so carry out the standing instruction and send_message the owner only if the outcome needs them.",
 			),
 		],
 		tasks: [RoutineTask],

@@ -1,4 +1,4 @@
-// What the web app's computer pane shows: the default Space's name, the newest screenshot, and the
+// What the web portal's computer pane shows: the default Space's name, the newest screenshot, and the
 // driver steps of the bot's most recent computer_use run, with the Space it ran on. src/bots.ts builds one per bot with
 // createComputerView() and hands it to createChat(), which pushes fresh snapshots while a computer_use
 // call is running. computer_use runs its driver calls in a child conversation of the bot's (src/computer.ts),

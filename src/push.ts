@@ -1,4 +1,4 @@
-// Web Push for the web app: a browser that turned notifications on in the app gets them even with every
+// Web Push for the web portal: a browser that turned notifications on in the web portal gets them even with every
 // cua-bot tab closed, as long as the browser runs. main.ts builds one with createPush() and calls send()
 // for every message a bot sends the owner with send_message (src/bots.ts) and every approval card; web.ts
 // serves the public key and takes subscriptions. The VAPID keys and the subscriptions live in data/push.json,

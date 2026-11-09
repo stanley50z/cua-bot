@@ -1,4 +1,4 @@
-// Owner chat over one bot's conversation, for the web app in src/web.ts.
+// Owner chat over one bot's conversation, for the web portal in src/web.ts.
 // src/bots.ts calls createChat({ harness, conversation, context, computer }) once per bot. The server uses history() for
 // pages of past messages, send()/stop() for input (send() also takes pasted images, which image() reads back), react() for the owner's emoji reactions (REACTION entries),
 // computer() for the computer pane, and subscribe()

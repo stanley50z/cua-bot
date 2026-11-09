@@ -1,5 +1,5 @@
 // Actions the bot may not take on its own: sending mail, deleting, and calls Executor holds for
-// approval. The executor extension files a request with request(); the web app shows it as a card
+// approval. The executor extension files a request with request(); the web portal shows it as a card
 // under the bot's reply; the owner's click calls approve() or discard(), which runs (or drops) the
 // Executor call from here, never from the model, and then tells the bot the outcome through notify.
 // Requests live in data/approvals.json, so a waiting card survives a restart. main.ts builds one store.

@@ -1,6 +1,6 @@
-// The web app's service worker, served by src/web.ts at /sw.js and registered by app.html when the owner
+// The web portal's service worker, served by src/web.ts at /sw.js and registered by app.html when the owner
 // turns notifications on. It shows each Web Push from the bot (src/push.ts), with or without an open tab,
-// and a click opens the chat of the bot that sent it, in the app's tab if one is open or else in a new one.
+// and a click opens the chat of the bot that sent it, in the web portal's tab if one is open or else in a new one.
 // A new version takes over at once, so a tab left open doesn't keep the old click behavior.
 self.addEventListener("install", () => self.skipWaiting());
 

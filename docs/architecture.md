@@ -4,7 +4,7 @@
 
 ```mermaid
 flowchart LR
-  browser[Web app] <--> server
+  browser[Web portal] <--> server
   say[say.py] --> server
   server["HTTP server<br/>127.0.0.1:43142"] <--> harness["Pi Durable Harness<br/>data/cua-bot.sqlite"]
   harness --> space["Cua Space<br/>computer_use, space_bash, live screen"]
@@ -14,7 +14,7 @@ flowchart LR
   harness -. Web Push .-> browser
 ```
 
-`src/main.ts` opens a Pi Durable Harness on `data/cua-bot.sqlite`, resumes unfinished and sleeping work, and serves one HTTP server: `POST /say`, the web app at `/` ([src/app.html](../src/app.html)), and its JSON API under `/api/` ([src/web.ts](../src/web.ts), routes in [HTTP API](http-api.md)).
+`src/main.ts` opens a Pi Durable Harness on `data/cua-bot.sqlite`, resumes unfinished and sleeping work, and serves one HTTP server: `POST /say`, the web portal at `/` ([src/app.html](../src/app.html)), and its JSON API under `/api/` ([src/web.ts](../src/web.ts), routes in [HTTP API](http-api.md)).
 
 ## Bots
 
@@ -36,7 +36,7 @@ Everything else a bot owns lives in `bots/<folder>/` in the project root (gitign
 | `agent.md` | Standing instructions. Plain markdown, no length cap, empty until the bot gets instructions. |
 | `routines.json` | Routine definitions, present only while the bot has routines. See [Routines](#routines). |
 
-`agent.md` is re-read on every request, so a hand edit applies on the bot's next turn; the web app picks it up within a second.
+`agent.md` is re-read on every request, so a hand edit applies on the bot's next turn; the web portal picks it up within a second.
 
 Folder rules:
 
@@ -128,7 +128,7 @@ Plain markdown in one store, `data/memory/`: `profile.md` for lasting facts and 
 | `@<folder>`, such as `@job-search` | That bot | Each bot has one |
 | Any other, such as `job-bots` | The bots listed for it | `tags.json`, edited in Settings > Memory tags |
 
-A line with no tag, or only tags that name nothing, reaches no bot and shows under Untagged in the web app. Renaming a bot or one of your tags rewrites its facts. Deleting either takes the tag off; a fact left with no tag stays, under Untagged.
+A line with no tag, or only tags that name nothing, reaches no bot and shows under Untagged in the web portal. Renaming a bot or one of your tags rewrites its facts. Deleting either takes the tag off; a fact left with no tag stays, under Untagged.
 
 - `remember` saves a fact with `tags`. Saving text a tier already has adds the tags to that fact.
 - `forget` removes a fact and `search_memory` searches by one or more keywords, both only among facts the bot can see. A keyword matches at the start of a word, or anywhere in text like Chinese that has no spaces.
@@ -155,7 +155,7 @@ Tools: `schedule`, `list_routines`, `run_routine`, `cancel_routine`. Each routin
 
 ### `routines.json`
 
-Each bot's definitions live in `routines.json` in its folder. The chat tools, the web app and hand edits all sync through these files; a watcher applies hand edits within a second or two.
+Each bot's definitions live in `routines.json` in its folder. The chat tools, the web portal and hand edits all sync through these files; a watcher applies hand edits within a second or two.
 
 ```json
 [
@@ -171,7 +171,7 @@ Each bot's definitions live in `routines.json` in its folder. The chat tools, th
 - `once` is optional; `true` makes it a one-time routine.
 - The file is the source of truth for its bot's definitions. On start and on every change the service syncs that bot's durable tasks to match: editing a title, prompt, cron or `once` replaces that routine's sleeper, and removing an entry cancels it.
 - An invalid file (bad JSON, bad cron, a non-boolean `once`, duplicate ids, more than 50 entries) is rejected whole. That bot's running routines keep going, the other bots still sync, and the log says why.
-- If a bot's file is missing while it has routines, the service recreates it from them instead of deleting them. To cancel them all, empty the file to `[]` or delete them in the app.
+- If a bot's file is missing while it has routines, the service recreates it from them instead of deleting them. To cancel them all, empty the file to `[]` or delete them in the web portal.
 - A bot with no routines has no file; removing its last routine deletes it.
 - The file moves with its bot's folder on a rename.
 - Run history (last fired) stays in the database, not the file.

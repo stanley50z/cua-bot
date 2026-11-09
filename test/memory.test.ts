@@ -1,4 +1,4 @@
-// Long-term memory: the tagged markdown store, the bot's tools feeding the next prompt, the web app's
+// Long-term memory: the tagged markdown store, the bot's tools feeding the next prompt, the web portal's
 // /api/memory routes, and the one-time move to tags. Run from the repo root:  node --test test/memory.test.ts
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
@@ -405,7 +405,7 @@ test("a conversation that isn't a bot gets only the facts every bot gets", () =>
 		assert.doesNotMatch(prompts[0] ?? "", /Job rule/);
 	}));
 
-// The web app's memory routes over `memory`, with two bots to tag.
+// The web portal's memory routes over `memory`, with two bots to tag.
 async function withServer(memory: Memory, run: (call: (method: string, path: string, body?: unknown) => Promise<Response>) => Promise<void>) {
 	const server: Server = createBotServer({ say: async (text) => text, memory, memoryBots: () => [scout, dev], context });
 	await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -418,7 +418,7 @@ async function withServer(memory: Memory, run: (call: (method: string, path: str
 	}
 }
 
-test("the web app lists, adds, edits, retags, and forgets tagged facts", () =>
+test("the web portal lists, adds, edits, retags, and forgets tagged facts", () =>
 	withDir(async (dir) => {
 		const memory = createMemory({ dir, now: () => new Date("2026-10-31T09:00:00") });
 		await withServer(memory, async (call) => {
@@ -455,7 +455,7 @@ test("the web app lists, adds, edits, retags, and forgets tagged facts", () =>
 		});
 	}));
 
-test("the web app makes, changes, and deletes the owner's tags", () =>
+test("the web portal makes, changes, and deletes the owner's tags", () =>
 	withDir(async (dir) => {
 		const memory = createMemory({ dir, now: () => new Date("2026-10-31T09:00:00") });
 		await withServer(memory, async (call) => {

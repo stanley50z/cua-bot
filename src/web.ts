@@ -1,4 +1,4 @@
-// The bot's HTTP surface on 127.0.0.1: the web app at GET / with its service worker at /sw.js, its JSON
+// The bot's HTTP surface on 127.0.0.1: the web portal at GET / with its service worker at /sw.js, its JSON
 // API under /api/ (the bot list and its edits, routines CRUD, each bot's chat history/send/react/stop and the owner's pasted images, a server-sent
 // event stream of one bot's live chat state, Web Push subscriptions, the Connections tab's check, start at sign-in, the bots' model and reasoning effort, and the default Space's live screen with the owner's control of it), screenshots under /shots/, and the original POST /say. Listens on loopback only, no auth; an HTTPS proxy such as Tailscale Serve can
 // reach it under a name in allowedHosts. isOwnRequest refuses requests other sites make through the owner's browser.
@@ -192,7 +192,7 @@ async function prepareImages(images: ChatImage[], processor: ImageProcessor | un
 	);
 }
 
-// One emoji (with any skin tone, variation selector, or joined parts), as the app's reaction picker sends it.
+// One emoji (with any skin tone, variation selector, or joined parts), as the web portal's reaction picker sends it.
 const EMOJI = /^\p{Extended_Pictographic}[\p{Extended_Pictographic}\p{Emoji_Modifier}‍️]*$/u;
 
 // POST /api/chat/react's body: { entryId, emoji, on }, plus the optional `bot` routeChat reads.
@@ -398,7 +398,7 @@ async function routeApprovals(req: IncomingMessage, res: ServerResponse, deps: B
 const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "[::1]"]);
 
 /**
- * Whether a request came from the web app or a local client such as say.py, rather than from another site
+ * Whether a request came from the web portal or a local client such as say.py, rather than from another site
  * open in the owner's browser. Any page can send a simple POST to 127.0.0.1, and DNS rebinding can point a
  * page's own name there, so a Host that is neither loopback nor allowed, or a foreign Origin, is refused.
  * Browsers set both headers, and pages cannot forge them. An allowed name is an HTTPS proxy in front of this

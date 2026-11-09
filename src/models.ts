@@ -102,7 +102,7 @@ export function botModel(): ModelRef {
 	return parseModelRef(process.env.CUABOT_MODEL?.trim() || config().default);
 }
 
-/** Checks a reasoning effort from .env or the web app. Throws ModelsConfigError naming the valid ones. */
+/** Checks a reasoning effort from .env or the web portal. Throws ModelsConfigError naming the valid ones. */
 export function parseThinkingLevel(text: string): ModelThinkingLevel {
 	const level = THINKING_LEVELS.find((name) => name === text);
 	if (level === undefined) throw new ModelsConfigError(`reasoning effort must be one of ${THINKING_LEVELS.join(", ")}, not "${text}"`);

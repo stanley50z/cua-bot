@@ -1,4 +1,4 @@
-// The web app's computer pane: one-line step summaries, call/result pairing from a computer_use
+// The web portal's computer pane: one-line step summaries, call/result pairing from a computer_use
 // child transcript, and picking the newest screenshot. Run:  node --test test/computer-view.test.ts
 import assert from "node:assert/strict";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";

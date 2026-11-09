@@ -1,5 +1,5 @@
 // Settings > Model: the model and reasoning effort every bot runs on unless its edit dialog overrides them (src/bots.ts).
-// Both live in .env as CUABOT_MODEL and CUABOT_REASONING, so a hand edit and the web app change the same two lines.
+// Both live in .env as CUABOT_MODEL and CUABOT_REASONING, so a hand edit and the web portal change the same two lines.
 // main.ts builds one with createModelSettings() and web.ts serves it at GET/PUT /api/model.
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";

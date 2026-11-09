@@ -75,12 +75,12 @@ registry.install(traceExtension);
 registry.install(createBotsExtension({ agent: botAgent, memoryNote }));
 registry.install(createComputerExtension(registry));
 registry.install(createBotToolSearchExtension());
-// Web Push to every browser that turned notifications on in the web app (data/push.json).
+// Web Push to every browser that turned notifications on in the web portal (data/push.json).
 const push = createPush({ file: join(DATA_DIR, "push.json"), log });
 // Every Cua Spaces tool, deferred until tool_search loads it. The rest of the bot works without the cua CLI.
 const cuaCommand = process.env.CUA_MCP_COMMAND?.trim() || defaultCuaCommand();
 const cuaConnect = connectCua(cuaCommand);
-// One `cua mcp` session for the bots' cua_* tools and the web app's Connections tab.
+// One `cua mcp` session for the bots' cua_* tools and the web portal's Connections tab.
 const cua = createExecutor(cuaConnect);
 try {
 	registry.install(await createCuaExtension(cuaConnect, { defaultSpace: defaultSpaceId(), call: cua }));
@@ -212,7 +212,7 @@ const autostart = createAutostart({ startScript: join(import.meta.dirname, "..",
 // Settings > Model: the model and reasoning effort in .env, applied to every bot without a restart.
 const modelSettings = createModelSettings({ models, apply: bots.applyAgent });
 createBotServer({ say, bots, memory, memoryBots: () => bots.list(), images, context, log, control: screenControl, live, push, connections, autostart, modelSettings, allowedHosts: ALLOWED_HOSTS, ...(approvals === undefined ? {} : { approvals }) }).listen(PORT, "127.0.0.1", () =>
-	log(`listening: web app http://127.0.0.1:${PORT}/ · chat POST http://127.0.0.1:${PORT}/say`),
+	log(`listening: web portal http://127.0.0.1:${PORT}/ · chat POST http://127.0.0.1:${PORT}/say`),
 );
 
 for (const signal of ["SIGINT", "SIGTERM"] as const) {

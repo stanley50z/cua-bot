@@ -103,7 +103,7 @@ const FALLBACK: DriverInfo[] = [
 ];
 
 // The Space a computer_use child works on, so its space_bash defaults to that Space, after a restart too. Also read
-// by the web app's computer pane (taskSpaceName).
+// by the web portal's computer pane (taskSpaceName).
 const ChildSpaceDoc = defineDoc<{ id: string; name: string }>({
 	kind: "cua-bot.computer-space",
 	version: 1,
@@ -204,7 +204,7 @@ export async function spacesText(): Promise<string> {
 	return listed.map((space) => describeSpace(space, space.id === fallback)).join("; ");
 }
 
-/** Used by the web app's computer pane. The name of the Space a computer_use child ran on. */
+/** Used by the web portal's computer pane. The name of the Space a computer_use child ran on. */
 export async function taskSpaceName(reader: Pick<Harness, "snapshot">, child: ConversationId, context: Context): Promise<string | undefined> {
 	return (await reader.snapshot(ChildSpaceDoc, child, context))?.name || undefined;
 }
@@ -289,7 +289,7 @@ export async function captureScreenshot(ref?: string): Promise<string> {
 }
 
 /**
- * Used by src/main.ts for the web app's Take control of the default Space, the one the live screen shows. While the
+ * Used by src/main.ts for the web portal's Take control of the default Space, the one the live screen shows. While the
  * owner has control, every driver call on that Space waits.
  */
 export const screenControl = createScreenControl();
@@ -377,7 +377,7 @@ computerTools.push(computerUse, spaceBash);
 
 /**
  * Used by src/main.ts as createLiveScreen's opener (src/live-screen.ts). An H.264 stream of the default Space's
- * primary display, decoded by the web app, that also takes the owner's input while they have control. The SDK's own
+ * primary display, decoded by the web portal, that also takes the owner's input while they have control. The SDK's own
  * streamSession needs the Cua Spaces app's streaming client, so this mints a media ticket and attaches to it
  * directly.
  */

@@ -6,11 +6,11 @@
 
 **A self-hostable Grok Bot alternative built on top of [Pi Durable](https://www.npmjs.com/package/@earendil-works/pi-durable) and [Cua Spaces](https://github.com/trycua/cua).**
 
-[Quick start](#quick-start) · [Web app](docs/web-app.md) · [How it works](docs/architecture.md) · [HTTP API](docs/http-api.md) · [Configuration](docs/configuration.md)
+[Quick start](#quick-start) · [Web portal](docs/web-portal.md) · [How it works](docs/architecture.md) · [HTTP API](docs/http-api.md) · [Configuration](docs/configuration.md)
 
 <br>
 
-<img src="assets/screenshot.png" width="900" alt="The cua-bot web app: bots on the left, a chat where the bot booked a dinner and is waiting for approval to send an email, and the Space's live screen with the steps it took">
+<img src="assets/screenshot.png" width="900" alt="The cua-bot web portal: bots on the left, a chat where the bot booked a dinner and is waiting for approval to send an email, and the Space's live screen with the steps it took">
 
 </div>
 
@@ -20,7 +20,7 @@ cua-bot runs on your own computer as an always-on service for one owner. When a 
 
 - **Uses real computers.** `computer_use` clicks and types on any of your Cua Spaces, picked by name, and you watch the default one live in the browser. Click Take control to drive it yourself; the bot waits until you hand it back.
 - **Runs several bots.** Each bot has its own chat, instructions (`agent.md`) and routines, and the bots can message each other.
-- **Runs routines.** Cron schedules (`30 7 * * 1-5`, `@daily`, `@every 30m`), repeating or run-once, stored as durable tasks, editable in the app or in `routines.json`.
+- **Runs routines.** Cron schedules (`30 7 * * 1-5`, `@daily`, `@every 30m`), repeating or run-once, stored as durable tasks, editable in the web portal or in `routines.json`.
 - **Remembers.** Plain markdown memory you can read and edit by hand, each fact tagged with the bots that get it.
 - **Asks before it acts.** An email to anyone but you, or a delete, becomes an approval card. Nothing goes out until you click.
 - **Reaches your other machines.** `read`, `write`, `edit` and `bash` run on any host in your `~/.ssh/config`. cua-bot itself has no machine list to maintain.
@@ -44,13 +44,13 @@ node --env-file-if-exists=.env src/preflight.ts
 python start.py
 ```
 
-`start.py` prints the web app's address when it's up. Open it and say hello. Gmail and Calendar stay off until you connect Executor; see [Configuration](docs/configuration.md#gmail-and-calendar).
+`start.py` prints the web portal's address when it's up. Open it and say hello. Gmail and Calendar stay off until you connect Executor; see [Configuration](docs/configuration.md#gmail-and-calendar).
 
 Stop it with `python stop.py`.
 
 ## Usage
 
-**In the browser.** The web app has the bots, the chat, and the Space's live screen side by side, plus Routines, Memory and Settings views. See the [web app guide](docs/web-app.md).
+**In the browser.** The web portal has the bots, the chat, and the Space's live screen side by side, plus Routines, Memory and Settings views. See the [web portal guide](docs/web-portal.md).
 
 **From the command line.**
 
@@ -84,7 +84,7 @@ python say.py "Every weekday at 9:00, email me a short agenda."
 | Page | Covers |
 | --- | --- |
 | [Configuration](docs/configuration.md) | `models.json`, environment variables, Executor, `start.py` and `stop.py` |
-| [Web app](docs/web-app.md) | Chat, quotes, reactions, the live screen, Routines, Memory, Settings, Connections, notifications |
+| [Web portal](docs/web-portal.md) | Chat, quotes, reactions, the live screen, Routines, Memory, Settings, Connections, notifications |
 | [How it works](docs/architecture.md) | Bots, tools, machines, code mode, memory, routines, approvals, email |
 | [HTTP API](docs/http-api.md) | Every route the server exposes |
 | [Troubleshooting](docs/troubleshooting.md) | Log, crash, and data file locations |

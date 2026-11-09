@@ -1,7 +1,7 @@
 // Long-term memory about the owner, as plain markdown the owner can read and edit: one store, data/memory/,
 // where each fact's tags say which bots get it. main.ts runs migrateMemory, installs createMemoryExtension
 // so every bot gets remember / forget / search_memory and sees its facts in every request, and hands the store to
-// the web app (GET/POST /api/memory). Layout of the store:
+// the web portal (GET/POST /api/memory). Layout of the store:
 //   profile.md          enduring facts about the owner ("About the owner")
 //   log/YYYY-MM.md      dated facts, one file per month
 //   tags.json           the owner's tags and the bots in each, by id

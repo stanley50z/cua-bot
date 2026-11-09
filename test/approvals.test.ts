@@ -1,6 +1,6 @@
 // Approval cards: Gmail raw messages decode for the card and re-encode with the owner's edits; approving
 // runs the exact Executor call once and tells the bot; discarding runs nothing; requests survive a
-// restart and expire after 7 days; the web app's routes. Run from the repo root:  node --test test/approvals.test.ts
+// restart and expire after 7 days; the web portal's routes. Run from the repo root:  node --test test/approvals.test.ts
 import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
 import type { Server } from "node:http";
@@ -175,7 +175,7 @@ test("waiting requests survive a restart and expire after 7 days", () =>
 		await assert.rejects(reopened.approve(card.id), /already expired/);
 	}));
 
-test("the web app lists, approves with edits, and discards", () =>
+test("the web portal lists, approves with edits, and discards", () =>
 	withStore(async ({ approvals, calls }) => {
 		const server: Server = createBotServer({ say: async (text) => text, approvals, context: BACKGROUND_CONTEXT });
 		await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));

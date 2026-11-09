@@ -94,7 +94,7 @@ async function api(session: Session, method: string, path: string, body?: unknow
 	return { status: response.status, json: text.length > 0 ? (JSON.parse(text) as unknown) : undefined };
 }
 
-test("GET / serves the web app with chat, computer pane, and routines", { timeout: 20_000 }, async () => {
+test("GET / serves the web portal with chat, computer pane, and routines", { timeout: 20_000 }, async () => {
 	const session = await open();
 	try {
 		const response = await fetch(`${session.base}/`);
@@ -273,7 +273,7 @@ test("requests from other sites in the owner's browser are refused before they r
 		assert.equal((await rawRequest(base, "POST", "/say", { host: `evil.example:${address.port}`, origin: `http://evil.example:${address.port}` }, "run this")).status, 403);
 		assert.deepEqual(said, []);
 
-		// The web app itself, under either loopback name, and local clients that send no Origin.
+		// The web portal itself, under either loopback name, and local clients that send no Origin.
 		assert.equal((await rawRequest(base, "POST", "/say", { origin: `http://${host}` }, "a")).status, 200);
 		assert.equal((await rawRequest(base, "POST", "/say", { host: `localhost:${address.port}`, origin: `http://localhost:${address.port}` }, "b")).status, 200);
 		assert.equal((await rawRequest(base, "POST", "/say", {}, "c")).status, 200);

@@ -1,5 +1,5 @@
 // Web Push (src/push.ts): keys persist across restarts, one subscription per browser endpoint, a message
-// reaches every subscription, and one the push service reports gone is dropped. Plus the web app's
+// reaches every subscription, and one the push service reports gone is dropped. Plus the web portal's
 // /api/push and /sw.js routes, and a body cut to fit a push. Run from the repo root:  node --test test/push.test.ts
 import assert from "node:assert/strict";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
@@ -51,7 +51,7 @@ test("a message reaches every subscribed browser, and a gone one is dropped", ()
 		);
 	}));
 
-test("the web app serves the push key and service worker and saves a browser's subscription", () =>
+test("the web portal serves the push key and service worker and saves a browser's subscription", () =>
 	inTempDir(async (file) => {
 		const push = createPush({ file, deliver: async () => undefined });
 		const server = createBotServer({ say: async () => "", context: BACKGROUND_CONTEXT, push });
@@ -121,7 +121,7 @@ const clickPushed = (message: PushMessage, urls: string[]) =>
 	}).then(() => result);
 let result: ReturnType<typeof runWorker>;
 
-test("clicking a bot's notification with the app open focuses that tab and tells it which bot", async () => {
+test("clicking a bot's notification with the web portal open focuses that tab and tells it which bot", async () => {
 	const { tabs, opened } = await clickPushed({ title: "Alfred", body: "done", bot: 7 }, ["http://127.0.0.1:3000/other", "http://127.0.0.1:3000/#view=routines"]);
 	assert.deepEqual(opened, []);
 	assert.deepEqual(tabs.map((t) => [t.focused, t.messages]), [[false, []], [true, [{ bot: 7 }]]]);
@@ -132,7 +132,7 @@ test("clicking a bot's notification with no tab open opens that bot's chat", asy
 	assert.deepEqual(opened, ["/#bot=7"]);
 });
 
-test("clicking a notification from no particular bot only brings the app up", async () => {
+test("clicking a notification from no particular bot only brings the web portal up", async () => {
 	const open = await clickPushed({ title: "Approval needed" }, ["http://127.0.0.1:3000/"]);
 	assert.deepEqual(open.tabs.map((t) => [t.focused, t.messages]), [[true, []]]);
 	const closed = await clickPushed({ title: "Approval needed" }, []);

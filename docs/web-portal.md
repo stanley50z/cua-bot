@@ -1,4 +1,4 @@
-# Web app
+# Web portal
 
 [Back to README](../README.md)
 

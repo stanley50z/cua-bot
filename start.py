@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Start cua-bot in the background. Prints the /say and web app URLs, or the stdout log on failure."""
+"""Start cua-bot in the background. Prints the /say and web portal URLs, or the stdout log on failure."""
 
 from __future__ import annotations
 
@@ -276,13 +276,13 @@ def main() -> int:
             break
         if port_accepts(port):
             print(f"http://127.0.0.1:{port}/say")
-            print(f"web app: http://127.0.0.1:{port}/")
+            print(f"web portal: http://127.0.0.1:{port}/")
             return 0
         time.sleep(0.2)
 
     if not exited and port_accepts(port):
         print(f"http://127.0.0.1:{port}/say")
-        print(f"web app: http://127.0.0.1:{port}/")
+        print(f"web portal: http://127.0.0.1:{port}/")
         return 0
 
     if exited:

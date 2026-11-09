@@ -5,7 +5,7 @@
 // a rename and goes with a delete. Bots message each other with message_bot: the text lands in the other bot's chat as
 // a `cua-bot.bot-message` entry (shown as "Message from <name>") and wakes it on a later turn.
 // main.ts installs createBotsExtension() before Harness.open, then builds the manager with createBots()
-// for the web app, which lists, adds, edits, and deletes bots and gives each one a Chat.
+// for the web portal, which lists, adds, edits, and deletes bots and gives each one a Chat.
 import { existsSync, watch as watchFiles } from "node:fs";
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
@@ -39,7 +39,7 @@ const MESSAGE_MAX = 8000;
 const SEND_LIMIT = 20;
 const HOUR_MS = 60 * 60 * 1000;
 
-/** The avatar characters the web app draws, by id; src/app.html holds each shape's drawing and each color's value. */
+/** The avatar characters the web portal draws, by id; src/app.html holds each shape's drawing and each color's value. */
 export const AVATAR_SHAPES = [
 	"blob",
 	"pebble",
@@ -85,12 +85,12 @@ const BotsDoc = defineDoc<BotsState>({
 });
 
 /**
- * `avatar` is the one to draw: the owner's pick, else `defaultAvatar`, which the web app's Reset goes back to.
- * `pinnedAt` is set while the bot is pinned; the web app shows pinned bots at the top, oldest pin first.
+ * `avatar` is the one to draw: the owner's pick, else `defaultAvatar`, which the web portal's Reset goes back to.
+ * `pinnedAt` is set while the bot is pinned; the web portal shows pinned bots at the top, oldest pin first.
  * `model` and `thinkingLevel` are set only while the bot overrides Settings > Model.
  */
 type BotEntry = { id: number; name: string; main: boolean; createdAt: number; avatar: Avatar; defaultAvatar: Avatar; pinnedAt?: number; model?: string; thinkingLevel?: ModelThinkingLevel };
-/** `folder` is the bot's folder and `file` its agent file, as paths from the project root, for the web app. */
+/** `folder` is the bot's folder and `file` its agent file, as paths from the project root, for the web portal. */
 export type Bot = BotEntry & { instructions: string; folder: string; file: string };
 /** `avatar`, `model` and `thinkingLevel` are checked here; an edit without one keeps the bot's, and null goes back to the default. */
 export type BotInput = { name: string; instructions: string; avatar?: { shape: string; color: string } | null; model?: string | null; thinkingLevel?: string | null };
@@ -206,7 +206,7 @@ function validInput(input: BotInput, others: BotEntry[]): ValidInput {
 type Commit = <T>(run: (tx: Tx) => Promise<T>) => Promise<T>;
 
 // Creates the bot's conversation and its record in one commit, then its agent file. A folder already
-// there (one the owner made by hand) is adopted. Used by create_bot and the web app.
+// there (one the owner made by hand) is adopted. Used by create_bot and the web portal.
 async function createBot(commit: Commit, dir: string, input: BotInput, agent: AgentChange, now: number): Promise<Bot> {
 	const bot = await commit(async (tx) => {
 		const doc = await tx.doc(BotsDoc);
@@ -249,7 +249,7 @@ export function botSection(bots: Bot[], self: number): string | undefined {
 	];
 	if (me.instructions !== "") lines.push(`The owner's standing instructions for you, from your agent file ${me.file}:\n${me.instructions}`);
 	lines.push(
-		`Your folder ${me.folder}/ holds your agent file and your routines (routines.json); other bots have theirs. The owner edits them in the web app.`,
+		`Your folder ${me.folder}/ holds your agent file and your routines (routines.json); other bots have theirs. The owner edits them in the web portal.`,
 	);
 	if (others.length === 0) lines.push("There are no other bots yet. When the owner asks for one, make it with create_bot.");
 	else {
@@ -367,7 +367,7 @@ export type BotView = Bot & {
 	activeModel: string;
 	/** The newest message between the owner and the bot, for the bot list. */
 	preview?: { text: string; at: number };
-	/** The newest message from another bot; the web app shows it instead when it is newer and bot talk is on. */
+	/** The newest message from another bot; the web portal shows it instead when it is newer and bot talk is on. */
 	botPreview?: { text: string; at: number };
 };
 
@@ -394,7 +394,7 @@ export type Bots = Awaited<ReturnType<typeof createBots>>;
 
 /**
  * The host's view of the bots: the list with each bot's newest message and busy state, edits from the
- * web app, and one Chat per bot. Records the root as the main bot on first start. Call close() on shutdown.
+ * web portal, and one Chat per bot. Records the root as the main bot on first start. Call close() on shutdown.
  */
 export async function createBots(deps: {
 	harness: Harness;
@@ -496,7 +496,7 @@ export async function createBots(deps: {
 		publish();
 	}
 
-	// The doc changes when the web app edits a bot or a bot runs create_bot.
+	// The doc changes when the web portal edits a bot or a bot runs create_bot.
 	const watch = await harness.watchDoc(BotsDoc, context);
 	let pending = refresh(watch?.value ?? (await harness.snapshot(BotsDoc, context)));
 	await pending;
@@ -507,7 +507,7 @@ export async function createBots(deps: {
 		await pending;
 	});
 	const reload = () => (pending = pending.then(async () => refresh(await harness.snapshot(BotsDoc, context))));
-	// A hand edit to an agent file reaches the web app within a second; prompts re-read the file every turn anyway.
+	// A hand edit to an agent file reaches the web portal within a second; prompts re-read the file every turn anyway.
 	let timer: ReturnType<typeof setTimeout> | undefined;
 	const files = watchFiles(dir, { recursive: true }, (_event, filename) => {
 		if (filename !== null && !filename.toString().endsWith(AGENT_FILE)) return;
@@ -569,7 +569,7 @@ export async function createBots(deps: {
 			if (bot.name !== before.name) await deps.renamed?.(id, before.name, bot.name);
 			return { ...bot, ...pathsOf(dir, bot) };
 		},
-		/** Pins the bot to the top of the web app's list, after the bots already pinned, or unpins it. Pinning a pinned bot keeps its place. */
+		/** Pins the bot to the top of the web portal's list, after the bots already pinned, or unpins it. Pinning a pinned bot keeps its place. */
 		async pin(id: number, pinned: boolean): Promise<void> {
 			await harness.commit(async (tx) => {
 				const doc = await tx.doc(BotsDoc);

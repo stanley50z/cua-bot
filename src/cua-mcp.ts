@@ -32,7 +32,7 @@ export const connectCua = (command: string) => async () => {
 
 /**
  * Used by main.ts at startup. Lists the server's tools once; throws when the server can't start or answer. Tool calls
- * go through `call`, a session main.ts shares with the web app's Connections tab; without it, one of its own.
+ * go through `call`, a session main.ts shares with the web portal's Connections tab; without it, one of its own.
  */
 export async function createCuaExtension(
 	connect: () => Promise<McpClient>,

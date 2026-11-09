@@ -75,7 +75,7 @@ const failure = (value: string) => ({ ...text(value), isError: true as const });
 const clip = (value: string) => (value.length > MAX_TEXT ? `${value.slice(0, MAX_TEXT)}\n… (cut at ${MAX_TEXT} characters)` : value);
 const errorText = (error: unknown) => `Executor is unreachable: ${error instanceof Error ? error.message : String(error)}`;
 const WAITING =
-	"Waiting for the owner: an approval card is under your reply, and they send or discard it there. Don't call this again; you'll get an [approval] message with the outcome. In a routine nobody is watching; the card waits in the app until the owner opens it.";
+	"Waiting for the owner: an approval card is under your reply, and they send or discard it there. Don't call this again; you'll get an [approval] message with the outcome. In a routine nobody is watching; the card waits in the web portal until the owner opens it.";
 
 function output(result: CallToolResult, external: boolean) {
 	const content = toLlmContent(result).map((part) => (part.type === "text" ? { ...part, text: clip(part.text) } : part));

@@ -63,7 +63,7 @@ Copy `.env.example` to `.env`.
 | `CUABOT_MODEL` | no | `"provider/model"`, overriding `default` in `models.json`. |
 | `CUABOT_REASONING` | no | The bots' reasoning effort: `off`, `minimal`, `low`, `medium`, `high`, `xhigh` or `max`. Defaults to `medium`. A model that doesn't support the effort uses its nearest one. |
 | `CUABOT_PORT` | no | HTTP port. Defaults to `43142`. The server listens on `127.0.0.1` only. |
-| `CUABOT_ALLOWED_HOSTS` | no | Comma-separated host names of HTTPS proxies in front of the web app. See [Open it from your phone](web-app.md#open-it-from-your-phone). |
+| `CUABOT_ALLOWED_HOSTS` | no | Comma-separated host names of HTTPS proxies in front of the web portal. See [Open it from your phone](web-portal.md#open-it-from-your-phone). |
 
 ## Gmail and Calendar
 
@@ -93,7 +93,7 @@ The coding tools reach any `Host` alias in your `~/.ssh/config`. cua-bot stores 
 
 1. Refuses to start if `data/cua-bot.pid.json` points at a live process that answers on the recorded port. A live pid with nothing on the port is taken as reused after a reboot, and the start goes on.
 2. Runs `pnpm update "@earendil-works/*"`. This moves the Pi packages to their newest release within `package.json`'s ranges, once that release is a day old (pnpm's minimum release age), and records it in the lockfile. Every other dependency stays pinned. It prints any version that changed; the full pnpm output goes to `data/logs/stdout.log`. If the update fails, for example offline, it says so and starts with the installed versions.
-3. Waits for the port to accept connections, then prints the `/say` URL and the web app URL.
+3. Waits for the port to accept connections, then prints the `/say` URL and the web portal URL.
 
 Every Pi package shares the same `^` range in `package.json` because each `pi-env` release requires the exact `pi-durable` of the same version. The update moves them together.
 

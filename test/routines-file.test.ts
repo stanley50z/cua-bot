@@ -1,4 +1,4 @@
-// routines/<bot>.json <-> Durable sync and the host-side manager the web UI uses: create from file,
+// routines/<bot>.json <-> Durable sync and the host-side manager the web portal uses: create from file,
 // edit/remove/add by rewriting the file, invalid files rejected without touching running state,
 // adoption when the file is missing, and add/update/delete/run operations.
 // Run from the repo root:  node --test test/routines-file.test.ts

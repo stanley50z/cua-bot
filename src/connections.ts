@@ -1,4 +1,4 @@
-// What the web app's Connections tab shows (Settings > Connections): the computer cua-bot runs on, each machine of the
+// What the web portal's Connections tab shows (Settings > Connections): the computer cua-bot runs on, each machine of the
 // owner's ~/.ssh/config with whether its SSH port answers, and every Cua Space, under the computer that provides it.
 // main.ts builds one with createConnections() and web.ts serves a fresh check at GET /api/connections. Nothing here is
 // configured: the machines are the owner's SSH hosts and the Spaces are what Cua lists, so it works the same for anyone.
