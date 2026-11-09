@@ -333,7 +333,7 @@ const computerUse = defineTool({
 			Object.assign(await tx.doc(ChildSpaceDoc, id), { id: space.id, name: space.name ?? space.id });
 			return id;
 		}, callContext);
-		await api.details({ conversationId: child }, callContext);
+		await api.details({ conversationId: child, space: space.name ?? space.id }, callContext);
 		const handle = await api.conversation(child, callContext);
 		if (handle === undefined) throw new Error("computer_use lost its child conversation");
 		const request = { type: "input", content: `${instructions}\n\nTask:\n${task}`, requestId: `computer:${api.taskId}` } as const;

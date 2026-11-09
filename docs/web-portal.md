@@ -65,13 +65,13 @@ A bot talks to you only through its `send_message` tool ([src/bots.ts](../src/bo
 
 Paste an image (a screenshot, or Copy image in a browser) into the message box and it waits there as a thumbnail; its ✕ removes it. Send with or without text, and the bot gets the images after your text.
 
-A paste that also carries plain text, such as spreadsheet cells, pastes the text instead. Your bubble shows the images; click one to open it in the image viewer over the chat. Escape, the ✕, or a click outside the image closes it. The box keeps them when you switch bots, but a reload drops them.
+A paste that also carries plain text, such as spreadsheet cells, pastes the text instead. Your bubble shows the images; click one to open it in the image viewer over the chat. Escape, the ✕, or a click outside the image closes it. Each bot keeps its own, but a reload drops them.
 
 ## Quotes, quick replies and reactions
 
 Hover a message for its toolbar. Reply quotes the whole message. To quote part of one, select the text and click Add to chat, or press Ctrl+L.
 
-A quote lands in the message box as a chip at your caret, so you can alternate: quote, reply, quote, reply. Backspace or the chip's ✕ removes it, and the box keeps its chips when you switch bots. The bot gets the message in the same order, each quote as markdown `> ` lines with your text between them, separated by blank lines. Your bubble shows the quotes as grey blocks in place.
+A quote lands in the message box as a chip at your caret, so you can alternate: quote, reply, quote, reply. Backspace or the chip's ✕ removes it. Each bot has its own draft, typed text and chips together, kept in this browser across reloads. The bot gets the message in the same order, each quote as markdown `> ` lines with your text between them, separated by blank lines. Your bubble shows the quotes as grey blocks in place.
 
 The bar over selected text has three rows: quick replies (Yes, No, Explain), the quick emoji, then Add to chat. It opens below the selection when there's no room above. A quick reply or emoji works like Add to chat and also types that reply after the quote, so you can edit it before sending.
 
@@ -83,7 +83,7 @@ If the bot is working, the change waits for that turn to end, and until then onl
 
 ## Computer pane
 
-The right column shows the default Space's screen live, plus each click and keystroke of the most recent computer-use task. When that task ran on another Space, the steps heading names it. The frame turns amber while the bot is driving.
+The right column shows the default Space's screen live, plus each click and keystroke of the most recent computer-use task. When that task ran on another Space, the steps heading names it. The frame turns amber while the bot is driving the Space on screen. While it works on another Space, the frame stays plain and the status above it names that Space.
 
 All open panes share one media session: about 15 fps at the display's native resolution, roughly 100 KB/s on a quiet screen and more when it changes a lot, decoded with WebCodecs. A pane streams only while its tab is visible, unless you have control. The session closes when the last pane closes. If the stream is down, or the browser lacks WebCodecs, the pane stays black. The caption says Connecting… while it retries, or that the browser can't play the live screen.
 

@@ -16,7 +16,7 @@ import { configure, createRegistry, defineExtension, defineTool, type Extension,
 import { createNodePhotonImages } from "@earendil-works/pi-durable/images/node";
 import type { ImageProcessor } from "@earendil-works/pi-durable/tools";
 import { createBots, createBotsExtension } from "../src/bots.ts";
-import { BOT_MESSAGE, type ChatEvent, type ChatItem, REACTION, reactionText, SEND_MESSAGE, toChatItem } from "../src/chat.ts";
+import { BOT_MESSAGE, type ChatEvent, type ChatItem, REACTION, reactionText, SEND_MESSAGE, toChatItem, toChatLive } from "../src/chat.ts";
 import { createMemory, messageNote } from "../src/memory.ts";
 import { createPcExtensions } from "../src/pc.ts";
 import { createBotServer } from "../src/web.ts";
@@ -435,6 +435,12 @@ const delegateExtension = (onChild: () => Promise<void>, idle = false) =>
 		],
 	});
 const delegate = fauxAssistantMessage([fauxToolCall("computer_use", {}, { id: "call-1" })], { stopReason: "toolUse" });
+
+test("the live state says which Space a running computer_use call is on", () => {
+	const tool = (details: unknown) => toChatLive({ tools: [{ callId: "a", name: "computer_use", status: "running", details }] } as never).tools[0];
+	assert.deepEqual(tool({ conversationId: 7, space: "Windows PC" }), { callId: "a", name: "computer_use", status: "running", child: 7, space: "Windows PC" });
+	assert.deepEqual(tool(null), { callId: "a", name: "computer_use", status: "running" }, "no Space until the call has picked one");
+});
 
 test("a steer reaches the running computer_use child at its next step, and the bot when that call returns", async () => {
 	const started = Promise.withResolvers<void>();

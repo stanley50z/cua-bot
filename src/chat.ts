@@ -95,8 +95,8 @@ export type ChatLive = {
 	busy: boolean;
 	/** What the in-flight reply has sent the owner so far, as send_message's text streams in. */
 	partial: string;
-	/** `child` is the conversation a running computer_use call drives the Space from. */
-	tools: { callId: string; name: string; status: "pending" | "running" | "done"; output?: string; child?: number }[];
+	/** `child` is the conversation a running computer_use call drives the Space from, and `space` that Space's name. */
+	tools: { callId: string; name: string; status: "pending" | "running" | "done"; output?: string; child?: number; space?: string }[];
 	retry?: { at: number; error: string };
 };
 
@@ -192,17 +192,16 @@ export function toChatLive(live: Readonly<LiveState> | null): ChatLive {
 		busy: live?.run !== undefined,
 		partial: partial === undefined ? "" : sentText(partial.content as readonly { type: string }[]),
 		tools: (live?.tools ?? []).filter((slot) => slot.name !== SEND_MESSAGE).map((slot) => {
-			const details = slot.details;
-			const child =
-				details !== null && typeof details === "object" && !Array.isArray(details) && typeof details.conversationId === "number"
-					? details.conversationId
-					: undefined;
+			const details = slot.details !== null && typeof slot.details === "object" && !Array.isArray(slot.details) ? slot.details : undefined;
+			const child = typeof details?.conversationId === "number" ? details.conversationId : undefined;
+			const space = typeof details?.space === "string" ? details.space : undefined;
 			return {
 				callId: slot.callId,
 				name: slot.name,
 				status: slot.status,
 				...(slot.output === undefined ? {} : { output: slot.output.slice(-TOOL_TEXT_LIMIT) }),
 				...(child === undefined ? {} : { child }),
+				...(space === undefined ? {} : { space }),
 			};
 		}),
 		...(live?.generation?.retry === undefined ? {} : { retry: { ...live.generation.retry } }),

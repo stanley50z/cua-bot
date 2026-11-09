@@ -229,7 +229,9 @@ dialog .row .btn.danger { margin-right: auto; }
 /* computer pane */
 .side { display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--bg); }
 .side .bar { background: var(--bg); }
-.side .bar .state { margin-left: auto; }
+.side .bar .state { margin-left: auto; line-height: 1.15; }
+.side .bar h1 { flex: none; max-width: 55%; }
+.side .bar .btn { flex: none; }
 .screen { flex: none; margin: 16px 16px 0; padding: 0; border-radius: 8px; overflow: hidden; aspect-ratio: 16 / 10; background: #000; border: 1px solid var(--line); position: relative; display: grid; place-items: center; cursor: zoom-in; }
 .screen.drive { outline: 3px solid var(--drive); outline-offset: -1px; border-color: var(--drive); }
 /* The canvas hides while the stream is down, so a stale frame never lingers over the black pane. */
@@ -732,7 +734,7 @@ function markdown(text) {
 /* ---------- chat state ---------- */
 // `bot` is the id of the bot whose chat is open; `bots` is the list from /api/bots. `picking` is the reply whose
 // reaction picker is open; `reacting` holds reactions sent but not yet back as items, by "<reply id>:<emoji>".
-const state = { bot: null, bots: [], items: [], ids: new Set(), before: null, live: { busy: false, partial: "", tools: [] }, queued: [], open: new Set(), computer: { steps: [] }, approvals: [], picking: null, reacting: new Map(), attachments: [] };
+const state = { bot: null, bots: [], items: [], ids: new Set(), before: null, live: { busy: false, partial: "", tools: [] }, queued: [], open: new Set(), computer: { steps: [] }, approvals: [], picking: null, reacting: new Map() };
 // The expanded live screen (see "expanded live screen" below): whether the owner has control of the Space, the
 // keys they hold down there, and their input on its way.
 const view = { owner: false, held: new Map(), queue: [], sending: null, lastMove: 0 };
@@ -945,8 +947,8 @@ async function react(target, emoji, on) {
 
 /* ---------- quoted replies ---------- */
 // A quote lands in the message box as a chip at the owner's caret, so what they type after it is their reply to it;
-// several quotes interleave with their replies. Backspace or the chip's ✕ removes it. The box keeps its chips while
-// the owner switches bots, so a reply from one bot can be quoted to another.
+// several quotes interleave with their replies. Backspace or the chip's ✕ removes it. Chips are part of
+// the open bot's draft (see restoreDraft).
 let caret = null; // the owner's last caret in the message box, kept while they select text in a message
 const inChip = (node) => Boolean((node.nodeType === 1 ? node : node.parentElement)?.closest(".qchip"));
 document.addEventListener("selectionchange", () => {
@@ -1032,22 +1034,27 @@ function composedText() {
     .filter((part) => part !== "").join("\n\n");
 }
 
-// The unsent message box, kept in this browser so a reload or a cua-bot restart brings it back. The box is shared
-// across bots (see "quoted replies"), so there is one draft. Every change to the box saves it, including a send,
-// which empties it, and a failed send, which puts it back.
-const DRAFT_KEY = "cua-bot.draft";
+// The unsent message box, one draft per bot, kept in this browser so a reload or a cua-bot restart brings it back.
+// selectBot shows the open bot's draft. Every change to the box saves it, including a send, which empties it.
+const draftKey = (bot) => "cua-bot.draft." + bot;
+// Held the one draft all bots used to share; the first bot opened inherits it.
+const SHARED_DRAFT_KEY = "cua-bot.draft";
+function saveDraft(bot, parts) {
+  if (parts.length === 0) localStorage.removeItem(draftKey(bot));
+  else localStorage.setItem(draftKey(bot), JSON.stringify(parts));
+}
 function restoreDraft() {
+  if (state.bot == null) return; // the bot list failed to load, so no bot is open
   let parts = [];
-  try { parts = JSON.parse(localStorage.getItem(DRAFT_KEY) || "[]"); } catch { /* unreadable: start empty */ }
-  if (!Array.isArray(parts)) return;
+  try { parts = JSON.parse(localStorage.getItem(draftKey(state.bot)) ?? localStorage.getItem(SHARED_DRAFT_KEY) ?? "[]"); } catch { /* unreadable: start empty */ }
+  localStorage.removeItem(SHARED_DRAFT_KEY);
+  if (!Array.isArray(parts)) parts = [];
+  caret = null;
   $("input").replaceChildren(...parts.map((part) =>
     typeof part?.quote === "string" ? quoteChip(part.quote) : document.createTextNode(String(part?.text ?? ""))));
 }
-restoreDraft();
 new MutationObserver(() => {
-  const parts = inputParts();
-  if (parts.length === 0) localStorage.removeItem(DRAFT_KEY);
-  else localStorage.setItem(DRAFT_KEY, JSON.stringify(parts));
+  if (state.bot != null) saveDraft(state.bot, inputParts());
 }).observe($("input"), { childList: true, subtree: true, characterData: true });
 
 // The owner's message as its blockquotes (without their "> ") and the text between them, in order.
@@ -1607,22 +1614,26 @@ function addChip(block, label, status, key) {
 
 function renderLive() {
   const live = state.live;
-  const driving = live.tools.some((tool) => tool.name === "computer_use" && tool.status !== "done");
+  const task = live.tools.find((tool) => tool.name === "computer_use" && tool.status !== "done");
+  const driving = task !== undefined;
   const label = $("chat-state");
   label.className = "state" + (live.retry ? " bad" : driving ? " drive" : live.busy ? " busy" : "");
   label.textContent = live.retry ? `Retrying after an error: ${live.retry.error}` : driving ? "Using the computer" : live.busy ? (live.partial ? "Replying" : "Working") : "";
   $("stop").hidden = !live.busy;
+  // The pane shows only the default Space, so a task on another Space neither drives this screen nor waits for the owner.
+  const onScreen = driving && task.space === state.computer.space;
+  const elsewhere = driving && !onScreen ? task.space : undefined;
   // While the owner has control, a running computer task waits for them instead of driving.
-  const botDriving = driving && !view.owner;
+  const botDriving = onScreen && !view.owner;
   const space = $("space-state");
   space.className = "state" + (botDriving ? " drive" : "");
-  space.textContent = view.owner ? "You're in control" : botDriving ? "Bot is driving" : "Idle";
+  space.textContent = view.owner ? "You're in control" : botDriving ? "Bot is driving" : elsewhere ? `Bot is on ${elsewhere}` : "Idle";
   $("screen").classList.toggle("drive", botDriving);
   $("screen").querySelector(".tag").hidden = !botDriving;
   const who = $("view-who");
   who.className = "who" + (view.owner ? " mine" : botDriving ? " drive" : "");
   who.replaceChildren(icon(view.owner ? "i-pointer" : "i-eye"),
-    view.owner ? (driving ? "You're in control. The bot waits for you" : "You're in control") : botDriving ? "Watching the bot drive" : "Watching. The bot is idle");
+    view.owner ? (onScreen ? "You're in control. The bot waits for you" : "You're in control") : botDriving ? "Watching the bot drive" : elsewhere ? `Watching. The bot is on ${elsewhere}` : "Watching. The bot is idle");
   $("view-control").textContent = view.owner ? "I'm done" : "Take control";
   $("view-control").title = view.owner ? "Give the computer back to the bot" : "Drive the computer with your mouse and keyboard";
 }
@@ -2048,6 +2059,7 @@ async function selectBot(id) {
   savePlace(false);
   renderBots();
   if (!switched && source) return;
+  if (switched) { restoreDraft(); renderAttachments(); }
   Object.assign(state, { items: [], ids: new Set(), before: null, live: { busy: false, partial: "", tools: [] }, queued: [], open: new Set(), computer: { steps: [] }, picking: null, reacting: new Map() });
   showChatError("");
   renderChat();
@@ -2209,6 +2221,8 @@ $("b-delete").addEventListener("click", async () => {
   $("b-delete").disabled = true;
   try {
     await request("DELETE", "/api/bots/" + bot.id);
+    saveDraft(bot.id, []);
+    unsentImages.delete(bot.id);
     $("bot-dialog").close();
     await loadBots();
     await selectBot(mainId());
@@ -2228,7 +2242,7 @@ async function sendMessage(text, images = []) {
     showChatError("");
     return true;
   } catch (error) {
-    state.queued.splice(state.queued.indexOf(queued), 1);
+    state.queued = state.queued.filter((item) => item !== queued);
     renderChat();
     showChatError("Your message was not sent: " + error.message);
     return false;
@@ -2236,13 +2250,19 @@ async function sendMessage(text, images = []) {
 }
 
 /* ---------- pasted images ---------- */
-// Images pasted into the message box wait in state.attachments as { data (base64), mimeType } and go with the next
-// send. Like the draft text, they are shared across bots; unlike it, a reload drops them.
+// Images pasted into the message box wait in imagesOf(bot) as { data (base64), mimeType } and go with the next send.
+// Like the draft text, they are per bot; unlike it, a reload drops them.
+const unsentImages = new Map();
+function imagesOf(bot) {
+  if (!unsentImages.has(bot)) unsentImages.set(bot, []);
+  return unsentImages.get(bot);
+}
 const imageUrl = (image) => `data:${image.mimeType};base64,${image.data}`;
 function renderAttachments() {
   const row = $("attachments");
-  row.hidden = state.attachments.length === 0;
-  row.replaceChildren(...state.attachments.map((image) => {
+  const images = imagesOf(state.bot);
+  row.hidden = images.length === 0;
+  row.replaceChildren(...images.map((image) => {
     const pic = el("div", "pic");
     const img = el("img");
     img.src = imageUrl(image);
@@ -2253,7 +2273,7 @@ function renderAttachments() {
     remove.title = "Remove";
     remove.append(icon("i-x"));
     remove.addEventListener("click", () => {
-      state.attachments.splice(state.attachments.indexOf(image), 1);
+      images.splice(images.indexOf(image), 1);
       renderAttachments();
       $("input").focus();
     });
@@ -2276,8 +2296,9 @@ $("input").addEventListener("paste", async (event) => {
   const files = [...(event.clipboardData?.files ?? [])].filter((file) => file.type.startsWith("image/"));
   if (files.length === 0 || event.clipboardData.getData("text/plain") !== "") return;
   event.preventDefault();
+  const images = imagesOf(state.bot);
   try {
-    state.attachments.push(...(await Promise.all(files.map(readImage))));
+    images.push(...(await Promise.all(files.map(readImage))));
     renderAttachments();
   } catch (error) { showChatError("Could not read the pasted image: " + error.message); }
 });
@@ -2286,15 +2307,17 @@ $("composer").addEventListener("submit", async (event) => {
   event.preventDefault();
   const input = $("input");
   const text = composedText();
-  const images = state.attachments;
+  const bot = state.bot, images = imagesOf(bot);
   if (text === "" && images.length === 0) return;
-  const draft = [...input.childNodes];
+  const parts = inputParts();
+  const sending = images.splice(0);
   input.replaceChildren();
-  state.attachments = [];
   renderAttachments();
-  if (!(await sendMessage(text, images))) {
-    input.replaceChildren(...draft);
-    state.attachments = [...images, ...state.attachments];
+  if (!(await sendMessage(text, sending))) {
+    // The owner may have opened another bot meanwhile, so the message goes back to the bot it was for.
+    saveDraft(bot, parts);
+    if (bot === state.bot) restoreDraft();
+    images.unshift(...sending);
     renderAttachments();
   }
 });
