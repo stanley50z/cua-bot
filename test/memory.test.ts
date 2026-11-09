@@ -330,7 +330,7 @@ test("a broken tags.json says so instead of quietly dropping the owner's tags", 
 	}));
 
 // Runs one turn of a bot that makes `calls`, returning the memory section of each request and what the tools answered.
-async function turn(memory: Memory, botsOf: (rootId: number) => { id: number; name: string }[], calls: { name: string; args: JsonObject }[], before?: (rootId: number) => Promise<unknown>) {
+async function turn(memory: Memory, botsOf: (rootId: number) => { id: number; name: string; main?: boolean }[], calls: { name: string; args: JsonObject }[], before?: (rootId: number) => Promise<unknown>) {
 	const prompts: string[] = [];
 	let results = "";
 	let rootId = 0;
@@ -403,6 +403,96 @@ test("a conversation that isn't a bot gets only the facts every bot gets", () =>
 		const { prompts } = await turn(memory, () => [{ id: 99, name: "Dev" }], [{ name: "search_memory", args: { keywords: ["nothing"] } }]);
 		assert.match(prompts[0] ?? "", /For everyone/);
 		assert.doesNotMatch(prompts[0] ?? "", /Job rule/);
+	}));
+
+const alfredAndDev = (id: number) => [{ id, name: "Alfred", main: true }, { id: 99, name: "Dev" }];
+const scoutAndDev = (id: number) => [{ id, name: "Scout", main: false }, { id: 99, name: "Dev" }];
+
+test("the main bot reads and changes every fact, and is still only given its own", () =>
+	withDir(async (dir) => {
+		const memory = createMemory({ dir, now: () => new Date("2026-10-31T09:00:00") });
+		await memory.remember("Dev secret rule", "profile", ["@dev"]);
+		await memory.remember("Dev typo fcat", "profile", ["@dev"]);
+		await memory.remember("Dev wrong owner", "log", ["@dev"]);
+		await memory.remember("Dev stale plan", "log", ["@dev"]);
+		await memory.remember("Dev old trip", "log", ["@dev"]);
+		const { prompts, results } = await turn(memory, alfredAndDev, [
+			{ name: "list_memory", args: {} },
+			{ name: "edit_memory", args: { fact: "Dev typo fcat", to: "Dev typo fact", tier: "profile" } },
+			{ name: "retag_memory", args: { fact: "Dev wrong owner", tags: ["every-bot", "@alfred"], tier: "log" } },
+			{ name: "forget", args: { fact: "Dev stale plan" } },
+		]);
+		assert.doesNotMatch(prompts[0] ?? "", /Dev secret/, "managing a fact doesn't put it in the prompt");
+		assert.match(results, /\(2026-10-31\) Dev secret rule \[@dev\] \(profile\)/);
+		assert.match(results, /\(2026-10-31\) Dev old trip \[@dev\] \(log\)/);
+		assert.equal(await readFile(join(dir, "profile.md"), "utf8"), "# About the owner\n- (2026-10-31) [@dev] Dev secret rule\n- (2026-10-31) [@dev] Dev typo fact\n");
+		assert.equal(await readFile(join(dir, "log", "2026-10.md"), "utf8"), "# 2026-10\n- (2026-10-31) [every-bot, @alfred] Dev wrong owner\n- (2026-10-31) [@dev] Dev old trip\n");
+	}));
+
+test("only the main bot can list, edit, or retag every fact", () =>
+	withDir(async (dir) => {
+		const memory = createMemory({ dir, now: () => new Date("2026-10-31T09:00:00") });
+		await memory.remember("Dev secret rule", "profile", ["@dev"]);
+		const before = await readFile(join(dir, "profile.md"), "utf8");
+		const { results } = await turn(memory, scoutAndDev, [
+			{ name: "list_memory", args: {} },
+			{ name: "edit_memory", args: { fact: "Dev secret rule", to: "Changed", tier: "profile" } },
+			{ name: "retag_memory", args: { fact: "Dev secret rule", tags: ["every-bot"], tier: "profile" } },
+			{ name: "forget", args: { fact: "Dev secret rule" } },
+		]);
+		assert.equal(results.match(/Only the main bot/g)?.length, 3);
+		assert.doesNotMatch(results, /Dev secret rule \[/);
+		assert.equal(await readFile(join(dir, "profile.md"), "utf8"), before);
+	}));
+
+test("forget can take a fact out of one tier, so a log fact can move to the profile", () =>
+	withDir(async (dir) => {
+		const memory = createMemory({ dir, now: () => new Date("2026-10-31T09:00:00") });
+		await memory.remember("Moves to profile", "log", ["@dev"]);
+		await memory.remember("Moves to profile", "profile", ["@dev"]);
+		await memory.remember("In both tiers", "log", ["@dev"]);
+		await memory.remember("In both tiers", "profile", ["@dev"]);
+		await turn(memory, alfredAndDev, [
+			{ name: "forget", args: { fact: "Moves to profile", tier: "log" } },
+			{ name: "forget", args: { fact: "In both tiers" } },
+		]);
+		assert.equal(await readFile(join(dir, "profile.md"), "utf8"), "# About the owner\n- (2026-10-31) [@dev] Moves to profile\n");
+		assert.equal(await readFile(join(dir, "log", "2026-10.md"), "utf8"), "# 2026-10\n");
+	}));
+
+test("the main bot's edits and retags report what went wrong", () =>
+	withDir(async (dir) => {
+		const memory = createMemory({ dir, now: () => new Date("2026-10-31T09:00:00") });
+		await memory.remember("First fact", "profile", ["@dev"]);
+		await memory.remember("Second fact", "profile", ["@dev"]);
+		const before = await readFile(join(dir, "profile.md"), "utf8");
+		const { results } = await turn(memory, alfredAndDev, [
+			{ name: "edit_memory", args: { fact: "Missing fact", to: "Anything", tier: "profile" } },
+			{ name: "edit_memory", args: { fact: "First fact", to: "Second fact", tier: "profile" } },
+			{ name: "retag_memory", args: { fact: "Missing fact", tags: ["@dev"], tier: "profile" } },
+			{ name: "retag_memory", args: { fact: "First fact", tags: ["nope"], tier: "profile" } },
+		]);
+		assert.equal(results.match(/No saved profile fact matches/g)?.length, 2);
+		assert.match(results, /is already saved/);
+		assert.match(results, /No tag is named nope/);
+		assert.equal(await readFile(join(dir, "profile.md"), "utf8"), before);
+	}));
+
+test("list_memory returns every fact of a memory larger than a normal tool result", () =>
+	withDir(async (dir) => {
+		const memory = createMemory({ dir, now: () => new Date("2026-10-31T09:00:00") });
+		const padding = "x".repeat(480);
+		for (let n = 0; n < 300; n += 1) await memory.remember(`Fact number ${n} ${padding}`, "profile", ["@dev"]);
+		const { results } = await turn(memory, alfredAndDev, [{ name: "list_memory", args: {} }]);
+		assert.match(results, /Fact number 0 x/);
+		assert.match(results, /Fact number 150 x/);
+		assert.match(results, /Fact number 299 x/);
+	}));
+
+test("list_memory says when nothing is saved", () =>
+	withDir(async (dir) => {
+		const { results } = await turn(createMemory({ dir }), alfredAndDev, [{ name: "list_memory", args: {} }]);
+		assert.match(results, /Nothing saved yet/);
 	}));
 
 // The web portal's memory routes over `memory`, with two bots to tag.

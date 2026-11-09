@@ -1,7 +1,8 @@
 // Long-term memory about the owner, as plain markdown the owner can read and edit: one store, data/memory/,
 // where each fact's tags say which bots get it. main.ts runs migrateMemory, installs createMemoryExtension
-// so every bot gets remember / forget / search_memory and sees its facts in every request, and hands the store to
-// the web portal (GET/POST /api/memory). Layout of the store:
+// so every bot gets remember / forget / search_memory and sees its facts in every request, gives the main bot
+// list_memory / edit_memory / retag_memory over every fact, and hands the store to the web portal
+// (GET/POST /api/memory). Layout of the store:
 //   profile.md          enduring facts about the owner ("About the owner")
 //   log/YYYY-MM.md      dated facts, one file per month
 //   tags.json           the owner's tags and the bots in each, by id
@@ -230,12 +231,12 @@ export function createMemory(options: { dir: string; now?: () => Date }) {
 		/** Replace the tags of the tier's fact whose text matches; no tags leaves it for no bot. Returns it, or undefined when none matches. */
 		retag: (text: string, tier: Tier, tags: string[]) => serial(() => changeFact(tier, text, (known) => ({ ...known, tags: [...new Set(tags)] }))),
 
-		/** Remove every fact whose text matches, ignoring case and spacing; given `seen`, only facts with one of those tags. Returns the removed facts. */
-		forget: (text: string, seen?: ReadonlySet<string>) =>
+		/** Remove every fact whose text matches, ignoring case and spacing; given `seen`, only facts with one of those tags, and given `tier`, only that tier. Returns the removed facts. */
+		forget: (text: string, seen?: ReadonlySet<string>, tier?: Tier) =>
 			serial(async () => {
 				const removed: Fact[] = [];
 				await rewrite((fact) => {
-					if (!same(fact.text, text) || (seen !== undefined && !canSee(fact, seen))) return fact;
+					if (!same(fact.text, text) || (seen !== undefined && !canSee(fact, seen)) || (tier !== undefined && fact.tier !== tier)) return fact;
 					removed.push(fact);
 					return null;
 				});
@@ -397,6 +398,13 @@ const text = (value: string) => ({ output: [{ type: "text" as const, text: value
 const failure = (value: string) => ({ output: [{ type: "text" as const, text: value }], isError: true as const });
 const listed = (facts: Fact[]) => facts.map((fact) => `- (${fact.date}) ${fact.text} [${fact.tags.join(", ")}] (${fact.tier})`).join("\n");
 const seenBy = (me: BotRef | undefined, tags: TagView[]) => new Set(me === undefined ? [EVERY_BOT] : tags.filter((tag) => tag.bots.includes(me.id)).map((tag) => tag.slug));
+const tierParameter = Type.Union([Type.Literal("profile"), Type.Literal("log")], { description: "profile or log" });
+const notMainBot = failure("Only the main bot manages all memory.");
+const noSuchFact = (fact: string, tier: Tier) => failure(`No saved ${tier} fact matches "${normalize(fact)}".`);
+const unknownTag = (names: string[], tags: TagView[]) => {
+	const missing = names.find((name) => !tags.some((known) => known.slug === name));
+	return missing === undefined ? undefined : failure(`No tag is named ${missing}. Tags: ${tags.map((tag) => tag.slug).join(", ")}.`);
+};
 
 /** What `search_memory` finds for a message from the owner or another bot to bot `id`, as a note for that bot; undefined when it finds nothing. writeMemoryNote places it before the message. */
 export async function messageNote(memory: Memory, message: string, id: number, bots: BotRef[]): Promise<string | undefined> {
@@ -407,9 +415,11 @@ export async function messageNote(memory: Memory, message: string, id: number, b
 
 /**
  * Every bot's memory tools and prompt section. `bots` lists the bots, to resolve who holds which tag and whose
- * conversation is asking; a conversation that isn't a bot has only every-bot. Installed by src/main.ts.
+ * conversation is asking; a conversation that isn't a bot has only every-bot. The main bot's tools reach every
+ * fact, for its nightly memory routine, but its prompt and automatic searches stay limited to its tags, so
+ * managing a fact doesn't put it in every request. Installed by src/main.ts.
  */
-export function createMemoryExtension(deps: { memory: Memory; bots: (read: Pick<Harness, "snapshot">, context: Context) => Promise<BotRef[]> }): Extension {
+export function createMemoryExtension(deps: { memory: Memory; bots: (read: Pick<Harness, "snapshot">, context: Context) => Promise<(BotRef & { main?: boolean })[]> }): Extension {
 	const { memory } = deps;
 	const viewer = async (conversationId: ConversationId, read: Pick<Harness, "snapshot">, context: Context) => {
 		const bots = await deps.bots(read, context);
@@ -425,12 +435,12 @@ export function createMemoryExtension(deps: { memory: Memory; bots: (read: Pick<
 		parameters: Type.Object({
 			fact: Type.String({ description: "The fact, as one short sentence" }),
 			tags: Type.Array(Type.String(), { description: "Tags of the bots that need it" }),
-			tier: Type.Union([Type.Literal("profile"), Type.Literal("log")], { description: "profile or log" }),
+			tier: tierParameter,
 		}),
 		execute: async (args, api, context) => {
 			const { tags } = await viewer(api.conversationId, api, context);
-			const missing = args.tags.find((tag) => !tags.some((known) => known.slug === tag));
-			if (missing !== undefined) return failure(`No tag is named ${missing}. Tags: ${tags.map((tag) => tag.slug).join(", ")}.`);
+			const unknown = unknownTag(args.tags, tags);
+			if (unknown !== undefined) return unknown;
 			try {
 				const { fact, added } = await memory.remember(args.fact, args.tier, args.tags);
 				return text(`${added ? "remembered" : "already remembered"} (${fact.tags.join(", ")}, ${fact.tier}): ${fact.text}`);
@@ -441,11 +451,59 @@ export function createMemoryExtension(deps: { memory: Memory; bots: (read: Pick<
 	});
 	const forget = defineTool({
 		name: "forget",
-		description: "Remove a fact you can see from long-term memory. Pass the fact's exact text as shown in memory, without its tags or date.",
-		parameters: Type.Object({ fact: Type.String({ description: "Exact text of the fact to remove" }) }),
+		description: "Remove a fact you can see from long-term memory; the main bot can remove any fact. Pass the fact's exact text as shown in memory, without its tags or date. With tier, it goes from that tier only; without, from both.",
+		parameters: Type.Object({ fact: Type.String({ description: "Exact text of the fact to remove" }), tier: Type.Optional(tierParameter) }),
 		execute: async (args, api, context) => {
-			const removed = await memory.forget(args.fact, (await viewer(api.conversationId, api, context)).seen);
+			const { me, seen } = await viewer(api.conversationId, api, context);
+			const removed = await memory.forget(args.fact, me?.main === true ? undefined : seen, args.tier);
 			return removed.length > 0 ? text(`forgot:\n${listed(removed)}`) : failure(`No saved fact matches "${normalize(args.fact)}".`);
+		},
+	});
+	const listMemory = defineTool({
+		name: "list_memory",
+		description: "Main bot only: list every saved fact, whichever bots it is for, with its tags and tier.",
+		parameters: Type.Object({}),
+		// A clean-up pass has to see every fact, and the store soon outgrows the default 50 KB.
+		outputLimits: { maxBytes: 4 * 1024 * 1024, maxLines: 100_000 },
+		execute: async (_args, api, context) => {
+			if ((await viewer(api.conversationId, api, context)).me?.main !== true) return notMainBot;
+			const { profile, log } = await memory.all();
+			return text(profile.length + log.length > 0 ? listed([...profile, ...log]) : "Nothing saved yet.");
+		},
+	});
+	const editMemory = defineTool({
+		name: "edit_memory",
+		description: "Main bot only: reword any saved fact, keeping its date and tags.",
+		parameters: Type.Object({
+			fact: Type.String({ description: "Exact text of the fact to change" }),
+			to: Type.String({ description: "The new text, as one short sentence" }),
+			tier: tierParameter,
+		}),
+		execute: async (args, api, context) => {
+			if ((await viewer(api.conversationId, api, context)).me?.main !== true) return notMainBot;
+			try {
+				const edited = await memory.edit(args.fact, args.to, args.tier);
+				return edited === undefined ? noSuchFact(args.fact, args.tier) : text(`edited (${edited.tier}): ${edited.text}`);
+			} catch (error) {
+				return failure(error instanceof Error ? error.message : String(error));
+			}
+		},
+	});
+	const retagMemory = defineTool({
+		name: "retag_memory",
+		description: "Main bot only: replace the tags of any saved fact, which sets the bots that get it. With no tags, it reaches no bot.",
+		parameters: Type.Object({
+			fact: Type.String({ description: "Exact text of the fact to change" }),
+			tags: Type.Array(Type.String(), { description: "The fact's new tags" }),
+			tier: tierParameter,
+		}),
+		execute: async (args, api, context) => {
+			const { me, tags } = await viewer(api.conversationId, api, context);
+			if (me?.main !== true) return notMainBot;
+			const unknown = unknownTag(args.tags, tags);
+			if (unknown !== undefined) return unknown;
+			const retagged = await memory.retag(args.fact, args.tier, args.tags);
+			return retagged === undefined ? noSuchFact(args.fact, args.tier) : text(`tagged (${retagged.tags.join(", ")}, ${retagged.tier}): ${retagged.text}`);
 		},
 	});
 	const searchMemory = defineTool({
@@ -459,7 +517,7 @@ export function createMemoryExtension(deps: { memory: Memory; bots: (read: Pick<
 	});
 	return defineExtension({
 		name: "memory",
-		tools: [remember, forget, searchMemory],
+		tools: [remember, forget, searchMemory, listMemory, editMemory, retagMemory],
 		sections: [
 			section("memory", async (input, context) => {
 				const { bots, tags, me, seen } = await viewer(input.conversationId, input.read, context);

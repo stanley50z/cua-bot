@@ -21,7 +21,7 @@ Every `/api/chat*` route takes `?bot=<id>`, or a `bot` field in the POST body. W
 | Route | Does |
 | --- | --- |
 | `GET /api/chat` | Pages the transcript. |
-| `POST /api/chat` | `{"text", "images"?, "whenBusy"?}` sends a message without waiting for the answer. While the bot is busy, `"steer"` (the default) joins the current turn after the running tool round, and `"followUp"` waits for the turn to end. Text or an image is required. |
+| `POST /api/chat` | `{"text", "images"?, "whenBusy"?}` sends a message without waiting for the answer. While the bot is busy, `"steer"` (the default) joins the current turn after the running tool round and goes to a running `computer_use` child after its current tool, and `"followUp"` waits for the turn to end. Text or an image is required. |
 | `GET /api/chat/image?entry=<id>&index=<n>` | Serves back one of the owner's images. |
 | `POST /api/chat/react` | `{"entryId", "emoji", "on"}` turns the owner's reaction to a reply on or off. Either change starts a turn, or queues behind the current one. |
 | `POST /api/chat/stop` | Stops the current turn. |

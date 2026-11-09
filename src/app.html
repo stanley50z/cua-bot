@@ -14,7 +14,7 @@
 -->
 <style>
 :root { --ink:#1B2129; --muted:#5A6370; --bg:#F4F6F8; --panel:#FFFFFF; --line:#DCE0E6; --drive:#A96500; --drive-line:#E2B567; --drive-bg:#FFF4E0;
-  --ok:#1E7A55; --bad:#B42318; --bad-bg:#FDF1F0; --accent:#27507F; --me:#E8EEF6; --focus:#2F6BFF; }
+  --ok:#1E7A55; --bad:#B42318; --bad-bg:#FDF1F0; --accent:#27507F; --me:#E8EEF6; --focus:#2F6BFF; --star:#E07B00; }
 * { box-sizing: border-box; }
 html, body { height: 100%; margin: 0; }
 body { background: var(--bg); color: var(--ink); font: 14px/1.5 "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif; }
@@ -79,8 +79,10 @@ code, pre, .mono { font-family: "Cascadia Code", Consolas, monospace; }
 .ctxmenu button:hover, .ctxmenu button:focus-visible { background: var(--bg); }
 .ctxmenu svg { width: 15px; height: 15px; color: var(--muted); }
 /* avatars: a character that blinks now and then and, from 24px up, glances aside; each bot on its own clock */
-.av { width: 36px; height: 36px; flex: none; display: block; }
+.av { position: relative; width: 36px; height: 36px; flex: none; display: block; }
 .av svg { display: block; width: 100%; height: 100%; overflow: visible; }
+.av .main-star { position: absolute; right: -1px; bottom: -1px; width: max(14px, 30%); height: max(14px, 30%); border-radius: 50%; background: var(--star); box-shadow: 0 0 0 2px var(--bg); color: #fff; }
+.av .main-star svg { position: absolute; inset: 15%; width: 70%; height: 70%; }
 .av .eyes { transform-box: fill-box; transform-origin: center; animation: blink var(--blink) linear var(--blink-at) infinite; }
 .av .look { animation: glance var(--glance) ease-in-out var(--glance-at) infinite; }
 .av.small .look, .av.still .look, .av.still .eyes { animation: none; }
@@ -440,6 +442,7 @@ dialog .row { display: flex; gap: 8px; justify-content: flex-end; margin-top: 18
  <symbol id="i-smile" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="8.5"/><path d="M8.5 14.2a4.2 4.2 0 0 0 7 0"/><path d="M9.2 9.6v.1M14.8 9.6v.1" stroke-width="2.4"/></symbol>
  <symbol id="i-reply" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M10 6.5L4.5 12l5.5 5.5"/><path d="M4.5 12H14a5.5 5.5 0 0 1 5.5 5.5v1"/></symbol>
  <symbol id="i-pin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4h6l-1 6 4 4H6l4-4z"/><path d="M12 14v6"/></symbol>
+ <symbol id="i-star" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2.8l2.9 5.9 6.5.9-4.7 4.6 1.1 6.5-5.8-3.1-5.8 3.1 1.1-6.5-4.7-4.6 6.5-.9z"/></symbol>
  <symbol id="i-gear" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M10.3 3h3.4l.5 2.6 1.8 1 2.5-.9 1.7 2.9-2 1.8v2.1l2 1.8-1.7 2.9-2.5-.9-1.8 1-.5 2.6h-3.4l-.5-2.6-1.8-1-2.5.9-1.7-2.9 2-1.8v-2.1l-2-1.8 1.7-2.9 2.5.9 1.8-1z"/><circle cx="12" cy="12" r="3"/></symbol>
  <symbol id="i-expand" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 4h6v6M10 20H4v-6M20 4l-6.5 6.5M4 20l6.5-6.5"/></symbol>
  <symbol id="i-eye" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="3"/></symbol>
@@ -517,7 +520,7 @@ dialog .row { display: flex; gap: 8px; justify-content: flex-end; margin-top: 18
      <label class="setting"><span><b>Show messages between bots</b><small>What one bot sends another, in both bots' chats and the bot list.</small></span><input type="checkbox" data-setting="botTalk"></label>
      <label class="setting"><span><b>Show tool steps</b><small>A chip for each tool a bot runs, like space bash or Remembered, that opens its output, plus its screenshots. Repeats share one chip, like space bash ×3.</small></span><input type="checkbox" data-setting="tools"></label>
      <label class="setting"><span><b>Show routine runs</b><small>A line in the bot's chat each time one of its routines starts.</small></span><input type="checkbox" data-setting="routineRuns"></label>
-     <label class="setting field"><span><b>Messages sent while a bot is working</b><small>After its current step puts the message in the turn it's on, so you can correct it mid-task. When it finishes holds the message for a turn of its own. Stop drops a message still waiting either way.</small></span><select id="set-when-busy"><option value="steer">After its current step</option><option value="followUp">When it finishes</option></select></label>
+     <label class="setting field"><span><b>Messages sent while a bot is working</b><small>After its current step puts the message in the turn it's on, so you can correct it mid-task. A running computer task gets it after its own current step. When it finishes holds the message for a turn of its own. Stop drops a message still waiting either way.</small></span><select id="set-when-busy"><option value="steer">After its current step</option><option value="followUp">When it finishes</option></select></label>
      <label class="setting field"><span><b>Quick replies</b><small>One per line. They show on the bar over text you select in a message; clicking one adds that text to the message box as a quote, with the reply after it.</small></span><textarea id="set-phrases" rows="4" spellcheck="false"></textarea></label>
      <label class="setting field"><span><b>Quick emoji</b><small>The reactions under a reply's smiley, and emoji replies on the bar over selected text, which add that text to the message box as a quote with the emoji after it.</small></span><input type="text" id="set-emoji" spellcheck="false" autocomplete="off"></label>
     </div>
@@ -835,6 +838,13 @@ function character(choice, seed, px, still) {
 // A bot's avatar: 36px in the bot list, 18px (`small`) beside its name in text. A bot no longer listed is gray.
 function avatar(bot, small, px = small ? 18 : 36) {
   return character((bot && bot.avatar) || UNKNOWN_AVATAR, (bot && bot.id) || 0, px);
+}
+
+// A bot's avatar in the sidebar, pinned tile or row. The main bot's wears a star.
+function listAvatar(bot, px) {
+  const node = avatar(bot, false, px);
+  if (bot.main) { const star = el("span", "main-star"); star.append(icon("i-star")); node.append(star); }
+  return node;
 }
 
 function toolLabel(call) {
@@ -1467,7 +1477,7 @@ function renderChat() {
   }
   for (const queued of state.queued) {
     const node = ownMessage(queued.text, "m me queued", queued.images.map(imageUrl));
-    node.append(el("span", "note", state.live.busy ? (queued.whenBusy === "steer" ? "Reaches the bot after its current step" : "Queued until the current reply finishes") : "Sending…"));
+    node.append(el("span", "note", state.live.busy ? (queued.whenBusy === "steer" ? (state.live.tools.some((tool) => tool.name === "computer_use" && tool.status !== "done") ? "Sent to the computer task, which takes it after its current step. The bot reads it when that task ends" : "Reaches the bot after its current step") : "Queued until the current reply finishes") : "Sending…"));
     box.append(node);
   }
   if (state.live.busy) {
@@ -1942,7 +1952,7 @@ function renderBots() {
   tiles.replaceChildren(...pins.map((bot) => {
     const tile = botButton(bot, "pintile");
     tile.title = bot.name;
-    tile.append(avatar(bot, false, 60), el("span", "name", bot.name));
+    tile.append(listAvatar(bot, 60), el("span", "name", bot.name));
     if (bot.busy) { const dot = el("span", "busy"); dot.title = "Working"; tile.append(dot); }
     const item = el("li");
     item.append(tile);
@@ -1961,7 +1971,7 @@ function renderBots() {
     const said = line && (quoteParts(line.text).filter((p) => !p.quote).map((p) => p.text).join(" ") || line.text);
     const peek = said ? said.replace(/\*\*|`/g, "").replace(/\s+/g, " ") : bot.main ? "Your main bot" : "No messages yet";
     text.append(who, el("span", "peek", peek));
-    row.append(avatar(bot), text);
+    row.append(listAvatar(bot, 36), text);
     item.append(row);
     rows.append(item);
   }

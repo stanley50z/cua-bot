@@ -131,7 +131,10 @@ Plain markdown in one store, `data/memory/`: `profile.md` for lasting facts and 
 A line with no tag, or only tags that name nothing, reaches no bot and shows under Untagged in the web portal. Renaming a bot or one of your tags rewrites its facts. Deleting either takes the tag off; a fact left with no tag stays, under Untagged.
 
 - `remember` saves a fact with `tags`. Saving text a tier already has adds the tags to that fact.
-- `forget` removes a fact and `search_memory` searches by one or more keywords, both only among facts the bot can see. A keyword matches at the start of a word, or anywhere in text like Chinese that has no spaces.
+- `forget` removes a fact and `search_memory` searches by one or more keywords, both only among facts the bot can see. A keyword matches at the start of a word, or anywhere in text like Chinese that has no spaces. `forget` removes the text from both tiers unless given `tier`.
+- The main bot manages every fact, whichever bots it is for: `list_memory` shows them all, `edit_memory` rewords one, `retag_memory` replaces its tags, and its `forget` can remove any of them. These tools change what it can reach, not what it is given. Its memory section and automatic searches still follow its tags, as `search_memory` does.
+
+To have the main bot tidy memory every night, give it a routine whose prompt says to go through `list_memory` and merge, correct, retag, and remove facts. It is an ordinary routine, edited in the Routines view.
 
 Every request carries a memory section with the list of tags, every profile fact the bot can see, and the 30 most recent log facts it can see, with no length cap. The files are re-read on every request, so hand edits apply at once. Tags decide what a bot is given and what `search_memory` returns; they aren't a security boundary, since bots with file tools can read the files.
 

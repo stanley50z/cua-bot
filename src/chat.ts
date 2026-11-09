@@ -12,6 +12,7 @@ import {
 	CompactionEntry,
 	type Conversation,
 	type ConversationId,
+	ConversationIdle,
 	type Cursor,
 	type EntryId,
 	type EntryRecord,
@@ -74,6 +75,8 @@ export type ChatTool = { id: string; name: string; args: Record<string, unknown>
 export type ChatImage = { data: string; mimeType: string };
 /** What an owner message does while the bot is busy: join the current turn after the running tool round, or wait for the turn to end. */
 export type WhenBusy = "steer" | "followUp";
+// Comes before an owner's steer in the computer_use child, which works for the bot and never talks to the owner itself.
+const COMPUTER_STEER_NOTE = "The owner just sent the bot that delegated this task the message below. Follow it now if it bears on your task; otherwise carry on.";
 
 export type ChatItem =
 	| { id: number; kind: "user"; text: string; at: number; images: number }
@@ -226,7 +229,20 @@ export function createChat(deps: { harness: Harness; conversation: Conversation;
 		for (const listener of listeners) listener(event);
 	};
 
-	const runningComputer = () => live.tools.find((tool) => tool.name === "computer_use" && tool.status !== "done");
+	const runningComputer = (tools = live.tools) => tools.find((tool) => tool.name === "computer_use" && tool.status !== "done");
+
+	// A whole computer_use call is one step to the bot, so a steer can't reach it until the call returns. Gives the steer to
+	// the call's child too, which takes it after its current tool. A child with no run, still waiting for its Space or
+	// already done, skips it; the bot still gets the message.
+	async function steerComputer(content: UserInput): Promise<void> {
+		const child = runningComputer(toChatLive((await harness.snapshot(LiveDoc, conversation.id, context)) ?? null).tools)?.child;
+		const handle = child === undefined ? undefined : await harness.conversation(child as ConversationId, context);
+		if (handle === undefined) return;
+		const steer = typeof content === "string" ? `${COMPUTER_STEER_NOTE}\n\n${content}` : [{ type: "text" as const, text: COMPUTER_STEER_NOTE }, ...content];
+		await handle.submit({ type: "input", content: steer, whenBusy: "steer", whenIdle: "reject" }, context).catch((error: unknown) => {
+			if (!(error instanceof ConversationIdle)) throw error;
+		});
+	}
 
 	// Push a computer snapshot when it changed. Errors are dropped: the pane keeps its last state.
 	async function pushComputer(): Promise<void> {
@@ -323,6 +339,7 @@ export function createChat(deps: { harness: Harness; conversation: Conversation;
 					: [...(text === "" ? [] : [{ type: "text" as const, text }]), ...images.map((image) => ({ type: "image" as const, ...image }))];
 			await writeMemoryNote(conversation, await deps.memoryNote?.(text), context);
 			const submission = await conversation.submit({ type: "input", content, whenBusy }, context);
+			if (whenBusy === "steer") await steerComputer(content);
 			return { submissionId: submission.id as number };
 		},
 		/** Image `index` of the owner's message `entryId`, or undefined when there is no such image. */

@@ -41,7 +41,7 @@ Each bot has a row with its newest message, and a pulsing dot while it works. Cl
 
 The pencil next to the chat title opens the bot's settings: its agent file (with its path) to read or edit, its name, its avatar, its model and reasoning effort, and Delete. Use default follows Settings > Model. The efforts listed are the ones the picked model supports, and a change reaches the bot on its next turn. Everything the bot does on screen through `computer_use` runs on the same model and effort.
 
-**Avatars.** Each bot shows as a small character that blinks every few seconds and, at the larger sizes, now and then glances aside. Each bot keeps its own rhythm, and the motion stops when the system asks for reduced motion. Click the big avatar in the dialog to pick a shape (hover one for its name) and a color; Reset goes back to the bot's default. The pick applies when you save. A new bot gets a shape and a color no other bot wears yet, while any are left.
+**Avatars.** Each bot shows as a small character that blinks every few seconds and, at the larger sizes, now and then glances aside. Each bot keeps its own rhythm, and the motion stops when the system asks for reduced motion. Click the big avatar in the dialog to pick a shape (hover one for its name) and a color; Reset goes back to the bot's default. The pick applies when you save. A new bot gets a shape and a color no other bot wears yet, while any are left. In the sidebar, the main bot's avatar has an orange star on its corner.
 
 **Messages between bots** are hidden unless you turn on Show messages between bots in Settings. With it on, a message shows in the sender's reply as "Message to <name>" and in the recipient's chat as "Message from <name>", and a bot's row can show the newest one. With it off and Show tool steps on, a `message_bot` call shows as a "Messaged <name>" chip.
 
@@ -53,7 +53,7 @@ A bot talks to you only through its `send_message` tool ([src/bots.ts](../src/bo
 - Each message shows its time under it. Hover for the full date.
 - While a reply runs, the chat title says Working or Using the computer.
 - Enter sends, Shift+Enter adds a line, the stop button ends the current reply.
-- A message sent while the bot is busy reaches it after the tool call it's running, in the same turn, so you can correct it without pressing stop. Settings > Chat can make it wait for the turn to end instead.
+- A message sent while the bot is busy reaches it after the tool call it's running, in the same turn, so you can correct it without pressing stop. A running computer-use task also gets the message after its own current step. Settings > Chat can make it wait for the turn to end instead.
 
 **Tool steps.** With Show tool steps on, each tool the bot used shows as a chip above its reply. Chips from consecutive steps that sent nothing run on in one wrapping row, up to the next message. Click a finished chip for the tool's result; screenshots appear as thumbnails, and clicking one opens it in the image viewer. A turn where nothing needs you shows only its chips. With the setting off (the default), that turn shows nothing.
 
@@ -118,7 +118,7 @@ Saved in this browser's `localStorage` (`cua-bot.settings`), so each browser kee
 | Show messages between bots | off | See [Bots](#bots) |
 | Show tool steps | off | See [Chat](#chat) |
 | Show routine runs | off | See [Chat](#chat) |
-| Messages sent while a bot is working | After its current step | After its current step puts the message in the running turn; When it finishes holds it for a turn of its own |
+| Messages sent while a bot is working | After its current step | After its current step puts the message in the running turn and any running computer-use task; When it finishes holds it for a turn of its own |
 | Quick replies | Yes, No, Explain | One phrase per line |
 | Quick emoji | 👍 👎 ❤️ 😂 🎉 😮 | Typed or pasted in any spacing; anything that isn't an emoji is dropped when you leave the field. Clearing it hides the smiley. |
 
