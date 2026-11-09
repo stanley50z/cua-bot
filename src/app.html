@@ -2829,7 +2829,7 @@ function factRow(fact) {
     catch (error) { showMemoryError(error.message); forget.disabled = false; }
   });
   const row = el("li");
-  const shown = marked(fact.text, memoryQuery());
+  const shown = highlightMatch(fact.text, memoryQuery());
   pen.addEventListener("click", () => editFact(row, shown, pen, fact));
   const body = el("div");
   body.append(shown, tagChips(fact));
@@ -2933,7 +2933,7 @@ function refreshBotTags() {
 }
 
 // The text with the first match of `query` highlighted.
-function marked(text, query) {
+function highlightMatch(text, query) {
   const span = el("span");
   const at = query === "" ? -1 : text.toLowerCase().indexOf(query.toLowerCase());
   if (at < 0) span.textContent = text;

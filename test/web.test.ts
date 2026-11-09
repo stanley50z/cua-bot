@@ -126,6 +126,7 @@ test("the page's markdown libraries are served as browser scripts", { timeout: 2
 		const html = await (await fetch(`${session.base}/`)).text();
 		const scripts = [...html.matchAll(/<script src="([^"]+)"/g)].map((match) => match[1]);
 		assert.deepEqual(scripts, ["/marked.js", "/purify.js"]);
+		assert.doesNotMatch(html, /^\s*(?:function|const|let|var|class)\s+(?:marked|DOMPurify)\b/m, "a page global of the same name would replace the library");
 		const responses = await Promise.all(scripts.map((path) => fetch(`${session.base}${path}`)));
 		for (const response of responses) {
 			assert.equal(response.status, 200);
