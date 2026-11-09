@@ -8,6 +8,7 @@ import { request, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { test } from "node:test";
+import { runInNewContext } from "node:vm";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { type FauxResponseStep, type Message } from "@earendil-works/pi-ai";
 import { createModels } from "@earendil-works/pi-ai/models";
@@ -114,6 +115,27 @@ test("GET / serves the web portal with chat, computer pane, and routines", { tim
 		assert.match(html, /class="input" id="input" contenteditable="plaintext-only"/, "quotes sit inline in the message box");
 		for (const id of [...AVATAR_SHAPES, ...AVATAR_COLORS]) assert.match(html, new RegExp(`^\\s+${id}: `, "m"), `the page draws the avatar ${id} the server accepts`);
 		assert.doesNotMatch(html, /innerHTML/, "server text is rendered with DOM nodes only");
+	} finally {
+		await close(session);
+	}
+});
+
+test("the page's markdown libraries are served as browser scripts", { timeout: 20_000 }, async () => {
+	const session = await open();
+	try {
+		const html = await (await fetch(`${session.base}/`)).text();
+		const scripts = [...html.matchAll(/<script src="([^"]+)"/g)].map((match) => match[1]);
+		assert.deepEqual(scripts, ["/marked.js", "/purify.js"]);
+		const responses = await Promise.all(scripts.map((path) => fetch(`${session.base}${path}`)));
+		for (const response of responses) {
+			assert.equal(response.status, 200);
+			assert.match(response.headers.get("content-type") ?? "", /javascript/);
+		}
+		const browser: { marked?: { parse: (text: string, options: object) => string } } = {};
+		runInNewContext(await responses[0].text(), browser);
+		const rendered = browser.marked?.parse("> *quote*\n\n| a |\n|---|\n| [**b**](https://e.com) |", { gfm: true, breaks: true }) ?? "";
+		assert.match(rendered, /<blockquote>\s*<p><em>quote<\/em><\/p>\s*<\/blockquote>/);
+		assert.match(rendered, /<td><a href="https:\/\/e\.com"><strong>b<\/strong><\/a><\/td>/);
 	} finally {
 		await close(session);
 	}
