@@ -6,11 +6,10 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { hostname, networkInterfaces, release, type, userInfo, version } from "node:os";
 import { join } from "node:path";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
-import { createRegistry, type Cursor, defineExtension, Harness, section } from "@earendil-works/pi-durable";
+import { createRegistry, defineExtension, Harness, section } from "@earendil-works/pi-durable";
 import { createNodePhotonImages } from "@earendil-works/pi-durable/images/node";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { botLookup, createBots, createBotsExtension, DEFAULT_BOTS_DIR, readBots } from "./bots.ts";
-import { toChatItem, writeMemoryNote } from "./chat.ts";
 import { createComputerExtension, defaultSpaceId, defaultSpaceLabel, openLiveStream, registrySpaces, screenControl, spacesText } from "./computer.ts";
 import { createConnections, listCuaSpaces, probeTcp } from "./connections.ts";
 import { createLiveScreen } from "./live-screen.ts";
@@ -30,6 +29,7 @@ import { LEGACY_ROUTINE_FILE } from "./routines-file.ts";
 import { bindRoutines, createRoutinesExtension, routineDir, syncRoutines } from "./routines.ts";
 import { today } from "./today.ts";
 import { traceExtension } from "./trace.ts";
+import { createTurns } from "./turns.ts";
 import { createBotServer } from "./web.ts";
 import { createModelSettings } from "./model-settings.ts";
 import { botAgent, botModel, botThinking, createBotModels } from "./models.ts";
@@ -49,6 +49,23 @@ process.on("unhandledRejection", crash("unhandledRejection"));
 
 const context = BACKGROUND_CONTEXT;
 const models = createBotModels(); // providers from models.json; see src/models.ts
+
+// The owner's memory, each fact tagged with the bots that get it. An install from before tags moves over first.
+if (await migrateMemory({ dir: join(DATA_DIR, "memory"), botsDir: DEFAULT_BOTS_DIR, backupDir: join(DATA_DIR, "memory-backup-pre-tags") })) {
+	log(`memory: moved to tags, backup in ${join(DATA_DIR, "memory-backup-pre-tags")}`);
+}
+// With TYPESAFE_API_KEY set, Jev judges which older facts and which lines of the receiving bot's work log each
+// incoming message brings up; without it, keywords pick the facts and work logs are left to the bots.
+const jev = Boolean(process.env.TYPESAFE_API_KEY?.trim());
+const memory = createMemory({ dir: join(DATA_DIR, "memory"), botsDir: DEFAULT_BOTS_DIR, log, ...(jev ? { relevance: createJevRelevance() } : {}) });
+log(`memory: what a message brings up is picked by ${jev ? "Jev, from older facts and work logs (TYPESAFE_API_KEY)" : "keyword search, from older facts"}`);
+// Every turn that reaches a bot (src/turns.ts). An owner or bot message first searches memory over the bot list as the
+// Harness holds it, so message_bot works before createBots has run, and the log records what each search found.
+const turns = createTurns(async (bot, message, read, ctx) => {
+	const note = await messageNote(memory, message, bot, await readBots(read, ctx));
+	if (note !== undefined) log(`memory: bot ${bot}: ${note.split("\n")[0]}`);
+	return note;
+});
 
 const registry = createRegistry();
 registry.install(
@@ -73,7 +90,7 @@ registry.install(
 	}),
 );
 registry.install(traceExtension);
-registry.install(createBotsExtension({ agent: botAgent, memoryNote }));
+registry.install(createBotsExtension({ agent: botAgent, turns }));
 // Fits images to the model's limits, in a worker thread: the owner's pasted ones, and those read and space_read return.
 const images = await createNodePhotonImages();
 registry.install(createComputerExtension(registry, images));
@@ -96,15 +113,6 @@ for (const extension of createPcExtensions()) registry.install(extension);
 // read, write, edit, bash, and powershell, on this PC or, given `machine`, on any SSH destination of the owner's.
 const machines = createMachines(images);
 registry.install(machines.extension);
-// The owner's memory, each fact tagged with the bots that get it. An install from before tags moves over first.
-if (await migrateMemory({ dir: join(DATA_DIR, "memory"), botsDir: DEFAULT_BOTS_DIR, backupDir: join(DATA_DIR, "memory-backup-pre-tags") })) {
-	log(`memory: moved to tags, backup in ${join(DATA_DIR, "memory-backup-pre-tags")}`);
-}
-// With TYPESAFE_API_KEY set, Jev judges which older facts and which lines of the receiving bot's work log each
-// incoming message brings up; without it, keywords pick the facts and work logs are left to the bots.
-const jev = Boolean(process.env.TYPESAFE_API_KEY?.trim());
-const memory = createMemory({ dir: join(DATA_DIR, "memory"), botsDir: DEFAULT_BOTS_DIR, log, ...(jev ? { relevance: createJevRelevance() } : {}) });
-log(`memory: what a message brings up is picked by ${jev ? "Jev, from older facts and work logs (TYPESAFE_API_KEY)" : "keyword search, from older facts"}`);
 registry.install(createMemoryExtension({ memory, bots: readBots, log }));
 const executorUrl = process.env.EXECUTOR_MCP_URL?.trim();
 const executorKey = process.env.EXECUTOR_API_KEY?.trim();
@@ -114,11 +122,8 @@ if (executorUrl && executorKey) {
 	approvals = createApprovals({
 		file: join(DATA_DIR, "approvals.json"),
 		call: (name, args) => executor(name, args),
-		// The owner's decision reaches the bot that asked as a message, after any turn in progress.
-		notify: async (text, conversationId) => {
-			const asked = (await lookup.conversation(conversationId, context)) ?? root;
-			return asked.submit({ type: "input", content: text, whenBusy: "followUp" }, context);
-		},
+		// Decisions come from the web portal, which listens only once `lookup` and `harness` are set.
+		notify: (text, filedBy) => turns.approval(lookup, filedBy, text, harness, context),
 		filed: (approval) =>
 			void push.send({ title: "Approval needed", body: describeApproval(approval), tag: approval.id, ...(approval.conversationId === undefined ? {} : { bot: approval.conversationId }) }),
 	});
@@ -136,7 +141,7 @@ const root = await harness.root(context, { agent: botAgent() });
 const lookup = botLookup(harness, root);
 const logRoutineSyncFailure = (error: unknown) =>
 	log("routine file sync failed:", error instanceof Error ? error.message : String(error));
-bindRoutines({ harness, bots: lookup, legacyFile: LEGACY_ROUTINE_FILE, onError: logRoutineSyncFailure });
+bindRoutines({ harness, bots: lookup, turns, legacyFile: LEGACY_ROUTINE_FILE, onError: logRoutineSyncFailure });
 harness.resume();
 // The bots come before the first routine sync, so their watch on the bot folders already sees any hand edit to a
 // routines.json that the sync doesn't.
@@ -149,7 +154,7 @@ const bots = await createBots({
 	memory,
 	onError: logRoutineSyncFailure,
 	sent: (bot, text) => void push.send({ title: bot.name, body: text, bot: bot.id }),
-	memoryNote,
+	turns,
 	computer: (conversation) =>
 		createComputerView({ harness, storage, conversation, shotsDir: join(DATA_DIR, "shots"), context, ...(space === undefined ? {} : { space }) }),
 });
@@ -160,32 +165,9 @@ log(
 );
 log(`cua-bot up: model ${botModel().provider}/${botModel().modelId}, reasoning ${botThinking()}, root ${root.id}`);
 
-// Searches memory for a message from the owner or another bot to `bot` and logs what it searched for, so the log shows each automatic search.
-async function memoryNote(bot: number, message: string) {
-	const note = await messageNote(memory, message, bot, bots.list());
-	if (note !== undefined) log(`memory: bot ${bot}: ${note.split("\n")[0]}`);
-	return note;
-}
-
-// Submits one owner message to the root conversation and returns what the bot sent the owner (send_message) by the end of the turn.
-async function say(text: string): Promise<string> {
-	const before = (await root.entries({ order: "descending" }, 1, undefined, context)).items[0]?.id;
-	await writeMemoryNote(root, await memoryNote(Number(root.id), text), context);
-	const submission = await root.submit({ type: "input", content: text }, context);
-	const settled = await submission.wait(context);
-	if (settled.status !== "done" || settled.type !== "input") return `(unanswered: ${settled.reason ?? "unknown"})`;
-	const sent: string[] = [];
-	let cursor: Cursor | undefined;
-	do {
-		const page = await root.entries({ order: "ascending", ...(before === undefined ? {} : { minEntryId: before }) }, 200, cursor, context);
-		for (const entry of page.items) {
-			const item = entry.id === before ? undefined : toChatItem(entry);
-			if (item?.kind === "assistant" && item.text !== "") sent.push(item.text);
-		}
-		cursor = page.next;
-	} while (cursor !== undefined);
-	return sent.join("\n\n");
-}
+// POST /say: an owner message to the main bot, answered with what the bot sent the owner by the end of its turn.
+const mainChat = await bots.chat();
+if (mainChat === undefined) throw new Error("The main bot has no chat.");
 
 const live = createLiveScreen(openLiveStream);
 // The Connections tab: this computer, which runs the Harness and every bot, then the owner's SSH machines and the Spaces.
@@ -211,7 +193,7 @@ const connections = createConnections({
 const autostart = createAutostart({ startScript: join(import.meta.dirname, "..", "start.py") });
 // Settings > Model: the model and reasoning effort in .env, applied to every bot without a restart.
 const modelSettings = createModelSettings({ models, apply: bots.applyAgent });
-createBotServer({ say, bots, memory, memoryBots: () => bots.list(), images, context, log, control: screenControl, live, push, connections, autostart, modelSettings, allowedHosts: ALLOWED_HOSTS, ...(approvals === undefined ? {} : { approvals }) }).listen(PORT, "127.0.0.1", () =>
+createBotServer({ say: (text) => mainChat.say(text), bots, memory, memoryBots: () => bots.list(), images, context, log, control: screenControl, live, push, connections, autostart, modelSettings, allowedHosts: ALLOWED_HOSTS, ...(approvals === undefined ? {} : { approvals }) }).listen(PORT, "127.0.0.1", () =>
 	log(`listening: web portal http://127.0.0.1:${PORT}/ · chat POST http://127.0.0.1:${PORT}/say`),
 );
 

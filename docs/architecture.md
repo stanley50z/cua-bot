@@ -60,7 +60,24 @@ An avatar is a shape and a color, stored as ids (`avatar: {shape, color}`). The 
 - Each bot may send at most 20 messages per rolling hour, so two bots can't keep each other awake.
 - `create_bot` makes a new bot when the owner asks for one in chat.
 
-An approval card remembers which bot filed it, so it shows in that bot's chat and the outcome goes back to that bot. `computer_use` runs one task at a time on each Space across all bots, because bots on the same Space share its screen.
+### Turns
+
+Code: [src/turns.ts](../src/turns.ts).
+
+Every turn that reaches a bot goes through `deliver()` in `src/turns.ts`. For each kind it decides whether memory is searched first, what the turn does while the bot is busy, its request id, and the entry kind the chat reads it back by.
+
+| Turn | Sent by | Memory note | While the bot is busy | Request id | Entry kind |
+| --- | --- | --- | --- | --- | --- |
+| Owner message, portal | `POST /api/chat` | yes | `steer` or `followUp`, as sent | none | `pi.user` |
+| Owner message, `/say` | `POST /say` | yes | the Harness default, which waits for the turn to end | none | `pi.user` |
+| Reaction | `POST /api/chat/react` | no | `followUp` | none | `cua-bot.reaction` |
+| Bot message | `message_bot` | yes | `followUp` | `bot:<task>` | `cua-bot.bot-message` |
+| Routine firing | its slot, or run now | no | `followUp` | `<task>:<due>`, or `<task>:manual:<now>` | `cua-bot.routine-firing` |
+| Approval outcome | the owner's click on a card | no | `followUp` | none | `cua-bot.approval-outcome` |
+
+A memory note lands in the transcript right before its message (see [Memory](#memory)). A request id makes a firing or a bot message land once, even when the task that sends it runs again after a restart. Routine firings and approval outcomes from before their entry kinds are plain `pi.user` entries; the chat still shows them as routine and approval items by their `[routine]` and `[approval]` prefix, which is also what the bot reads them by.
+
+An approval card remembers which bot filed it, so it shows in that bot's chat and the outcome goes back to that bot. A card that names no bot, or whose bot was deleted, sends its outcome to the main bot. `computer_use` runs one task at a time on each Space across all bots, because bots on the same Space share its screen.
 
 ## Tools
 

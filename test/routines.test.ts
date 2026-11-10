@@ -24,6 +24,7 @@ import {
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { botLookup } from "../src/bots.ts";
 import { bindRoutines, createRoutinesExtension, syncRoutines } from "../src/routines.ts";
+import { createTurns } from "../src/turns.ts";
 
 const context = BACKGROUND_CONTEXT;
 const TITLE = "Morning sweep";
@@ -146,7 +147,7 @@ async function openSession(
 	const harness = await Harness.open(storage, options, context);
 	const root = await harness.root(context, { agent: { model: MODEL } });
 	const file = routineFile ?? (await freshRoutineFile());
-	bindRoutines({ harness, bots: botLookup(harness, root, dirname(dirname(file))), now: () => clock.now });
+	bindRoutines({ harness, bots: botLookup(harness, root, dirname(dirname(file))), turns: createTurns(async () => undefined), now: () => clock.now });
 	harness.resume();
 	await syncRoutines(context);
 	return { clock, reports, harness, root, routineFile: file };
@@ -234,11 +235,13 @@ test("schedule returns before the routine fires", { timeout: 20_000 }, async () 
 
 test("advancing the clock fires a [routine] turn", { timeout: 20_000 }, async () => {
 	const clock = { now: BASE };
-	const session = await openSession(new MemoryStorage(), clock, scriptedModel());
+	const storage = new MemoryStorage();
+	const session = await openSession(storage, clock, scriptedModel());
 	try {
 		await say(session.root, "please schedule a routine");
 		const until = await sleepDeadline(session.harness);
-		clock.now = until;
+		// Past the slot, so the firing names its slot, not the time it ran.
+		clock.now = until + 5_000;
 		session.harness.resume();
 		await eventually(async () => wakeCount(await transcript(session.root)) === 1);
 		const log = await transcript(session.root);
@@ -246,6 +249,8 @@ test("advancing the clock fires a [routine] turn", { timeout: 20_000 }, async ()
 		assert.match(log, /Nobody is waiting/);
 		assert.match(log, new RegExp(PROMPT));
 		assert.match(log, /send_message the owner only if the outcome needs them/);
+		const { taskId } = scheduledId(log);
+		assert.ok(await storage.submissionByRequest(session.root.id, `${taskId}:${until}`, context), "a firing's request id is <task>:<due>, as before the upgrade");
 		assertNoFaults(session);
 	} finally {
 		await session.harness.close(context);
@@ -400,16 +405,18 @@ test("a once routine fires one time and removes itself", { timeout: 20_000 }, as
 
 test("run_routine fires now without the clock moving", { timeout: 20_000 }, async () => {
 	const clock = { now: BASE };
-	const session = await openSession(new MemoryStorage(), clock, scriptedModel());
+	const storage = new MemoryStorage();
+	const session = await openSession(storage, clock, scriptedModel());
 	try {
 		await say(session.root, "please schedule a routine");
 		const until = await sleepDeadline(session.harness);
-		const { id } = scheduledId(await transcript(session.root));
+		const { id, taskId } = scheduledId(await transcript(session.root));
 		await say(session.root, `run ${id}`);
 		await eventually(async () => wakeCount(await transcript(session.root)) === 1);
 		assert.equal(clock.now, BASE);
 		assert.equal(await sleepDeadline(session.harness), until);
 		assert.match(await transcript(session.root), /Running "Morning sweep" now/);
+		assert.ok(await storage.submissionByRequest(session.root.id, `${taskId}:manual:${BASE}`, context), "a run-now's request id is <task>:manual:<now>");
 		assertNoFaults(session);
 	} finally {
 		await session.harness.close(context);

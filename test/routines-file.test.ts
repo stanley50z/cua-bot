@@ -30,6 +30,7 @@ import {
 	syncRoutines,
 	updateRoutine,
 } from "../src/routines.ts";
+import { createTurns } from "../src/turns.ts";
 
 const context = BACKGROUND_CONTEXT;
 // Tue 2023-11-14T22:13:20Z.
@@ -78,7 +79,7 @@ async function open(): Promise<Session> {
 	);
 	const root = await harness.root(context, { agent: { model: { provider: "faux", modelId: "faux-1" } } });
 	const syncErrors: unknown[] = [];
-	bindRoutines({ harness, bots: botLookup(harness, root, dirname(dirname(file))), now: () => clock.now, onError: (error) => syncErrors.push(error) });
+	bindRoutines({ harness, bots: botLookup(harness, root, dirname(dirname(file))), turns: createTurns(async () => undefined), now: () => clock.now, onError: (error) => syncErrors.push(error) });
 	harness.resume();
 	return { dir, file, clock, harness, root, syncErrors };
 }

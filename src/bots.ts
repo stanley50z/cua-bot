@@ -28,11 +28,12 @@ import {
 	section,
 	type Tx,
 } from "@earendil-works/pi-durable";
-import { BOT_MESSAGE, type BotMessage, type Chat, type ChatItem, createChat, SEND_MESSAGE, SENT_MESSAGE, type SentMessage, writeMemoryNote } from "./chat.ts";
+import { type Chat, type ChatItem, createChat, SEND_MESSAGE, SENT_MESSAGE, type SentMessage } from "./chat.ts";
 import type { ComputerView } from "./computer-view.ts";
 import type { Memory } from "./memory.ts";
 import { parseModelRef, parseThinkingLevel } from "./models.ts";
 import { removeBotRoutines, syncRoutines } from "./routines.ts";
+import type { Turns } from "./turns.ts";
 
 export const MAIN_NAME = "cua-bot";
 /** One folder per bot, in the project root. */
@@ -313,15 +314,13 @@ export function botSection(bots: Bot[], self: number): string | undefined {
 	return lines.join("\n");
 }
 
-/** The turn a delivered message starts. The chat shows the BotMessage data instead. */
-export function inboundText(from: { id: number; name: string }, text: string): string {
-	return `[bot] Message from ${from.name} (id ${from.id}), another of the owner's bots:\n${text}`;
-}
-
 const reply = (text: string, isError = false) => ({ output: [{ type: "text" as const, text }], ...(isError ? { isError: true as const } : {}) });
 
-/** The bots' tools and prompt section. `agent` is the model settings each new bot starts with; `dir` holds the bot folders. */
-export function createBotsExtension(options: { agent: () => AgentChange; dir?: string; memoryNote?: (bot: number, message: string) => Promise<string | undefined> }): Extension {
+/**
+ * The bots' tools and prompt section. `agent` is the model settings each new bot starts with; message_bot delivers
+ * through `turns`; `dir` holds the bot folders.
+ */
+export function createBotsExtension(options: { agent: () => AgentChange; turns: Turns; dir?: string }): Extension {
 	const dir = options.dir ?? DEFAULT_BOTS_DIR;
 	const sent = new Map<number, number[]>();
 
@@ -348,12 +347,7 @@ export function createBotsExtension(options: { agent: () => AgentChange; dir?: s
 			const handle = await api.conversation(target.id as ConversationId, context);
 			if (handle === undefined) return reply(`${target.name}'s chat is gone.`, true);
 			const body = text.length > MESSAGE_MAX ? `${text.slice(0, MESSAGE_MAX)}…` : text;
-			const data: BotMessage = { from: self, name: me.name, text: body };
-			await writeMemoryNote(handle, await options.memoryNote?.(target.id, body), context);
-			await handle.submit(
-				{ type: "input", content: inboundText(me, body), whenBusy: "followUp", requestId: `bot:${api.taskId}`, entry: { kind: BOT_MESSAGE, data } },
-				context,
-			);
+			await options.turns.deliver(handle, { kind: "bot", from: me, text: body, task: Number(api.taskId) }, api, context);
 			sent.set(self, [...recent, now]);
 			return reply(`Sent to ${target.name}. A reply, if any, arrives later as a [bot] message; don't wait for it.`);
 		},
@@ -460,8 +454,8 @@ export async function createBots(deps: {
 	computer?: (conversation: Conversation) => ComputerView;
 	/** Each message a bot sends the owner with send_message, in any bot's chat; main.ts pushes it to the owner's browser. */
 	sent?: (bot: Bot, text: string) => void;
-	/** What memory holds for a message to this bot, for the bot to read before it; main.ts searches. */
-	memoryNote?: (bot: number, message: string) => Promise<string | undefined>;
+	/** How each bot's chat delivers the owner's messages and reactions. */
+	turns: Turns;
 }) {
 	const { harness, lookup, context, memory, onError } = deps;
 	const { root, dir } = lookup;
@@ -500,14 +494,7 @@ export async function createBots(deps: {
 		const conversation = await lookup.conversation(bot.id, context);
 		if (conversation === undefined) return;
 		const computer = deps.computer?.(conversation);
-		const { memoryNote } = deps;
-		const chat = createChat({
-			harness,
-			conversation,
-			context,
-			...(computer === undefined ? {} : { computer }),
-			...(memoryNote === undefined ? {} : { memoryNote: (message: string) => memoryNote(bot.id, message) }),
-		});
+		const chat = createChat({ harness, conversation, context, turns: deps.turns, ...(computer === undefined ? {} : { computer }) });
 		const first: ListView = { busy: chat.live.busy };
 		applyPreviews(first, (await chat.history(20)).items);
 		views.set(bot.id, first);

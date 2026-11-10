@@ -1,7 +1,7 @@
 // Owner chat over one bot's conversation, for the web portal in src/web.ts.
-// src/bots.ts calls createChat({ harness, conversation, context, computer }) once per bot. The server uses history() for
-// pages of past messages, send()/stop() for input (send() also takes pasted images, which image() reads back), react() for the owner's emoji reactions (REACTION entries),
-// computer() for the computer pane, and subscribe()
+// src/bots.ts calls createChat({ harness, conversation, context, turns, computer }) once per bot. The server uses history() for
+// pages of past messages, send()/stop() for input (send() also takes pasted images, which image() reads back), say() for POST /say,
+// react() for the owner's emoji reactions (REACTION entries), computer() for the computer pane, and subscribe()
 // for live updates: the streaming partial reply, running tool calls, every new transcript entry, and
 // computer pane snapshots while computer_use runs. Entries are normalized to ChatItem so the browser
 // never sees provider message shapes.
@@ -26,6 +26,8 @@ import {
 	type UserInput,
 } from "@earendil-works/pi-durable";
 import type { ComputerSnapshot, ComputerView } from "./computer-view.ts";
+// Types only: src/turns.ts reads this module's entry kinds.
+import type { Turns } from "./turns.ts";
 
 const TOOL_TEXT_LIMIT = 4000;
 const COMPUTER_POLL_MS = 1500;
@@ -49,7 +51,7 @@ function sentText(content: readonly { type: string; name?: string; arguments?: R
 export const SENT_MESSAGE = "cua-bot.sent-message";
 export type SentMessage = { text: string; at: number };
 
-/** Entry kind of a message from another bot (src/bots.ts); its data is a BotMessage. */
+/** Entry kind of a message from another bot (message_bot in src/bots.ts, delivered by src/turns.ts); its data is a BotMessage. */
 export const BOT_MESSAGE = "cua-bot.bot-message";
 export type BotMessage = { from: number; name: string; text: string };
 
@@ -64,11 +66,10 @@ const QUOTE_MAX = 80;
 /** Entry kind of what a memory search found for a message from the owner or another bot (src/memory.ts). The bot reads it just before that message; the chat doesn't show it. */
 export const MEMORY_NOTE = "cua-bot.memory-note";
 
-/** Put a message's memory search result in the conversation without starting a turn. Call right before submitting the message. */
-export async function writeMemoryNote(conversation: Pick<Conversation, "submit">, note: string | undefined, context: Context) {
-	if (note === undefined) return;
-	await conversation.submit({ type: "write", entry: { kind: MEMORY_NOTE, model: [{ role: "user", content: note, timestamp: Date.now() }] } }, context);
-}
+/** Entry kind of a routine firing (src/routines.ts, delivered by src/turns.ts). Its model message is the `[routine]` text. */
+export const ROUTINE_FIRING = "cua-bot.routine-firing";
+/** Entry kind of the owner's decision on an approval card, as told to the bot (src/approvals.ts, delivered by src/turns.ts). Its model message is the `[approval]` text. */
+export const APPROVAL_OUTCOME = "cua-bot.approval-outcome";
 
 export type ChatTool = { id: string; name: string; args: Record<string, unknown> };
 /** An image in an owner message: base64 data in a format the model takes. */
@@ -105,7 +106,8 @@ export type ChatEvent =
 	| { type: "items"; items: ChatItem[] }
 	| { type: "computer"; computer: ComputerSnapshot };
 
-function textOf(content: string | readonly { type: string; text?: string }[]): string {
+/** A message's text parts, joined; src/turns.ts searches memory for an owner message by it. */
+export function textOf(content: string | readonly { type: string; text?: string }[]): string {
 	if (typeof content === "string") return content;
 	return content.flatMap((part) => (part.type === "text" && part.text !== undefined ? [part.text] : [])).join("");
 }
@@ -130,9 +132,13 @@ export function toChatItem(entry: EntryRecord): ChatItem | undefined {
 		const data = (entry.data ?? {}) as Partial<Reaction>;
 		return { id, kind: "reaction", target: Number(data.target), emoji: String(data.emoji ?? ""), on: data.on !== false, at: message?.timestamp ?? 0 };
 	}
+	if (entry.kind === ROUTINE_FIRING && message?.role === "user") return { id, kind: "routine", text: textOf(message.content), at: message.timestamp };
+	if (entry.kind === APPROVAL_OUTCOME && message?.role === "user") return { id, kind: "approval", text: textOf(message.content), at: message.timestamp };
 	if (UserEntry.is(entry) && message?.role === "user") {
 		const user = message as UserMessage;
 		const text = textOf(user.content);
+		// Firings and outcomes from before their entry kinds are plain user entries known only by their prefix. The bot
+		// reads any message with that prefix as a firing or an outcome, so the chat shows it as one too.
 		if (text.startsWith("[routine]")) return { id, kind: "routine", text, at: user.timestamp };
 		if (text.startsWith("[approval]")) return { id, kind: "approval", text, at: user.timestamp };
 		return { id, kind: "user", text, at: user.timestamp, images: imageCount(user.content) };
@@ -210,9 +216,9 @@ export function toChatLive(live: Readonly<LiveState> | null): ChatLive {
 
 export type Chat = ReturnType<typeof createChat>;
 
-/** Bind the chat to one bot's conversation. Call close() on shutdown. */
-export function createChat(deps: { harness: Harness; conversation: Conversation; context: Context; computer?: ComputerView; memoryNote?: (message: string) => Promise<string | undefined> }) {
-	const { harness, conversation, context, computer } = deps;
+/** Bind the chat to one bot's conversation. Its messages and reactions reach the bot through `turns`. Call close() on shutdown. */
+export function createChat(deps: { harness: Harness; conversation: Conversation; context: Context; turns: Turns; computer?: ComputerView }) {
+	const { harness, conversation, context, turns, computer } = deps;
 	const listeners = new Set<(event: ChatEvent) => void>();
 	// Listeners that show the computer pane; only they make the chat read computer snapshots.
 	let computerListeners = 0;
@@ -265,25 +271,31 @@ export function createChat(deps: { harness: Harness; conversation: Conversation;
 		void pushComputer();
 	}
 
-	// Entries newer than lastSeen, oldest first. The query's minEntryId is inclusive.
-	async function newEntries(ctx: Context): Promise<ChatItem[]> {
+	// The items of the entries after `after` (all of them when undefined), oldest first, and the newest entry's id.
+	// The query's minEntryId is inclusive.
+	async function itemsAfter(after: EntryId | undefined, ctx: Context): Promise<{ items: ChatItem[]; last: EntryId | undefined }> {
 		const items: ChatItem[] = [];
+		let last = after;
 		let cursor: Cursor | undefined;
 		do {
-			const page = await conversation.entries(
-				{ order: "ascending", ...(lastSeen === undefined ? {} : { minEntryId: lastSeen }) },
-				200,
-				cursor,
-				ctx,
-			);
+			const page = await conversation.entries({ order: "ascending", ...(after === undefined ? {} : { minEntryId: after }) }, 200, cursor, ctx);
 			for (const entry of page.items) {
-				if (lastSeen !== undefined && entry.id <= lastSeen) continue;
-				lastSeen = entry.id;
+				if (last !== undefined && entry.id <= last) continue;
+				last = entry.id;
 				const item = toChatItem(entry);
 				if (item !== undefined) items.push(item);
 			}
 			cursor = page.next;
 		} while (cursor !== undefined);
+		return { items, last };
+	}
+
+	const newestEntry = async () => (await conversation.entries({ order: "descending" }, 1, undefined, context)).items[0]?.id;
+
+	// Entries newer than lastSeen, oldest first.
+	async function newEntries(ctx: Context): Promise<ChatItem[]> {
+		const { items, last } = await itemsAfter(lastSeen, ctx);
+		lastSeen = last;
 		return items;
 	}
 
@@ -299,8 +311,7 @@ export function createChat(deps: { harness: Harness; conversation: Conversation;
 	}
 
 	async function startWatch(): Promise<void> {
-		const newest = await conversation.entries({ order: "descending" }, 1, undefined, context);
-		lastSeen = newest.items[0]?.id;
+		lastSeen = await newestEntry();
 		const watch = await harness.watchDoc(LiveDoc, conversation.id, context);
 		if (watch === undefined) return;
 		live = toChatLive(watch.value);
@@ -336,10 +347,20 @@ export function createChat(deps: { harness: Harness; conversation: Conversation;
 				images.length === 0
 					? text
 					: [...(text === "" ? [] : [{ type: "text" as const, text }]), ...images.map((image) => ({ type: "image" as const, ...image }))];
-			await writeMemoryNote(conversation, await deps.memoryNote?.(text), context);
-			const submission = await conversation.submit({ type: "input", content, whenBusy }, context);
+			const submission = await turns.deliver(conversation, { kind: "owner", content, whenBusy }, harness, context);
 			if (whenBusy === "steer") await steerComputer(content);
 			return { submissionId: submission.id as number };
+		},
+		/**
+		 * Submit an owner message with the Harness's default busy behavior, wait for its turn, and return what the bot sent
+		 * the owner from then on, or `(unanswered: <reason>)` when the turn does not finish. Used by POST /say.
+		 */
+		async say(text: string): Promise<string> {
+			const before = await newestEntry();
+			const settled = await (await turns.deliver(conversation, { kind: "owner", content: text }, harness, context)).wait(context);
+			if (settled.status !== "done" || settled.type !== "input") return `(unanswered: ${settled.reason ?? "unknown"})`;
+			const { items } = await itemsAfter(before, context);
+			return items.flatMap((item) => (item.kind === "assistant" && item.text !== "" ? [item.text] : [])).join("\n\n");
 		},
 		/** Image `index` of the owner's message `entryId`, or undefined when there is no such image. */
 		async image(entryId: number, index: number): Promise<ChatImage | undefined> {
@@ -359,13 +380,10 @@ export function createChat(deps: { harness: Harness; conversation: Conversation;
 			const entry = (await conversation.entries({ order: "ascending", minEntryId: id, maxEntryId: id }, 1, undefined, context)).items[0];
 			const reply = entry === undefined ? undefined : toChatItem(entry);
 			if (reply?.kind !== "assistant" || reply.text.trim() === "") return undefined;
-			const data: Reaction = { target, emoji, on };
-			const withdrawn = await withdrawOpposite(data);
+			const reaction: Reaction = { target, emoji, on };
+			const withdrawn = await withdrawOpposite(reaction);
 			if (withdrawn !== undefined) return { submissionId: withdrawn };
-			const submission = await conversation.submit(
-				{ type: "input", content: reactionText(emoji, on, reply.text), whenBusy: "followUp", entry: { kind: REACTION, data } },
-				context,
-			);
+			const submission = await turns.deliver(conversation, { kind: "reaction", reaction, reply: reply.text }, harness, context);
 			return { submissionId: submission.id as number };
 		},
 		/** Stop the current turn and drop queued messages and reactions. Routines keep their schedules. */

@@ -6,8 +6,9 @@
 // no file. The bots module (src/bots.ts) says where that file is, finds each bot's conversation, moves the file
 // with the folder on a rename, and calls syncRoutines when the file changes by hand. The manager below syncs those
 // files into each bot's Durable doc and sleeper tasks; the chat tools and the web portal both go through it, so
-// hand edits, GUI edits, and model edits converge. The host calls bindRoutines({harness, bots: botLookup(...)})
-// after Harness.open, then syncRoutines() once at startup.
+// hand edits, GUI edits, and model edits converge. Each firing reaches its bot through src/turns.ts. The host calls
+// bindRoutines({harness, bots: botLookup(...), turns: createTurns(...)}) after Harness.open, then syncRoutines()
+// once at startup.
 import { existsSync } from "node:fs";
 import { mkdir, rename, rm } from "node:fs/promises";
 import { dirname } from "node:path";
@@ -29,6 +30,7 @@ import {
 import { cronLabel, nextFire, toCronSpec, type LegacySchedule } from "./cron.ts";
 // Types only: src/bots.ts calls into this module, so nothing here may load it.
 import type { BotLookup } from "./bots.ts";
+import type { Turns } from "./turns.ts";
 import {
 	MAX_ROUTINES,
 	readRoutineFile,
@@ -144,18 +146,8 @@ const RoutineTask = defineTask<RoutineInput, RoutineState, null>({
 			const mine = Object.values(items).find((item) => Number(item.taskId) === Number(task.id));
 			const conversation = await runtime.conversation(runtime.conversationId, ctx);
 			if (conversation !== undefined) {
-				await conversation.submit(
-					{
-						type: "input",
-						content: routineTurnText(
-							{ ...task.input, lastFiredAt: mine?.lastFiredAt },
-							now,
-						),
-						requestId: `${task.id}:${due}`,
-						whenBusy: "followUp",
-					},
-					ctx,
-				);
+				const text = routineTurnText({ ...task.input, lastFiredAt: mine?.lastFiredAt }, now);
+				await requireBound().turns.deliver(conversation, { kind: "routine", text, task: Number(task.id), at: due, manual: false }, runtime, ctx);
 			}
 			await runtime.commit(async (tx) => {
 				const doc = await tx.doc(RoutinesDoc, runtime.conversationId);
@@ -318,6 +310,8 @@ type BoundRoutines = {
 	harness: Harness;
 	/** Every bot, each one's conversation, and where its routines.json lives. */
 	bots: BotLookup;
+	/** How a firing reaches its bot. */
+	turns: Turns;
 	/** The single routines.json from before each bot had its own file, moved to the main bot's file once. */
 	legacyFile?: string;
 	now: () => number;
@@ -330,10 +324,12 @@ type RoutineBot = { id: number; name: string; main: boolean };
 
 let bound: BoundRoutines | undefined;
 
-// Call once with the open Harness and the bots module's lookup over it, before the bot accepts work.
+// Call once with the open Harness, the bots module's lookup over it, and the turns firings go through (src/turns.ts),
+// before the bot accepts work.
 export function bindRoutines(options: {
 	harness: Harness;
 	bots: BotLookup;
+	turns: Turns;
 	legacyFile?: string;
 	now?: () => number;
 	onError?: (error: unknown) => void;
@@ -341,6 +337,7 @@ export function bindRoutines(options: {
 	bound = {
 		harness: options.harness,
 		bots: options.bots,
+		turns: options.turns,
 		...(options.legacyFile === undefined ? {} : { legacyFile: options.legacyFile }),
 		now: options.now ?? Date.now,
 		onError: options.onError ?? console.error,
@@ -624,15 +621,7 @@ export async function runRoutineNow(id: string, ctx: Context, only?: number): Pr
 		const { bot, item } = await locate(b, id, ctx, only);
 		const conversation = await conversationOf(b, bot, ctx);
 		const now = b.now();
-		await conversation.submit(
-			{
-				type: "input",
-				content: routineTurnText(item, now),
-				requestId: `${item.taskId}:manual:${now}`,
-				whenBusy: "followUp",
-			},
-			ctx,
-		);
+		await b.turns.deliver(conversation, { kind: "routine", text: routineTurnText(item, now), task: Number(item.taskId), at: now, manual: true }, b.harness, ctx);
 		await conversation.commit(async (tx) => {
 			const doc = await tx.doc(RoutinesDoc, conversation.id);
 			const entry = doc.items[id];

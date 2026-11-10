@@ -239,7 +239,10 @@ export function createApprovals(options: {
 	file: string;
 	envFile?: string;
 	call: ExecutorCall;
-	/** Tells the bot that filed the request; `conversationId` is undefined for the main bot's older cards. */
+	/**
+	 * Tells the bot that filed the request; `conversationId` is undefined for the main bot's older cards. main.ts sends it
+	 * through src/turns.ts, which tells the main bot when there is no such bot any more.
+	 */
 	notify: (text: string, conversationId: number | undefined) => Promise<unknown>;
 	filed?: (approval: Approval) => void;
 	now?: () => number;

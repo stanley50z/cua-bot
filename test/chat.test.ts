@@ -17,9 +17,10 @@ import { createNodePhotonImages } from "@earendil-works/pi-durable/images/node";
 import type { ImageProcessor } from "@earendil-works/pi-durable/tools";
 import { botLookup, createBots, createBotsExtension } from "../src/bots.ts";
 import { BOT_MESSAGE, type ChatEvent, type ChatItem, REACTION, reactionText, SEND_MESSAGE, toChatItem, toChatLive } from "../src/chat.ts";
-import { createMemory, messageNote } from "../src/memory.ts";
+import { createMemory } from "../src/memory.ts";
 import { createPcExtensions } from "../src/pc.ts";
 import { createScreenControl, type ScreenControl } from "../src/screen-control.ts";
+import { createTurns, type MemoryNote } from "../src/turns.ts";
 import { createBotServer } from "../src/web.ts";
 
 const context = BACKGROUND_CONTEXT;
@@ -44,7 +45,7 @@ const SCRIPT: FauxResponseStep[] = [
 	end,
 ];
 
-async function open(responses = SCRIPT, images?: ImageProcessor, memoryNote?: (bot: number, message: string) => Promise<string | undefined>, options: { extensions?: Extension[]; sent?: (text: string) => void; control?: ScreenControl } = {}) {
+async function open(responses = SCRIPT, images?: ImageProcessor, memoryNote: MemoryNote = async () => undefined, options: { extensions?: Extension[]; sent?: (text: string) => void; control?: ScreenControl } = {}) {
 	const dir = await mkdtemp(join(tmpdir(), "cua-bot-chat-"));
 	const faux = fauxProvider();
 	const models = createModels();
@@ -53,11 +54,12 @@ async function open(responses = SCRIPT, images?: ImageProcessor, memoryNote?: (b
 	const registry = createRegistry();
 	registry.install(defineExtension({ name: "test", tools: [lookTool] }));
 	for (const extension of options.extensions ?? []) registry.install(extension);
-	registry.install(createBotsExtension({ agent: () => ({ model: MODEL }), dir: join(dir, "bots") }));
+	const turns = createTurns(memoryNote);
+	registry.install(createBotsExtension({ agent: () => ({ model: MODEL }), turns, dir: join(dir, "bots") }));
 	const harness = await Harness.open(new MemoryStorage(), { models, registry }, context);
 	const root = await harness.root(context, { agent: { model: MODEL } });
 	harness.resume();
-	const bots = await createBots({ harness, lookup: botLookup(harness, root, join(dir, "bots")), context, agent: () => ({ model: MODEL }), memory: createMemory({ dir: join(dir, "memory") }), onError: (error) => assert.fail(String(error)), ...(memoryNote === undefined ? {} : { memoryNote }), sent: (_bot, text) => options.sent?.(text) });
+	const bots = await createBots({ harness, lookup: botLookup(harness, root, join(dir, "bots")), context, agent: () => ({ model: MODEL }), memory: createMemory({ dir: join(dir, "memory") }), onError: (error) => assert.fail(String(error)), turns, sent: (_bot, text) => options.sent?.(text) });
 	const server = createBotServer({ say: async (text) => text, bots, context, shotsDir: dir, ...(images === undefined ? {} : { images }), ...(options.control === undefined ? {} : { control: options.control }) });
 	await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
 	const address = server.address();
@@ -150,39 +152,6 @@ test("send_message called from a codemode script shows in the chat once, notifie
 	}
 });
 
-test("an owner message that matches memory reaches the bot with the search result just before it, and the chat doesn't show the result", async () => {
-	const store = await mkdtemp(join(tmpdir(), "cua-bot-chat-memory-"));
-	const memory = createMemory({ dir: store });
-	await memory.remember("Plumber comes Tuesday", "log", ["every-bot"]);
-	// Thirty newer log facts fill the bot's memory section, so the plumber is left to the search.
-	for (let i = 1; i <= 30; i++) await memory.remember(`Newer event ${i}`, "log", ["every-bot"]);
-	const requests: string[][] = [];
-	const record = (step: FauxResponseStep): FauxResponseFactory => (request, ...rest) => {
-		requests.push(request.messages.flatMap((message) => (message.role === "user" && typeof message.content === "string" ? [message.content] : [])));
-		return typeof step === "function" ? step(request, ...rest) : step;
-	};
-	const bot = await open([record(send("Tuesday.")), record(end), record(send("Hello.")), record(end)], undefined, (id, message) => messageNote(memory, message, id, [{ id, name: "cua-bot" }]));
-	try {
-		const events = await collect(bot.base, settled(["user", "assistant"]), async () => {
-			await post(bot.base, "/api/chat", { text: "when is the plumber coming" });
-		});
-		assert.deepEqual(items(events).map((item) => item.kind), ["user", "assistant"]);
-		assert.equal(requests[0]?.length, 2);
-		assert.match(requests[0]?.[0] ?? "", /^\[search_memory\] .*\(plumber\):\n- \(\d{4}-\d{2}-\d{2}\) Plumber comes Tuesday \[every-bot\] \(log\)$/);
-		assert.equal(requests[0]?.[1], "when is the plumber coming");
-
-		await collect(bot.base, settled(["user", "assistant"]), async () => {
-			await post(bot.base, "/api/chat", { text: "hi" });
-		});
-		assert.deepEqual(requests[2]?.slice(1), ["when is the plumber coming", "hi"], "a message that finds nothing adds no note");
-		const history = (await (await fetch(`${bot.base}/api/chat`)).json()).items as ChatItem[];
-		assert.ok(!JSON.stringify(history).includes("search_memory"), "the chat never shows the note");
-	} finally {
-		await bot.close();
-		await rm(store, { recursive: true, force: true });
-	}
-});
-
 const items = (events: ChatEvent[]) => events.flatMap((event) => (event.type === "items" ? event.items : []));
 const settled = (kinds: ChatItem["kind"][]) => (events: ChatEvent[]) => {
 	const last = events.at(-1);
@@ -269,15 +238,8 @@ test("screenshots are served by name only", async () => {
 	}
 });
 
-test("routine firings and context markers are labeled for the chat", () => {
+test("context markers and bot messages are labeled for the chat", () => {
 	const base = { conversationId: 0 as never };
-	const routine = toChatItem({
-		...base,
-		id: 1 as never,
-		kind: "pi.user",
-		model: [{ role: "user", content: '[routine] "Morning agenda": email me', timestamp: 5 }],
-	});
-	assert.equal(routine?.kind, "routine");
 	const compaction = toChatItem({ ...base, id: 2 as never, kind: "pi.compaction", data: { reason: "threshold" } });
 	assert.equal(compaction?.kind, "marker");
 	assert.equal(toChatItem({ ...base, id: 3 as never, kind: "pi.system" }), undefined);
@@ -289,6 +251,13 @@ test("routine firings and context markers are labeled for the chat", () => {
 		model: [{ role: "user", content: "[bot] Message from Job Search (id 7)…", timestamp: 9 }],
 	});
 	assert.deepEqual(message, { id: 4, kind: "bot", from: 7, name: "Job Search", text: "Found 3 roles.", at: 9 });
+});
+
+test("a transcript entry that has only the [routine] or [approval] text still shows as a routine or approval item", () => {
+	const user = (id: number, content: string) => toChatItem({ conversationId: 0 as never, id: id as never, kind: "pi.user", model: [{ role: "user", content, timestamp: 5 }] });
+	assert.deepEqual(user(1, '[routine] "Morning agenda" is due'), { id: 1, kind: "routine", text: '[routine] "Morning agenda" is due', at: 5 });
+	assert.deepEqual(user(2, "[approval] The owner approved and it ran"), { id: 2, kind: "approval", text: "[approval] The owner approved and it ran", at: 5 });
+	assert.deepEqual(user(3, "what about [routine] ones?"), { id: 3, kind: "user", text: "what about [routine] ones?", at: 5, images: 0 });
 });
 
 test("a reply shows only what it sent; one with only private notes is hidden; one from before send_message shows its text", () => {
