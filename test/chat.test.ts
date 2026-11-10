@@ -15,7 +15,7 @@ import { type FauxResponseFactory, type FauxResponseStep, fauxAssistantMessage, 
 import { configure, createRegistry, defineExtension, defineTool, type Extension, Harness, MemoryStorage } from "@earendil-works/pi-durable";
 import { createNodePhotonImages } from "@earendil-works/pi-durable/images/node";
 import type { ImageProcessor } from "@earendil-works/pi-durable/tools";
-import { createBots, createBotsExtension } from "../src/bots.ts";
+import { botLookup, createBots, createBotsExtension } from "../src/bots.ts";
 import { BOT_MESSAGE, type ChatEvent, type ChatItem, REACTION, reactionText, SEND_MESSAGE, toChatItem, toChatLive } from "../src/chat.ts";
 import { createMemory, messageNote } from "../src/memory.ts";
 import { createPcExtensions } from "../src/pc.ts";
@@ -57,7 +57,7 @@ async function open(responses = SCRIPT, images?: ImageProcessor, memoryNote?: (b
 	const harness = await Harness.open(new MemoryStorage(), { models, registry }, context);
 	const root = await harness.root(context, { agent: { model: MODEL } });
 	harness.resume();
-	const bots = await createBots({ harness, root, context, agent: () => ({ model: MODEL }), dir: join(dir, "bots"), ...(memoryNote === undefined ? {} : { memoryNote }), sent: (_bot, text) => options.sent?.(text) });
+	const bots = await createBots({ harness, lookup: botLookup(harness, root, join(dir, "bots")), context, agent: () => ({ model: MODEL }), memory: createMemory({ dir: join(dir, "memory") }), onError: (error) => assert.fail(String(error)), ...(memoryNote === undefined ? {} : { memoryNote }), sent: (_bot, text) => options.sent?.(text) });
 	const server = createBotServer({ say: async (text) => text, bots, context, shotsDir: dir, ...(images === undefined ? {} : { images }), ...(options.control === undefined ? {} : { control: options.control }) });
 	await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
 	const address = server.address();

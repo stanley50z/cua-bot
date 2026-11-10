@@ -6,10 +6,10 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { hostname, networkInterfaces, release, type, userInfo, version } from "node:os";
 import { join } from "node:path";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
-import { type ConversationId, createRegistry, type Cursor, defineExtension, Harness, section } from "@earendil-works/pi-durable";
+import { createRegistry, type Cursor, defineExtension, Harness, section } from "@earendil-works/pi-durable";
 import { createNodePhotonImages } from "@earendil-works/pi-durable/images/node";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
-import { createBots, createBotsExtension, DEFAULT_BOTS_DIR, readBots } from "./bots.ts";
+import { botLookup, createBots, createBotsExtension, DEFAULT_BOTS_DIR, readBots } from "./bots.ts";
 import { toChatItem, writeMemoryNote } from "./chat.ts";
 import { createComputerExtension, defaultSpaceId, defaultSpaceLabel, openLiveStream, registrySpaces, screenControl, spacesText } from "./computer.ts";
 import { createConnections, listCuaSpaces, probeTcp } from "./connections.ts";
@@ -27,7 +27,7 @@ import { createMemory, createMemoryExtension, messageNote, migrateMemory } from 
 import { createPcExtensions, pcEnv } from "./pc.ts";
 import { createPush } from "./push.ts";
 import { LEGACY_ROUTINE_FILE } from "./routines-file.ts";
-import { bindRoutines, createRoutinesExtension, removeBotRoutines, routineDir, startRoutineFileWatch, syncRoutines } from "./routines.ts";
+import { bindRoutines, createRoutinesExtension, routineDir, syncRoutines } from "./routines.ts";
 import { today } from "./today.ts";
 import { traceExtension } from "./trace.ts";
 import { createBotServer } from "./web.ts";
@@ -116,7 +116,7 @@ if (executorUrl && executorKey) {
 		call: (name, args) => executor(name, args),
 		// The owner's decision reaches the bot that asked as a message, after any turn in progress.
 		notify: async (text, conversationId) => {
-			const asked = conversationId === undefined ? root : ((await harness.conversation(conversationId as ConversationId, context)) ?? root);
+			const asked = (await lookup.conversation(conversationId, context)) ?? root;
 			return asked.submit({ type: "input", content: text, whenBusy: "followUp" }, context);
 		},
 		filed: (approval) =>
@@ -131,15 +131,33 @@ const DATABASE = join(DATA_DIR, "cua-bot.sqlite");
 const storage = await openNodeSqliteStorage(DATABASE);
 const harness = await Harness.open(storage, { models, registry, env: pcEnv }, context);
 const root = await harness.root(context, { agent: botAgent() });
+// Each bot's conversation and the files in its folder. Routines and createBots work through it, and the approval
+// card finds the bot that asked through it.
+const lookup = botLookup(harness, root);
 const logRoutineSyncFailure = (error: unknown) =>
 	log("routine file sync failed:", error instanceof Error ? error.message : String(error));
-bindRoutines({ harness, root, legacyFile: LEGACY_ROUTINE_FILE, onError: logRoutineSyncFailure });
+bindRoutines({ harness, bots: lookup, legacyFile: LEGACY_ROUTINE_FILE, onError: logRoutineSyncFailure });
 harness.resume();
+// The bots come before the first routine sync, so their watch on the bot folders already sees any hand edit to a
+// routines.json that the sync doesn't.
+const space = await defaultSpaceLabel();
+const bots = await createBots({
+	harness,
+	lookup,
+	context,
+	agent: botAgent,
+	memory,
+	onError: logRoutineSyncFailure,
+	sent: (bot, text) => void push.send({ title: bot.name, body: text, bot: bot.id }),
+	memoryNote,
+	computer: (conversation) =>
+		createComputerView({ harness, storage, conversation, shotsDir: join(DATA_DIR, "shots"), context, ...(space === undefined ? {} : { space }) }),
+});
+log(`bots: ${bots.list().map((bot) => bot.name).join(", ")}`);
 const synced = await syncRoutines(context);
 log(
 	`routines: ${synced.total} from ${routineDir()} (created ${synced.created}, updated ${synced.updated}, deleted ${synced.deleted}${synced.adopted ? ", adopted existing" : ""})`,
 );
-const stopWatching = startRoutineFileWatch(context, logRoutineSyncFailure);
 log(`cua-bot up: model ${botModel().provider}/${botModel().modelId}, reasoning ${botThinking()}, root ${root.id}`);
 
 // Searches memory for a message from the owner or another bot to `bot` and logs what it searched for, so the log shows each automatic search.
@@ -169,29 +187,6 @@ async function say(text: string): Promise<string> {
 	return sent.join("\n\n");
 }
 
-const space = await defaultSpaceLabel();
-const bots = await createBots({
-	harness,
-	root,
-	context,
-	agent: botAgent,
-	// A renamed bot's routine file is renamed on the next sync and its memory tag follows; a deleted bot's routines
-	// go with it and its tag comes off its facts.
-	renamed: async (id, before, after) => {
-		await memory.botRenamed({ id, name: before }, { id, name: after });
-		await syncRoutines(context);
-	},
-	removing: async (id) => {
-		const bot = bots.list().find((b) => b.id === id);
-		if (bot !== undefined) await memory.botRemoved(bot);
-		await removeBotRoutines(id, context);
-	},
-	sent: (bot, text) => void push.send({ title: bot.name, body: text, bot: bot.id }),
-	memoryNote,
-	computer: (conversation) =>
-		createComputerView({ harness, storage, conversation, shotsDir: join(DATA_DIR, "shots"), context, ...(space === undefined ? {} : { space }) }),
-});
-log(`bots: ${bots.list().map((bot) => bot.name).join(", ")}`);
 const live = createLiveScreen(openLiveStream);
 // The Connections tab: this computer, which runs the Harness and every bot, then the owner's SSH machines and the Spaces.
 const defaultSpace = defaultSpaceId();
@@ -223,7 +218,6 @@ createBotServer({ say, bots, memory, memoryBots: () => bots.list(), images, cont
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
 	process.on(signal, async () => {
 		log(`${signal}: closing`);
-		stopWatching();
 		await bots.close();
 		await harness.close(context);
 		machines.close();

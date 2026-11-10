@@ -1,11 +1,14 @@
 // The owner's bots. The main bot is the root conversation; every other bot is an ownerless conversation
 // of its own. All of them run the same tools and Cua Spaces and share memory through tags (src/memory.ts); each has a name, its own chat, and
 // its own folder bots/<name>/ holding agent.md (its standing instructions, re-read every turn, so hand
-// edits apply at once) and routines.json (src/routines.ts). The folder follows
-// a rename and goes with a delete. Bots message each other with message_bot: the text lands in the other bot's chat as
+// edits apply at once), routines.json (src/routines.ts), and work-log.md (src/memory.ts). This module is the one
+// that knows that layout (botFile) and turns a bot id into its conversation (botLookup). The folder follows
+// a rename and goes with a delete, and createBots carries both through to the bot's memory tag and routines.
+// Bots message each other with message_bot: the text lands in the other bot's chat as
 // a `cua-bot.bot-message` entry (shown as "Message from <name>") and wakes it on a later turn.
-// main.ts installs createBotsExtension() before Harness.open, then builds the manager with createBots()
-// for the web portal, which lists, adds, edits, and deletes bots and gives each one a Chat.
+// main.ts installs createBotsExtension() before Harness.open, makes one botLookup() after it for bindRoutines and
+// createBots, then builds the manager with createBots() for the web portal, which lists, adds, edits, and deletes bots
+// and gives each one a Chat.
 import { existsSync, watch as watchFiles } from "node:fs";
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
@@ -27,12 +30,15 @@ import {
 } from "@earendil-works/pi-durable";
 import { BOT_MESSAGE, type BotMessage, type Chat, type ChatItem, createChat, SEND_MESSAGE, SENT_MESSAGE, type SentMessage, writeMemoryNote } from "./chat.ts";
 import type { ComputerView } from "./computer-view.ts";
+import type { Memory } from "./memory.ts";
 import { parseModelRef, parseThinkingLevel } from "./models.ts";
+import { removeBotRoutines, syncRoutines } from "./routines.ts";
 
 export const MAIN_NAME = "cua-bot";
 /** One folder per bot, in the project root. */
 export const DEFAULT_BOTS_DIR = join(import.meta.dirname, "..", "bots");
 const AGENT_FILE = "agent.md";
+const ROUTINES_FILE = "routines.json";
 const NAME_MAX = 40;
 const MESSAGE_MAX = 8000;
 /** Messages one bot may send per rolling hour, so two bots can't keep each other awake forever. */
@@ -140,15 +146,56 @@ export const slugOf = (name: string) =>
 		.replace(/[^\p{L}\p{N}]+/gu, "-")
 		.replace(/^-+|-+$/g, "");
 
-/** The bot's folder name under bots/: "Job Search" → "job-search". Used by src/routines.ts and src/main.ts for the files inside it. */
-export function botFolder(bot: { id: number; name: string }): string {
+/** What names a bot's folder: its id and name. */
+type BotRef = Pick<BotEntry, "id" | "name">;
+
+/** The bot's folder name under bots/: "Job Search" → "job-search". src/memory.ts derives the bot's `@<folder>` tag from it. */
+export function botFolder(bot: BotRef): string {
 	const slug = slugOf(bot.name);
 	if (slug === "") return `bot-${bot.id}`;
 	// Windows reserves these names for devices.
 	return /^(con|prn|aux|nul|com\d|lpt\d)$/.test(slug) ? `${slug}-bot` : slug;
 }
 
-const agentPath = (dir: string, bot: BotEntry) => join(dir, botFolder(bot), AGENT_FILE);
+/** The files a bot's folder holds: its instructions, its routines (src/routines.ts), and the records of its own work (src/memory.ts). */
+export type BotFile = typeof AGENT_FILE | typeof ROUTINES_FILE | "work-log.md";
+
+// The bot's folder in `dir`. Every path under a bot's folder is joined here or in botFile.
+const folderPath = (dir: string, bot: BotRef) => join(dir, botFolder(bot));
+
+/** Where one of the bot's files lives in `dir`, the folder of bot folders. src/memory.ts reads the work log through it. */
+export const botFile = (dir: string, bot: BotRef, file: BotFile) => join(folderPath(dir, bot), file);
+
+export type BotLookup = ReturnType<typeof botLookup>;
+
+/**
+ * Finds the bots and what is theirs: every bot, a bot's conversation, and the files in its folder. main.ts makes the
+ * one lookup right after Harness.open and hands it to bindRoutines and then createBots; the approval cards find the
+ * bot that asked through it.
+ */
+export function botLookup(harness: Pick<Harness, "snapshot" | "conversation">, root: Conversation, dir = DEFAULT_BOTS_DIR) {
+	return {
+		/** The main bot's conversation. */
+		root,
+		/** The folder of bot folders. */
+		dir,
+		/** Every bot, the main bot first. Until createBots first records the root as the main bot, the root is listed as it. */
+		async list(context: Context): Promise<BotEntry[]> {
+			const bots = botsOf(await harness.snapshot(BotsDoc, context));
+			return bots.some((bot) => bot.main) ? bots : [entryOf(Number(root.id), { name: MAIN_NAME, createdAt: 0 }, true), ...bots];
+		},
+		/**
+		 * The conversation of the bot with this id; the main bot's when `id` is undefined. Undefined when no conversation
+		 * has the id. A deleted bot's conversation stays in the database, so this still finds it.
+		 */
+		conversation: async (id: number | undefined, context: Context): Promise<Conversation | undefined> =>
+			id === undefined ? root : harness.conversation(id as ConversationId, context),
+		/** Where one of the bot's files lives. */
+		file: (bot: BotRef, file: BotFile) => botFile(dir, bot, file),
+	};
+}
+
+const agentPath = (dir: string, bot: BotEntry) => botFile(dir, bot, AGENT_FILE);
 
 // The bot's instructions: its agent file, or "" while it has none.
 async function readAgentFile(dir: string, bot: BotEntry): Promise<string> {
@@ -163,7 +210,7 @@ async function readAgentFile(dir: string, bot: BotEntry): Promise<string> {
 // Atomically replaces the bot's agent file, creating its folder.
 async function writeAgentFile(dir: string, bot: BotEntry, instructions: string): Promise<void> {
 	const path = agentPath(dir, bot);
-	await mkdir(join(dir, botFolder(bot)), { recursive: true });
+	await mkdir(folderPath(dir, bot), { recursive: true });
 	await writeFile(`${path}.tmp`, instructions === "" ? "" : `${instructions}\n`, "utf8");
 	await rename(`${path}.tmp`, path);
 }
@@ -394,28 +441,30 @@ export type Bots = Awaited<ReturnType<typeof createBots>>;
 
 /**
  * The host's view of the bots: the list with each bot's newest message and busy state, edits from the
- * web portal, and one Chat per bot. Records the root as the main bot on first start. Call close() on shutdown.
+ * web portal, and one Chat per bot. Records the root as the main bot on first start. A rename or delete
+ * carries through to the bot's folder, its memory tag, and its routines, which must be bound
+ * (bindRoutines in src/routines.ts) first. One watch on the bot folders sends hand edits to an agent file to
+ * the web portal and hand edits to a routines.json to syncRoutines. Call close() on shutdown.
  */
 export async function createBots(deps: {
 	harness: Harness;
-	root: Conversation;
+	/** The lookup over `harness` that routines were bound with: the main bot's conversation and the folder of bot folders. */
+	lookup: BotLookup;
 	context: Context;
 	/** The model settings a bot runs with unless it overrides them, as of the call. */
 	agent: () => AgentChange;
-	/** Where the bot folders live; DEFAULT_BOTS_DIR unless a test moves them. */
-	dir?: string;
+	/** The owner's memory, whose tag for a bot follows its rename and comes off its facts when it is deleted. */
+	memory: Pick<Memory, "botRenamed" | "botRemoved">;
+	/** Told when a sync after a hand edit to a routines.json fails, or the watch on the bot folders does. */
+	onError: (error: unknown) => void;
 	computer?: (conversation: Conversation) => ComputerView;
-	/** After the owner renames a bot and its folder has moved; main.ts resyncs its routines and moves its memory tag. */
-	renamed?: (id: number, before: string, after: string) => Promise<unknown>;
-	/** Before a bot is deleted, while its record still names it; main.ts cancels its routines and takes its tag off its facts. */
-	removing?: (id: number) => Promise<unknown>;
 	/** Each message a bot sends the owner with send_message, in any bot's chat; main.ts pushes it to the owner's browser. */
 	sent?: (bot: Bot, text: string) => void;
 	/** What memory holds for a message to this bot, for the bot to read before it; main.ts searches. */
 	memoryNote?: (bot: number, message: string) => Promise<string | undefined>;
 }) {
-	const { harness, root, context } = deps;
-	const dir = deps.dir ?? DEFAULT_BOTS_DIR;
+	const { harness, lookup, context, memory, onError } = deps;
+	const { root, dir } = lookup;
 	await mkdir(dir, { recursive: true });
 	await harness.commit(async (tx) => {
 		const doc = await tx.doc(BotsDoc);
@@ -448,7 +497,7 @@ export async function createBots(deps: {
 	// Opens a bot's chat and follows it for the list: its newest message and whether it is working.
 	async function open(bot: Bot): Promise<void> {
 		if (chats.has(bot.id)) return;
-		const conversation = bot.main ? root : await harness.conversation(bot.id as ConversationId, context);
+		const conversation = await lookup.conversation(bot.id, context);
 		if (conversation === undefined) return;
 		const computer = deps.computer?.(conversation);
 		const { memoryNote } = deps;
@@ -507,20 +556,23 @@ export async function createBots(deps: {
 		await pending;
 	});
 	const reload = () => (pending = pending.then(async () => refresh(await harness.snapshot(BotsDoc, context))));
-	// A hand edit to an agent file reaches the web portal within a second; prompts re-read the file every turn anyway.
-	let timer: ReturnType<typeof setTimeout> | undefined;
+	// The one watch on the bot folders. A hand edit to an agent file reaches the web portal within a second (prompts
+	// re-read the file every turn anyway), and one to a routines.json syncs that bot's routines within a second or two.
+	// Each waits for 250 ms of quiet, since an editor's save is several events.
+	let agentTimer: ReturnType<typeof setTimeout> | undefined;
+	let routinesTimer: ReturnType<typeof setTimeout> | undefined;
 	const files = watchFiles(dir, { recursive: true }, (_event, filename) => {
-		if (filename !== null && !filename.toString().endsWith(AGENT_FILE)) return;
-		clearTimeout(timer);
-		timer = setTimeout(() => void reload(), 250);
+		const name = filename?.toString();
+		if (name === undefined || name.endsWith(AGENT_FILE)) {
+			clearTimeout(agentTimer);
+			agentTimer = setTimeout(() => void reload(), 250);
+		}
+		if (name === undefined || name.endsWith(ROUTINES_FILE)) {
+			clearTimeout(routinesTimer);
+			routinesTimer = setTimeout(() => void syncRoutines(context).catch(onError), 250);
+		}
 	});
-	files.on("error", () => {});
-
-	const conversationOf = async (id: number) => {
-		const bot = bots.find((b) => b.id === id);
-		if (bot === undefined) throw new BotError(404, "No such bot.");
-		return bot.main ? root : await harness.conversation(id as ConversationId, context);
-	};
+	files.on("error", onError);
 
 	return {
 		list,
@@ -528,7 +580,8 @@ export async function createBots(deps: {
 		/** The bot's chat; the main bot's when `id` is undefined. Undefined for an unknown bot. */
 		async chat(id?: number): Promise<Chat | undefined> {
 			await pending;
-			return chats.get(id ?? Number(root.id))?.chat;
+			const conversation = await lookup.conversation(id, context);
+			return conversation === undefined ? undefined : chats.get(Number(conversation.id))?.chat;
 		},
 		async create(input: BotInput): Promise<Bot> {
 			const bot = await createBot((run) => harness.commit(run, context), dir, input, deps.agent(), Date.now());
@@ -547,9 +600,9 @@ export async function createBots(deps: {
 				if (record === undefined) throw new BotError(404, "No such bot.");
 				const valid = validInput(input, botsOf(doc).filter((b) => b.id !== id));
 				const before = entryOf(id, record, id === doc.main);
-				const moved = botFolder(before) !== botFolder({ id, name: valid.name });
-				if (moved && existsSync(join(dir, botFolder({ id, name: valid.name })))) {
-					throw new BotError(400, `${basename(dir)}/${botFolder({ id, name: valid.name })} already exists; move it away or pick another name.`);
+				const after = { id, name: valid.name };
+				if (botFolder(before) !== botFolder(after) && existsSync(folderPath(dir, after))) {
+					throw new BotError(400, `${basename(dir)}/${botFolder(after)} already exists; move it away or pick another name.`);
 				}
 				record.name = valid.name;
 				if (valid.avatar === null) delete record.avatar;
@@ -561,12 +614,16 @@ export async function createBots(deps: {
 				await configure(tx, id as ConversationId, agentOf(record, deps.agent()));
 				return { bot: { ...entryOf(id, record, before.main), instructions: valid.instructions }, before };
 			}, context);
-			// The folder, with its routines, follows a rename.
-			const from = join(dir, botFolder(before));
-			if (botFolder(before) !== botFolder(bot) && existsSync(from)) await rename(from, join(dir, botFolder(bot)));
+			// The folder follows a rename, with everything in it; this is the only move of a bot's files. Then the bot's
+			// memory tag follows, and its routines resync, finding their file in the new folder.
+			const from = folderPath(dir, before);
+			if (botFolder(before) !== botFolder(bot) && existsSync(from)) await rename(from, folderPath(dir, bot));
 			await writeAgentFile(dir, bot, bot.instructions);
 			await reload();
-			if (bot.name !== before.name) await deps.renamed?.(id, before.name, bot.name);
+			if (bot.name !== before.name) {
+				await memory.botRenamed(before, bot);
+				await syncRoutines(context);
+			}
 			return { ...bot, ...pathsOf(dir, bot) };
 		},
 		/** Pins the bot to the top of the web portal's list, after the bots already pinned, or unpins it. Pinning a pinned bot keeps its place. */
@@ -581,17 +638,23 @@ export async function createBots(deps: {
 			}, context);
 			await reload();
 		},
-		/** Stops the bot, ends its routines, deletes its folder (agent file and routines), and drops it from the list. Its transcript stays in the database. The main bot can't go. */
+		/**
+		 * Deletes the bot: while its record still names it, takes its tag off its facts and the owner's tags and ends its
+		 * routines; then stops its turn, drops it from the list, and deletes its folder. Its transcript stays in the database.
+		 * The main bot can't go.
+		 */
 		async remove(id: number): Promise<void> {
 			if (id === Number(root.id)) throw new BotError(400, "The main bot can't be deleted.");
-			const conversation = await conversationOf(id);
 			const bot = bots.find((b) => b.id === id);
-			await deps.removing?.(id);
+			if (bot === undefined) throw new BotError(404, "No such bot.");
+			const conversation = await lookup.conversation(id, context);
+			await memory.botRemoved(bot);
+			await removeBotRoutines(id, context);
 			await conversation?.abort(context, { background: true });
 			await harness.commit(async (tx) => {
 				delete (await tx.doc(BotsDoc)).bots[String(id)];
 			}, context);
-			if (bot !== undefined) await rm(join(dir, botFolder(bot)), { recursive: true, force: true });
+			await rm(folderPath(dir, bot), { recursive: true, force: true });
 			await reload();
 		},
 		/** Receive the list whenever a bot is added, edited, removed, starts or stops work, or gets a message. */
@@ -601,7 +664,8 @@ export async function createBots(deps: {
 		},
 		async close() {
 			listeners.clear();
-			clearTimeout(timer);
+			clearTimeout(agentTimer);
+			clearTimeout(routinesTimer);
 			files.close();
 			await watch?.stop();
 			for (const entry of chats.values()) {

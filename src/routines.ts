@@ -2,14 +2,15 @@
 // its cron slot, posts a `[routine]` turn there, and sleeps again. A deadline that passed while the bot
 // was down fires once on resume and rearms from the wake time; missed slots are never replayed. A routine
 // marked `once` does not rearm: the firing removes it, whether or not the turn it posted has finished.
-// Each bot's definitions live in its folder as bots/<bot-name>/routines.json (see routines-file.ts and
-// botFolder in bots.ts); a bot without routines has no file. The manager below syncs those files into each bot's
-// Durable doc and sleeper tasks; the chat tools and the web portal both go through it, so hand edits, GUI
-// edits, and model edits converge. The host calls bindRoutines({harness, root}) after Harness.open,
-// then syncRoutines() once at startup.
-import { existsSync, mkdirSync, watch } from "node:fs";
+// Each bot's definitions live in its folder's routines.json (see routines-file.ts); a bot without routines has
+// no file. The bots module (src/bots.ts) says where that file is, finds each bot's conversation, moves the file
+// with the folder on a rename, and calls syncRoutines when the file changes by hand. The manager below syncs those
+// files into each bot's Durable doc and sleeper tasks; the chat tools and the web portal both go through it, so
+// hand edits, GUI edits, and model edits converge. The host calls bindRoutines({harness, bots: botLookup(...)})
+// after Harness.open, then syncRoutines() once at startup.
+import { existsSync } from "node:fs";
 import { mkdir, rename, rm } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { dirname } from "node:path";
 import type { Context } from "@earendil-works/chord";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { Type } from "typebox";
@@ -26,7 +27,8 @@ import {
 	type TaskId,
 } from "@earendil-works/pi-durable";
 import { cronLabel, nextFire, toCronSpec, type LegacySchedule } from "./cron.ts";
-import { botFolder, DEFAULT_BOTS_DIR, MAIN_NAME, readBots } from "./bots.ts";
+// Types only: src/bots.ts calls into this module, so nothing here may load it.
+import type { BotLookup } from "./bots.ts";
 import {
 	MAX_ROUTINES,
 	readRoutineFile,
@@ -314,61 +316,50 @@ export type SyncSummary = {
 
 type BoundRoutines = {
 	harness: Harness;
-	root: Conversation;
-	dir: string;
+	/** Every bot, each one's conversation, and where its routines.json lives. */
+	bots: BotLookup;
 	/** The single routines.json from before each bot had its own file, moved to the main bot's file once. */
 	legacyFile?: string;
 	now: () => number;
 	/** Told when the sync that follows a once-routine's firing fails. */
 	onError: (error: unknown) => void;
 	queue: Promise<unknown>;
-	/** Each bot's file as of its last sync, so a renamed bot's file moves with it. */
-	paths: Map<number, string>;
 };
 
 type RoutineBot = { id: number; name: string; main: boolean };
 
 let bound: BoundRoutines | undefined;
 
-// Call once with the open Harness and its root conversation (the main bot), before the bot accepts work.
+// Call once with the open Harness and the bots module's lookup over it, before the bot accepts work.
 export function bindRoutines(options: {
 	harness: Harness;
-	root: Conversation;
-	dir?: string;
+	bots: BotLookup;
 	legacyFile?: string;
 	now?: () => number;
 	onError?: (error: unknown) => void;
 }): void {
 	bound = {
 		harness: options.harness,
-		root: options.root,
-		dir: options.dir ?? DEFAULT_BOTS_DIR,
+		bots: options.bots,
 		...(options.legacyFile === undefined ? {} : { legacyFile: options.legacyFile }),
 		now: options.now ?? Date.now,
 		onError: options.onError ?? console.error,
 		queue: Promise.resolve(),
-		paths: new Map(),
 	};
 }
 
-// Every bot. Without a bot list (tests that only run routines) the root is the one bot.
-async function routineBots(b: BoundRoutines, ctx: Context): Promise<RoutineBot[]> {
-	const bots = await readBots(b.harness, ctx);
-	return bots.some((bot) => bot.main) ? bots : [{ id: Number(b.root.id), name: MAIN_NAME, main: true }, ...bots];
-}
-
+// The bot `id` names; the main bot when it is undefined.
 async function botById(b: BoundRoutines, id: number | undefined, ctx: Context): Promise<RoutineBot> {
-	const bots = await routineBots(b, ctx);
-	const bot = id === undefined ? bots.find((candidate) => candidate.main) : bots.find((candidate) => candidate.id === id);
+	const conversation = await b.bots.conversation(id, ctx);
+	const bot = conversation === undefined ? undefined : (await b.bots.list(ctx)).find((candidate) => candidate.id === Number(conversation.id));
 	if (bot === undefined) throw new RoutineValidationError("No such bot.");
 	return bot;
 }
 
-const ROUTINE_FILE = "routines.json";
-const fileOf = (b: BoundRoutines, bot: RoutineBot) => join(b.dir, botFolder(bot), ROUTINE_FILE);
+const fileOf = (b: BoundRoutines, bot: RoutineBot) => b.bots.file(bot, "routines.json");
 
 async function conversationOf(b: BoundRoutines, bot: RoutineBot, ctx: Context): Promise<Conversation> {
-	const conversation = bot.main ? b.root : await b.harness.conversation(bot.id as ConversationId, ctx);
+	const conversation = await b.bots.conversation(bot.id, ctx);
 	if (conversation === undefined) throw new Error(`${bot.name}'s conversation is missing`);
 	return conversation;
 }
@@ -382,7 +373,7 @@ async function saveDefs(path: string, defs: readonly RoutineDefinition[]): Promi
 
 // The bot holding routine `id`; `only` limits the search to one bot, as the chat tools do.
 async function locate(b: BoundRoutines, id: string, ctx: Context, only?: number): Promise<{ bot: RoutineBot; item: RoutineItem }> {
-	for (const bot of await routineBots(b, ctx)) {
+	for (const bot of await b.bots.list(ctx)) {
 		if (only !== undefined && bot.id !== only) continue;
 		const item = (await snapshotItems(b, bot, ctx))[id];
 		if (item !== undefined) return { bot, item };
@@ -434,7 +425,7 @@ export async function listRoutineViews(ctx: Context): Promise<RoutineView[]> {
 	const b = requireBound();
 	const now = b.now();
 	const views: RoutineView[] = [];
-	for (const bot of await routineBots(b, ctx)) {
+	for (const bot of await b.bots.list(ctx)) {
 		for (const [id, item] of Object.entries(await snapshotItems(b, bot, ctx))) views.push(toView(bot, id, item, now));
 	}
 	return views.sort((x, y) => x.nextFire.localeCompare(y.nextFire));
@@ -445,9 +436,6 @@ export async function listRoutineViews(ctx: Context): Promise<RoutineView[]> {
 // landed) heals on the next sync, which re-diffs the doc against the file.
 async function syncInternal(b: BoundRoutines, bot: RoutineBot, ctx: Context, saved?: RoutineDefinition[]): Promise<SyncSummary> {
 	const path = fileOf(b, bot);
-	const previous = b.paths.get(bot.id);
-	b.paths.set(bot.id, path);
-	if (previous !== undefined && previous !== path && existsSync(previous) && !existsSync(path)) await rename(previous, path);
 	const loaded = saved === undefined ? await readRoutineFile(path) : { defs: saved, assignedIds: false };
 	const state = await b.harness.snapshot(RoutinesDoc, bot.id as ConversationId, ctx);
 	const items = state?.items ?? {};
@@ -525,7 +513,7 @@ export async function syncRoutines(ctx: Context): Promise<SyncSummary> {
 	const b = requireBound();
 	return enqueue(b, async () => {
 		const total: SyncSummary = { created: 0, updated: 0, deleted: 0, total: 0, adopted: false };
-		const bots = await routineBots(b, ctx);
+		const bots = await b.bots.list(ctx);
 		const main = bots.find((bot) => bot.main);
 		if (b.legacyFile !== undefined && main !== undefined && existsSync(b.legacyFile) && !existsSync(fileOf(b, main))) {
 			await mkdir(dirname(fileOf(b, main)), { recursive: true });
@@ -654,11 +642,11 @@ export async function runRoutineNow(id: string, ctx: Context, only?: number): Pr
 	});
 }
 
-/** Before a bot is deleted: stop its routines and delete its file. Called by src/bots.ts through main.ts. */
+/** Before a bot is deleted, while its record still names it: stop its routines and delete its file. Called by createBots in src/bots.ts. */
 export async function removeBotRoutines(botId: number, ctx: Context): Promise<void> {
 	const b = requireBound();
 	return enqueue(b, async () => {
-		const bot = (await routineBots(b, ctx)).find((candidate) => candidate.id === botId);
+		const bot = (await b.bots.list(ctx)).find((candidate) => candidate.id === botId);
 		if (bot === undefined) return;
 		const items = await snapshotItems(b, bot, ctx);
 		for (const item of Object.values(items)) {
@@ -670,7 +658,6 @@ export async function removeBotRoutines(botId: number, ctx: Context): Promise<vo
 			(await tx.doc(RoutinesDoc, conversation.id)).items = {};
 		}, ctx);
 		await rm(fileOf(b, bot), { force: true });
-		b.paths.delete(bot.id);
 	});
 }
 
@@ -689,26 +676,7 @@ export function previewCron(spec: string, once?: boolean): { label: string; next
 
 /** The folder of bot folders, each holding its routines.json (for logs and the UI). */
 export function routineDir(): string {
-	return requireBound().dir;
-}
-
-/** Watch the bot folders and sync after hand edits to a routines.json (debounced). Returns a stop function. */
-export function startRoutineFileWatch(ctx: Context, onError: (error: unknown) => void): () => void {
-	const b = requireBound();
-	mkdirSync(b.dir, { recursive: true });
-	let timer: ReturnType<typeof setTimeout> | undefined;
-	const watcher = watch(b.dir, { recursive: true }, (_event, filename) => {
-		if (filename !== null && !filename.toString().endsWith(ROUTINE_FILE)) return;
-		if (timer !== undefined) clearTimeout(timer);
-		timer = setTimeout(() => {
-			syncRoutines(ctx).catch(onError);
-		}, 250);
-	});
-	watcher.on("error", onError);
-	return () => {
-		if (timer !== undefined) clearTimeout(timer);
-		watcher.close();
-	};
+	return requireBound().bots.dir;
 }
 
 const cancelRoutine = defineTool({
