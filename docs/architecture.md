@@ -7,7 +7,7 @@ flowchart LR
   browser[Web portal] <--> server
   say[say.py] --> server
   server["HTTP server<br/>127.0.0.1:43142"] <--> harness["Pi Durable Harness<br/>data/cua-bot.sqlite"]
-  harness --> space["Cua Space<br/>computer_use, space_bash, live screen"]
+  harness --> space["Cua Space<br/>computer_use, space_bash, space_read, live screen"]
   harness --> ssh["SSH hosts<br/>read, write, edit, bash"]
   harness --> cua["cua mcp<br/>~156 cua_* tools"]
   harness --> executor["Executor Cloud<br/>Gmail, Calendar"]
@@ -71,8 +71,9 @@ The bots work on every Space your Cua account lists, the way `cua mcp`'s `list_s
 
 - **`computer_use`** runs in the foreground as a subagent on the calling bot's model and reasoning effort, with every driver tool the chosen Space lists (60 on the Mac's cua-driver and 61 on Windows as of 2026-11-07, including the typed `browser_*` tools, `run_steps` and `run_script`). On-screen work goes here, one task at a time on each Space.
 - **`space_bash`** runs a shell command on a Space (`/bin/sh -c`, or `cmd.exe /C` on a Windows Space). The bot calls it directly for CLI tools, files and inspection; `computer_use` has it too.
+- **`space_read`** reads a file on a Space, by its path there. It is Pi's own `read`: the cua SDK's `Space.download` copies the file into a temp folder on the computer cua-bot runs on, `read` runs on the copy, and the folder is deleted. An image comes back as an image the model sees, shrunk to fit by the same Photon processor as pasted images. `computer_use` has it too, and its brief tells it to look at image files this way instead of opening them in an app; before `space_read` it opened them in Paint or Photos and took a screenshot.
 
-Both take `space`, a Space's name (any case) or its id. Without it they use the default; inside `computer_use`, `space_bash` uses the task's Space. A bot can switch Spaces between calls in one job.
+All three take `space`, a Space's name (any case) or its id. Without it they use the default; inside `computer_use`, `space_bash` and `space_read` use the task's Space. A bot can switch Spaces between calls in one job.
 
 Each Space's driver tools sit in their own extension, `space:<id>`, installed by that Space's first `computer_use` call, because a Mac and a Windows PC both have a `click` with different schemas. Only that Space's child selects the extension. The main agent never gets driver tools: `tool_search` skips them and code mode can't call them. To call one driver tool directly, a bot uses `cua_call_tool` with the Space's id.
 
@@ -82,7 +83,7 @@ The live screen and Take control stay on the default Space. Owner control pauses
 
 Code: [src/machines.ts](../src/machines.ts), [src/pc.ts](../src/pc.ts).
 
-Pi Durable's `read`, `write`, `edit` and `bash` (Git Bash on Windows), plus `powershell` when cua-bot runs on Windows. Pi Durable doesn't install them on its own; `createMachines()` does.
+Pi Durable's `read`, `write`, `edit` and `bash` (Git Bash on Windows), plus `powershell` when cua-bot runs on Windows. Pi Durable doesn't install them on its own; `createMachines(images)` does. `read` gets the Photon processor, so it shrinks an image larger than the model takes (2000 px on a side) instead of refusing it.
 
 Each takes an optional `machine` argument:
 

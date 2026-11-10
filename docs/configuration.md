@@ -58,7 +58,7 @@ Copy `.env.example` to `.env`.
 | `OPENAI_API_KEY` | no | For `openai/<model>`, instead of `node src/login.ts openai`. |
 | `EXECUTOR_MCP_URL` | no | The URL on Executor's Connect card, e.g. `https://executor.sh/<org>/mcp`. |
 | `EXECUTOR_API_KEY` | no | A key from Executor's API keys page. |
-| `CUA_SPACE_ID` | no | The default Space's id: the one `computer_use` and `space_bash` use when the bot names no Space, and the one the live screen shows. Defaults to the first in `~/.cua/spaces.json`. |
+| `CUA_SPACE_ID` | no | The default Space's id: the one `computer_use`, `space_bash` and `space_read` use when the bot names no Space, and the one the live screen shows. Defaults to the first in `~/.cua/spaces.json`. |
 | `CUA_MCP_COMMAND` | no | The `cua` CLI to run `cua mcp` with. Defaults to the Cua Spaces app's bundled `cua.exe` on Windows, else `cua` on PATH. |
 | `CUABOT_MODEL` | no | `"provider/model"`, overriding `default` in `models.json`. |
 | `CUABOT_REASONING` | no | The bots' reasoning effort: `off`, `minimal`, `low`, `medium`, `high`, `xhigh` or `max`. Defaults to `medium`. A model that doesn't support the effort uses its nearest one. |

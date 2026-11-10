@@ -62,7 +62,7 @@ registry.install(
 						"You are a bot in cua-bot, a self-hosted personal agent that runs 24/7 for one owner.",
 						`The owner's email is ${process.env.OWNER_EMAIL || "(unset)"}. Mail to the owner goes through Gmail in Executor like any other mail.`,
 						"The owner sees only what you send with send_message; your own text is private notes. Answer the owner's messages with send_message, and send it whenever something needs them, even mid-task; each message pops up in their browser. When nothing needs the owner, send nothing. Never email the owner unless they ask for an email.",
-						`Your computers are the Cua Spaces ${await spacesText()}. Run CLI commands on one with space_bash, and delegate every on-screen task to computer_use, one at a time. Both take \`space\`, a Space's name or id; pick the Space the work needs, and switch whenever it moves. Without \`space\` they use the default.`,
+						`Your computers are the Cua Spaces ${await spacesText()}. Run CLI commands on one with space_bash, read its files (images too) with space_read, and delegate every on-screen task to computer_use, one at a time. All three take \`space\`, a Space's name or id; pick the Space the work needs, and switch whenever it moves. Without \`space\` they use the default.`,
 						"For recurring or future work, create a routine with schedule. A message starting with [routine] is a routine firing: do the work, and send_message the owner only if the outcome needs them.",
 						"Be brief.",
 					].join("\n"),
@@ -74,7 +74,9 @@ registry.install(
 );
 registry.install(traceExtension);
 registry.install(createBotsExtension({ agent: botAgent, memoryNote }));
-registry.install(createComputerExtension(registry));
+// Fits images to the model's limits, in a worker thread: the owner's pasted ones, and those read and space_read return.
+const images = await createNodePhotonImages();
+registry.install(createComputerExtension(registry, images));
 registry.install(createBotToolSearchExtension());
 // Web Push to every browser that turned notifications on in the web portal (data/push.json).
 const push = createPush({ file: join(DATA_DIR, "push.json"), log });
@@ -92,7 +94,7 @@ registry.install(createRoutinesExtension());
 // codemode over every tool, and the section saying the coding tools act on this PC by default.
 for (const extension of createPcExtensions()) registry.install(extension);
 // read, write, edit, bash, and powershell, on this PC or, given `machine`, on any SSH destination of the owner's.
-const machines = createMachines();
+const machines = createMachines(images);
 registry.install(machines.extension);
 // The owner's memory, each fact tagged with the bots that get it. An install from before tags moves over first.
 if (await migrateMemory({ dir: join(DATA_DIR, "memory"), botsDir: DEFAULT_BOTS_DIR, backupDir: join(DATA_DIR, "memory-backup-pre-tags") })) {
@@ -210,8 +212,6 @@ const connections = createConnections({
 	fallback: registrySpaces,
 	...(defaultSpace === undefined ? {} : { defaultSpace }),
 });
-// Fits images the owner pastes in the chat to the model's limits, in a worker thread.
-const images = await createNodePhotonImages();
 // Settings > Startup: start.py at sign-in.
 const autostart = createAutostart({ startScript: join(import.meta.dirname, "..", "start.py") });
 // Settings > Model: the model and reasoning effort in .env, applied to every bot without a restart.

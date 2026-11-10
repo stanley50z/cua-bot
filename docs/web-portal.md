@@ -172,7 +172,7 @@ Lists the computers the bot can reach ([src/connections.ts](../src/connections.t
 - a relay Space under the host its `host_name` names,
 - anything else, like cloud Spaces, under Other Spaces.
 
-The Default label marks the bots' default Space: `computer_use` and `space_bash` use it when the bot names no Space, and the live screen shows it. The bots can use every Space listed here. The list is Cua's live one (`list_spaces`, through the same `cua mcp` session as the bots' `cua_*` tools). If Cua doesn't answer, the tab shows `~/.cua/spaces.json` without status and says why.
+The Default label marks the bots' default Space: `computer_use`, `space_bash` and `space_read` use it when the bot names no Space, and the live screen shows it. The bots can use every Space listed here. The list is Cua's live one (`list_spaces`, through the same `cua mcp` session as the bots' `cua_*` tools). If Cua doesn't answer, the tab shows `~/.cua/spaces.json` without status and says why.
 
 The tab blurs users, SSH addresses, `direct:` Space ids and the database path, so a screenshot doesn't leak them. Click one (or focus it and press Enter) to reveal it until the next check.
 

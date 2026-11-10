@@ -3,7 +3,7 @@
 // destination, resolved by the owner's own ssh and ~/.ssh/config like `ssh <machine>`, and the call runs there through
 // a pi-env daemon pi-env deploys on first use. cua-bot holds no machine names: the prompt section lists the Host
 // aliases of the owner's ~/.ssh/config, re-read on every request, and the tool schemas never change.
-// main.ts installs createMachines().extension and calls close() at shutdown. Nothing connects until a call names a
+// main.ts installs createMachines(images).extension and calls close() at shutdown. Nothing connects until a call names a
 // machine, so one that is asleep fails only its own calls, and the next call tries again.
 import { execFile } from "node:child_process";
 import { readFileSync } from "node:fs";
@@ -12,7 +12,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { RemoteExecutionEnv, sshConnection } from "@earendil-works/pi-env";
 import type { ExecutionEnv } from "@earendil-works/pi-durable/env";
-import { createBashTool, createEditTool, createPowerShellTool, createReadTool, createWriteTool } from "@earendil-works/pi-durable/tools";
+import { createBashTool, createEditTool, createPowerShellTool, createReadTool, createWriteTool, type ImageProcessor } from "@earendil-works/pi-durable/tools";
 import { defineExtension, section, type ToolExecutionApi, type ToolRegistration } from "@earendil-works/pi-durable";
 
 /** A destination `ssh` takes as its host argument (`alias` or `user@host`), never as an option. */
@@ -103,16 +103,17 @@ function machineEnv(machine: string) {
 
 /**
  * Used by main.ts: the `coding-tools` extension (Pi's tools, each with `machine`) and a section naming the owner's
- * SSH hosts, and `close()`, which ends the SSH connections at shutdown.
+ * SSH hosts, and `close()`, which ends the SSH connections at shutdown. `images` lets read shrink an image too large
+ * for the model instead of refusing it.
  */
-export function createMachines() {
+export function createMachines(images?: ImageProcessor) {
 	const envs = new Map<string, ReturnType<typeof machineEnv>>();
 	const machines: Machines = (machine) => {
 		let env = envs.get(machine);
 		if (env === undefined) envs.set(machine, (env = machineEnv(machine)));
 		return env.get();
 	};
-	const tools = [createReadTool(), createWriteTool(), createEditTool(), createBashTool()];
+	const tools = [createReadTool(images === undefined ? {} : { images }), createWriteTool(), createEditTool(), createBashTool()];
 	if (process.platform === "win32") tools.push(createPowerShellTool());
 	const extension = defineExtension({
 		name: "coding-tools",

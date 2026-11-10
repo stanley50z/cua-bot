@@ -1,5 +1,6 @@
-// Every Cua Space the owner's Cua account lists, for every bot. space_bash runs CLI commands on one directly, and
-// computer_use runs a foreground child for on-screen work there, one task at a time per Space. Both take `space`, a
+// Every Cua Space the owner's Cua account lists, for every bot. space_bash runs CLI commands on one directly, space_read
+// reads one of its files (Pi's read tool, images included, on a copy downloaded to this PC), and computer_use runs a
+// foreground child for on-screen work there, one task at a time per Space. All three take `space`, a
 // Space's name or id as Cua lists it; without it they use the default Space (CUA_SPACE_ID, else the first in
 // ~/.cua/spaces.json). The SDK runtime signs in with the `cua auth login` session, so relay Spaces (a computer the Cua
 // Spaces app shares, such as the one cua-bot runs on) open as well as direct ones. spacesText() names the Spaces in
@@ -7,11 +8,12 @@
 // Each Space's driver tools live in their own extension, `space:<id>`, installed by the Space's first computer_use
 // call. Two Spaces can both have a `click` with different schemas, so the child selects only its Space's extension,
 // and the main agent never gets them: src/tool-search.ts skips them, and code mode can't call them.
-// main.ts installs createComputerExtension(registry).
+// main.ts installs createComputerExtension(registry, images).
 import { traceExtension } from "./trace.ts";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
-import { join } from "node:path";
+import { mkdtemp, rm } from "node:fs/promises";
+import { homedir, tmpdir } from "node:os";
+import { join, relative } from "node:path";
 import type { Context } from "@earendil-works/chord";
 import { embedded } from "@trycua/cua";
 import { Type } from "typebox";
@@ -25,8 +27,11 @@ import {
 	type Extension,
 	type Harness,
 	type Registry,
+	type ToolExecutionApi,
 	type ToolRegistration,
 } from "@earendil-works/pi-durable";
+import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
+import { createReadTool, type ImageProcessor } from "@earendil-works/pi-durable/tools";
 import { toLlmContent, type CallToolResult, type LlmContent } from "@earendil-works/pi-mcp";
 import type { OpenLiveStream } from "./live-screen.ts";
 import { botModel } from "./models.ts";
@@ -41,6 +46,7 @@ const CHILD_BRIEF = [
 	"After each action, take another screenshot and verify it.",
 	"Finish with a concise summary and the absolute path of the last screenshot.",
 	"Image results include a line `saved: <path>`.",
+	"To look at an image file or read any file on the Space, use space_read; never open a file in an app just to see it.",
 ].join(" ");
 const SPACE_ARG = "Which Cua Space: its name or id, as your prompt lists them. Omit it for the default Space (inside computer_use, the Space the task runs on).";
 
@@ -139,10 +145,13 @@ let registry: Pick<Registry, "install"> | undefined;
 
 /**
  * Installed by src/main.ts into `into`, where each Space's driver extension is installed later. The main agent is
- * offered computer_use and space_bash; a foreground child runs the screen.
+ * offered computer_use, space_bash and space_read; a foreground child runs the screen. `images` fits the images
+ * space_read returns to the model's limits; without it, an image too large to send is refused.
  */
-export function createComputerExtension(into: Pick<Registry, "install">): Extension {
+export function createComputerExtension(into: Pick<Registry, "install">, images?: ImageProcessor): Extension {
 	registry = into;
+	spaceRead = readFromSpace(createReadTool(images === undefined ? {} : { images }), downloadFromSpace);
+	computerTools.splice(0, computerTools.length, computerUse, spaceBash, spaceRead);
 	return computerExtension;
 }
 
@@ -243,17 +252,17 @@ async function spaceExtension(id: string): Promise<Extension> {
 	if (current?.live) return current.extension;
 	if (registry === undefined) throw new Error("createComputerExtension() was not given the registry");
 	const { infos, service, failure } = await drivers(id);
-	const used = new Set(["computer_use", "space_bash"]);
+	const used = new Set(["computer_use", "space_bash", "space_read"]);
 	const extension = defineExtension({ name: `${SPACE_EXTENSION}${id}`, tools: infos.map((info) => driverTool(id, service, info, used)) });
 	registry.install(extension);
 	installed.set(id, { extension, live: failure === undefined });
 	return extension;
 }
 
-/** Used by test/computer.smoke.ts. The child's tools on a Space: its driver tools and space_bash. */
+/** Used by test/computer.smoke.ts. The child's tools on a Space: its driver tools, space_bash and space_read. */
 export async function prepareComputerTools(ref?: string): Promise<string[]> {
 	const extension = await spaceExtension((await resolveSpace(ref)).id);
-	return [spaceBash, ...(extension.tools ?? [])].map((tool) => tool.name);
+	return [spaceBash, spaceRead, ...(extension.tools ?? [])].map((tool) => tool.name);
 }
 
 /** Used by test/computer.smoke.ts and preflight.ts. Names from a Space's live driver registry. */
@@ -315,7 +324,7 @@ const computerUse = defineTool({
 	execute: async ({ task, space: ref }, api, callContext) => {
 		const space = await resolveSpace(ref);
 		const extension = await spaceExtension(space.id);
-		const childTools = [spaceBash, ...(extension.tools ?? [])];
+		const childTools = [spaceBash, spaceRead, ...(extension.tools ?? [])];
 		const instructions = `${CHILD_BRIEF} You work on the Cua Space ${describeSpace(space)}.`;
 		// The child thinks like the bot that called it.
 		const { model = botModel(), thinkingLevel } = await api.agent(callContext);
@@ -362,8 +371,7 @@ const spaceBash = defineTool({
 	executionMode: "sequential",
 	outputLimits: { maxBytes: 64 * 1024, maxLines: 2000, retain: "tail" },
 	execute: async ({ command, space: ref }, api, context) => {
-		const own = ref?.trim() ? undefined : (await api.snapshot(ChildSpaceDoc, api.conversationId, context))?.id;
-		const space = await connectSpace(own || (await resolveSpace(ref)).id);
+		const space = await callSpace(ref, api, context);
 		const result = await space.bash(command, undefined);
 		const text = result.rendered.length > 0 ? result.rendered : fallbackBashText(result);
 		return {
@@ -373,7 +381,57 @@ const spaceBash = defineTool({
 	},
 });
 
-computerTools.push(computerUse, spaceBash);
+/** The Space `ref` names; without it, a computer_use child's own Space, else the default. */
+async function callSpace(ref: string | undefined, api: ToolExecutionApi, context: Context) {
+	const own = ref?.trim() ? undefined : (await api.snapshot(ChildSpaceDoc, api.conversationId, context))?.id;
+	return connectSpace(own || (await resolveSpace(ref)).id);
+}
+
+/** Copies a Space's file into `dir` on this PC and returns the copy's path. */
+export type SpaceDownload = (file: { path: string; space?: string }, dir: string, api: ToolExecutionApi, context: Context) => Promise<string>;
+
+async function downloadFromSpace(...[{ path, space: ref }, dir, api, context]: Parameters<SpaceDownload>) {
+	const space = await callSpace(ref, api, context);
+	return (await space.download(path, dir, undefined)).dest;
+}
+
+/**
+ * Pi's `read` as space_read: `download` copies the Space's file into a fresh temp folder on this PC, `read` runs on
+ * the copy, and the folder is removed. So text, images and their resizing are all Pi's own. Exported for
+ * test/computer.test.ts; createComputerExtension downloads with the cua SDK.
+ */
+export function readFromSpace(read: ToolRegistration, download: SpaceDownload): ToolRegistration {
+	const { properties } = read.parameters as { properties: Record<string, unknown> };
+	return {
+		...read,
+		name: "space_read",
+		description: `Read a file on a Cua Space, by its absolute path there. ${read.description}`,
+		// Plain JSON Schema extends read's own, keeping its required list, so `space` stays optional.
+		parameters: {
+			...read.parameters,
+			properties: {
+				...properties,
+				path: { type: "string", description: "Absolute path of the file on the Space" },
+				space: { type: "string", description: SPACE_ARG },
+			},
+		},
+		execute: async (args, api, context) => {
+			const { space, ...rest } = args as typeof args & { path: string; space?: string };
+			const dir = await mkdtemp(join(tmpdir(), "cua-bot-space-read-"));
+			try {
+				const copy = await download({ path: rest.path, ...(space === undefined ? {} : { space }) }, dir, api, context);
+				// Relative to the temp folder, so what read says about the file names the file, not the folder.
+				const local: ToolExecutionApi = Object.create(api, { env: { value: new NodeExecutionEnv({ cwd: dir }) } });
+				return await read.execute({ ...rest, path: relative(dir, copy) }, local, context);
+			} finally {
+				await rm(dir, { recursive: true, force: true });
+			}
+		},
+	};
+}
+
+// Replaced by createComputerExtension with one that has main.ts's image processor.
+let spaceRead = readFromSpace(createReadTool(), downloadFromSpace);
 
 /**
  * Used by src/main.ts as createLiveScreen's opener (src/live-screen.ts). An H.264 stream of the default Space's
