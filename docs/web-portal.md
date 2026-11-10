@@ -37,7 +37,7 @@ On a touch screen, whatever its size:
 
 - Tap a message for its toolbar (React, Reply). Tap it again, or anywhere else, to put the toolbar away.
 - Hold a finger on a bot to pin it above the list or unpin it, as a right-click does with a mouse.
-- Return starts a new line in the message box, and the arrow button sends.
+- While the on-screen keyboard is up, Return starts a new line in the message box and the arrow button sends. With a hardware keyboard, as on an iPad with a keyboard attached, Enter sends as on a computer.
 - The bar over selected text sits under the selection, clear of the phone's own Copy menu.
 - In the expanded screen with control, taps and drags reach the Space. The keyboard button beside I'm done brings the phone's keyboard up and puts it away. A touch screen can't right-click or scroll the Space's screen.
 

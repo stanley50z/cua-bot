@@ -2565,9 +2565,16 @@ $("composer").addEventListener("submit", async (event) => {
     renderAttachments();
   }
 });
-// Enter sends. On a touch keyboard, which has no Shift+Enter, it starts a new line and the send button sends.
+// Whether an on-screen keyboard covers the bottom of the page: the visual viewport, unzoomed, falls well short of
+// the layout viewport. A tablet with a hardware keyboard shows at most a shortcut bar there, so this stays false.
+function onScreenKeyboard() {
+  const area = window.visualViewport;
+  return touch.matches && document.documentElement.clientHeight - area.height * area.scale > 150;
+}
+
+// Enter sends. On an on-screen keyboard, which has no Shift+Enter, it starts a new line and the send button sends.
 $("input").addEventListener("keydown", (event) => {
-  if (event.key === "Enter" && !event.shiftKey && !event.isComposing && !touch.matches) { event.preventDefault(); $("composer").requestSubmit(); }
+  if (event.key === "Enter" && !event.shiftKey && !event.isComposing && !onScreenKeyboard()) { event.preventDefault(); $("composer").requestSubmit(); }
 });
 $("stop").addEventListener("click", async () => {
   $("stop").disabled = true;
