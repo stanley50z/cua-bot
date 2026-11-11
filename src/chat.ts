@@ -63,7 +63,7 @@ export const REACTION = "cua-bot.reaction";
 export type Reaction = { target: number; emoji: string; on: boolean };
 const QUOTE_MAX = 80;
 
-/** Entry kind of what a memory search found for a message from the owner or another bot (src/memory.ts). The bot reads it just before that message; the chat doesn't show it. */
+/** Entry kind of what a memory search found for a message from the owner or another bot (src/memory.ts). src/turns.ts submits it just ahead of that message and says where it lands; the bot reads it, the chat doesn't show it. */
 export const MEMORY_NOTE = "cua-bot.memory-note";
 
 /** Entry kind of a routine firing (src/routines.ts, delivered by src/turns.ts). Its model message is the `[routine]` text. */

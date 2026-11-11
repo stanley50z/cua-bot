@@ -15,7 +15,7 @@ import { APPROVAL_OUTCOME, BOT_MESSAGE, type BotMessage, MEMORY_NOTE, REACTION, 
 export type Reader = Pick<Harness, "snapshot">;
 
 /**
- * What memory holds for `message` to bot `bot`, as a note for the bot to read just before it; undefined when it
+ * What memory holds for `message` to bot `bot`, as a note deliver() submits just ahead of it; undefined when it
  * brings up nothing. main.ts searches with messageNote (src/memory.ts) over the bot list `read` gives.
  */
 export type MemoryNote = (bot: number, message: string, read: Reader, context: Context) => Promise<string | undefined>;
@@ -80,8 +80,10 @@ export function createTurns(memoryNote: MemoryNote) {
 		const { search, draft } = draftOf(turn);
 		if (search !== undefined) {
 			const note = await memoryNote(Number(to.id), search, read, context);
-			// A write without a run. On an idle bot, or with steer, it lands right before the message. While the bot is
-			// busy it lands at the run's next tool round, and a followUp message only when the run ends (issue 6).
+			// A write without a run. On an idle bot with nothing queued it lands right before the message. Otherwise every
+			// queued note lands at the conversation's next boundary (the end of the current tool round, or of the run),
+			// and a message at the first boundary that selects it: one steer per boundary, one followUp per run end. A
+			// note can then land before other messages, or a whole run before its own (issue 6).
 			if (note !== undefined) await to.submit({ type: "write", entry: { kind: MEMORY_NOTE, model: [{ role: "user", content: note, timestamp: Date.now() }] } }, context);
 		}
 		return to.submit(draft, context);
