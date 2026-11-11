@@ -137,10 +137,12 @@ const lookup = botLookup(harness, root);
 const logRoutineSyncFailure = (error: unknown) =>
 	log("routine file sync failed:", error instanceof Error ? error.message : String(error));
 bindRoutines({ harness, bots: lookup, legacyFile: LEGACY_ROUTINE_FILE, onError: logRoutineSyncFailure });
+// The Spaces listing is a Cua round trip, so it runs before work resumes: between resume() and the first sync a due
+// routine can fire on its stored task, before a routines.json edited while the service was down is applied.
+const space = await defaultSpaceLabel();
 harness.resume();
 // The bots come before the first routine sync, so their watch on the bot folders already sees any hand edit to a
 // routines.json that the sync doesn't.
-const space = await defaultSpaceLabel();
 const bots = await createBots({
 	harness,
 	lookup,
