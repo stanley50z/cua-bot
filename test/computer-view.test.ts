@@ -77,6 +77,12 @@ test("a snapshot pairs the child's driver calls with their results and shows the
 
 		const empty = await createComputerView({ harness, storage, conversation: root, shotsDir: join(dir, "missing"), context }).snapshot();
 		assert.deepEqual(empty, { steps: [] }, "no owned child and no shots folder");
+
+		// main.ts hands over its Cua lookup of the name unanswered, so startup doesn't wait on it; the pane waits instead.
+		let answer: (name: string) => void = () => {};
+		const pending = createComputerView({ harness, storage, conversation: root, shotsDir: dir, space: new Promise((resolve) => (answer = resolve)), context }).snapshot();
+		answer("Mac mini");
+		assert.equal((await pending).space, "Mac mini", "the name from a lookup that answers later");
 	} finally {
 		await harness.close(context);
 		await rm(dir, { recursive: true, force: true });

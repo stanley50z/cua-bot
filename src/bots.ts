@@ -137,7 +137,10 @@ const botsOf = (state: Readonly<BotsState> | null | undefined): BotEntry[] =>
 		.map(([id, record]) => entryOf(Number(id), record, Number(id) === state?.main))
 		.sort((a, b) => Number(b.main) - Number(a.main) || a.createdAt - b.createdAt);
 
-/** Every bot, the main bot first. Used by src/routines.ts, which keeps one routine file per bot. */
+/**
+ * Every bot, the main bot first, read from the bots doc alone. The memory extension and the memory note in main.ts use
+ * it, because main.ts makes both before Harness.open; code that runs after it lists bots through botLookup's list().
+ */
 export const readBots = async (reader: Pick<Harness, "snapshot">, context: Context) => botsOf(await reader.snapshot(BotsDoc, context));
 
 /** A name as a file name or memory tag: "Job Search" → "job-search". */
