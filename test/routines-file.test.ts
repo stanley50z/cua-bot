@@ -286,10 +286,17 @@ test("a firing once-routine leaves the bot's other routines alone", { timeout: 2
 
 		await writeDefs(session, [{ ...ONCE, cron: "@every 1m" }, AGENDA]);
 		await syncRoutines(context);
-		await sleeping(session, 2);
+		const [rearmed] = await sleeping(session, 2);
 		fireAt(session, BASE + 60_000);
 		await eventually(async () => (await firings(session, "One-off")) === 1);
-		await eventually(async () => (await readDefs(session)).length === 1);
+		// The firing's commit ends the task and starts a sync that drops the routine from routines.json. Wait for that
+		// sync through the queue, not by polling the file: on Windows a read in flight makes the sync's rename fail.
+		await eventually(
+			async () =>
+				!(await session.harness.inspect(context)).tasks.some((task) => task.record.id === rearmed?.id && task.record.state.status !== "terminal"),
+		);
+		await syncRoutines(context);
+		assert.deepEqual(session.syncErrors, [], "the firing's own sync cleaned the file");
 
 		assert.deepEqual((await readDefs(session)).map((def) => def.id), ["agenda"]);
 		assert.deepEqual((await listRoutineViews(context)).map((view) => view.id), ["agenda"]);
