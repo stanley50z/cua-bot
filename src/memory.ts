@@ -557,7 +557,7 @@ const unknownTag = (names: string[], tags: TagView[]) => {
 
 /**
  * What a message from the owner or another bot to bot `id` brings up beyond that bot's memory section, as a note
- * for the bot; undefined when it brings up nothing. writeMemoryNote places it before the message.
+ * for the bot; undefined when it brings up nothing. src/turns.ts places it before the message.
  */
 export async function messageNote(memory: Memory, message: string, id: number, bots: BotRef[]): Promise<string | undefined> {
 	const me = bots.find((bot) => bot.id === id);

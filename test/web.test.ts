@@ -16,6 +16,7 @@ import { fauxAssistantMessage, fauxProvider, fauxText } from "@earendil-works/pi
 import { type Conversation, createRegistry, Harness, MemoryStorage } from "@earendil-works/pi-durable";
 import { AVATAR_COLORS, AVATAR_SHAPES, botLookup } from "../src/bots.ts";
 import { bindRoutines, createRoutinesExtension, syncRoutines, type RoutineView } from "../src/routines.ts";
+import { createTurns } from "../src/turns.ts";
 import { createLiveScreen, type InputEvent } from "../src/live-screen.ts";
 import { createScreenControl } from "../src/screen-control.ts";
 import type { ConnectionsSnapshot } from "../src/connections.ts";
@@ -60,7 +61,7 @@ async function open(): Promise<Session> {
 		context,
 	);
 	const root = await harness.root(context, { agent: { model: { provider: "faux", modelId: "faux-1" } } });
-	bindRoutines({ harness, bots: botLookup(harness, root, dirname(dirname(file))), now: () => clock.now });
+	bindRoutines({ harness, bots: botLookup(harness, root, dirname(dirname(file))), turns: createTurns(async () => undefined), now: () => clock.now });
 	harness.resume();
 	await syncRoutines(context);
 	const server = createBotServer({ say: async (text) => `echo: ${text}`, context });
