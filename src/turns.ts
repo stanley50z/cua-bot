@@ -1,9 +1,9 @@
 // Every turn that reaches a bot goes through deliver() here: owner messages (the portal and /say), the owner's
 // reactions, messages from other bots (message_bot), routine firings, and approval outcomes. For each kind of turn
-// this module decides whether memory is searched first (owner and bot messages only), whether the note lands right
-// before the message, what the turn does while the bot is busy, its request id, and the entry kind the chat reads it
-// back by (src/chat.ts). The texts the model reads are the callers', except a bot message's and a reaction's, which
-// are built here from the data their entries keep.
+// this module decides whether memory is searched first (owner and bot messages only, the note submitted just ahead of
+// the message), what the turn does while the bot is busy, its request id, and the entry kind the chat reads it back by
+// (src/chat.ts). The texts the model reads are the callers', except a bot message's and a reaction's, which are built
+// here from the data their entries keep.
 // main.ts calls createTurns(memoryNote) once and hands the result to createBotsExtension, bindRoutines, and
 // createBots (which gives it to each bot's Chat), and routes approval outcomes through approval().
 import type { Context } from "@earendil-works/chord";
@@ -80,7 +80,8 @@ export function createTurns(memoryNote: MemoryNote) {
 		const { search, draft } = draftOf(turn);
 		if (search !== undefined) {
 			const note = await memoryNote(Number(to.id), search, read, context);
-			// A write without a run, so it lands in the transcript right before the message.
+			// A write without a run. On an idle bot, or with steer, it lands right before the message. While the bot is
+			// busy it lands at the run's next tool round, and a followUp message only when the run ends (issue 6).
 			if (note !== undefined) await to.submit({ type: "write", entry: { kind: MEMORY_NOTE, model: [{ role: "user", content: note, timestamp: Date.now() }] } }, context);
 		}
 		return to.submit(draft, context);
