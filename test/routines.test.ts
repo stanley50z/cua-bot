@@ -22,6 +22,7 @@ import {
 	type TaskId,
 } from "@earendil-works/pi-durable";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
+import { botLookup } from "../src/bots.ts";
 import { bindRoutines, createRoutinesExtension, syncRoutines } from "../src/routines.ts";
 
 const context = BACKGROUND_CONTEXT;
@@ -145,7 +146,7 @@ async function openSession(
 	const harness = await Harness.open(storage, options, context);
 	const root = await harness.root(context, { agent: { model: MODEL } });
 	const file = routineFile ?? (await freshRoutineFile());
-	bindRoutines({ harness, root, dir: dirname(dirname(file)), now: () => clock.now });
+	bindRoutines({ harness, bots: botLookup(harness, root, dirname(dirname(file))), now: () => clock.now });
 	harness.resume();
 	await syncRoutines(context);
 	return { clock, reports, harness, root, routineFile: file };

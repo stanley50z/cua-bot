@@ -13,10 +13,11 @@ import type { Message } from "@earendil-works/pi-ai";
 import { createModels } from "@earendil-works/pi-ai/models";
 import { fauxAssistantMessage, fauxProvider, fauxText, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
 import { type AgentChange, type ConversationId, createRegistry, Harness, MemoryStorage } from "@earendil-works/pi-durable";
-import { type BotView, createBots, createBotsExtension, defaultAvatar, readBots } from "../src/bots.ts";
+import { botLookup, type BotView, createBots, createBotsExtension, defaultAvatar, readBots } from "../src/bots.ts";
 import { type ChatItem, SEND_MESSAGE } from "../src/chat.ts";
+import { createMemory } from "../src/memory.ts";
 import { createModelSettings } from "../src/model-settings.ts";
-import { bindRoutines, createRoutinesExtension, deleteRoutine, removeBotRoutines, type RoutineView, syncRoutines } from "../src/routines.ts";
+import { bindRoutines, createRoutinesExtension, deleteRoutine, type RoutineView, syncRoutines } from "../src/routines.ts";
 import { createBotServer } from "../src/web.ts";
 
 const context = BACKGROUND_CONTEXT;
@@ -56,23 +57,14 @@ async function open(memoryNote?: (bot: number, message: string) => Promise<strin
 	const root = await harness.root(context, { agent: { model: MODEL } });
 	const legacyFile = join(temp, "routines.json");
 	await writeFile(legacyFile, JSON.stringify([{ id: "old", title: "Old agenda", prompt: "Brief me", cron: "@daily" }]));
-	bindRoutines({ harness, root, dir, legacyFile });
+	// The order main.ts starts in: routines bound to the bots, work resumed, the bots, then the first routine sync.
+	const memory = createMemory({ dir: join(temp, "memory"), botsDir: dir });
+	const syncErrors: unknown[] = [];
+	const lookup = botLookup(harness, root, dir);
+	bindRoutines({ harness, bots: lookup, legacyFile, onError: (error) => syncErrors.push(error) });
 	harness.resume();
 	const agent: AgentChange = { model: MODEL };
-	const renames: [number, string, string][] = [];
-	const bots = await createBots({
-		harness,
-		root,
-		context,
-		agent: () => agent,
-		dir,
-		renamed: (id, before, after) => {
-			renames.push([id, before, after]);
-			return syncRoutines(context);
-		},
-		removing: (id) => removeBotRoutines(id, context),
-		sent: (bot, text) => replies.push([bot.name, text]),
-	});
+	const bots = await createBots({ harness, lookup, context, agent: () => agent, memory, onError: (error) => syncErrors.push(error), sent: (bot, text) => replies.push([bot.name, text]) });
 	await syncRoutines(context);
 	const modelSettings = createModelSettings({ models, apply: bots.applyAgent, envFile: join(temp, ".env") });
 	const server = createBotServer({ say: async (text) => text, bots, context, modelSettings });
@@ -82,9 +74,12 @@ async function open(memoryNote?: (bot: number, message: string) => Promise<strin
 	return {
 		base: `http://127.0.0.1:${address.port}`,
 		agent,
-		renames,
 		bots,
 		harness,
+		root,
+		lookup,
+		memory,
+		syncErrors,
 		prompts,
 		replies,
 		dir,
@@ -238,7 +233,20 @@ test("a bot's message lands in the other bot's chat and wakes it", { timeout: 20
 	}
 });
 
-test("each bot has its own routines and routine file, which follow it through a rename and a delete", { timeout: 20_000 }, async () => {
+test("the lookup turns a bot id into its conversation, and no id into the main bot's", { timeout: 20_000 }, async () => {
+	const bot = await open();
+	try {
+		const scout = (await (await send(bot.base, "POST", "/api/bots", { name: "Scout" })).json()) as BotView;
+		const { lookup } = bot;
+		assert.equal((await lookup.conversation(undefined, context))?.id, bot.root.id);
+		assert.equal(Number((await lookup.conversation(scout.id, context))?.id), scout.id);
+		assert.equal(await lookup.conversation(9999, context), undefined, "no conversation has that id");
+	} finally {
+		await bot.close();
+	}
+});
+
+test("each bot has its own routines and routine file, and they fire in its own chat", { timeout: 20_000 }, async () => {
 	const bot = await open();
 	try {
 		assert.equal(existsSync(bot.legacyFile), false, "the old routines.json moved");
@@ -265,20 +273,98 @@ test("each bot has its own routines and routine file, which follow it through a 
 		await until(scoutChat, (items) => items.some((item) => item.kind === "routine" && item.text.includes('"Fares"')));
 		const mainChat = (await (await fetch(`${bot.base}/api/chat`)).json()).items as ChatItem[];
 		assert.ok(!mainChat.some((item) => item.kind === "routine"), "it fires in Scout's chat only");
+	} finally {
+		await bot.close();
+	}
+});
 
-		await send(bot.base, "PUT", `/api/bots/${scout.id}`, { name: "Travel", instructions: "" });
-		assert.equal(existsSync(join(bot.dir, "scout", "routines.json")), false);
-		assert.ok(existsSync(join(bot.dir, "travel", "routines.json")), "the file follows the rename");
+const routineTasks = async (harness: Harness) => (await harness.inspect(context)).tasks.filter((task) => task.record.kind === "cua-bot.routine" && task.record.state.status !== "terminal");
+
+test("renaming a bot moves its folder with its routine, which keeps firing in its chat, and moves its memory tag", { timeout: 20_000 }, async () => {
+	const bot = await open();
+	try {
+		const scout = (await (await send(bot.base, "POST", "/api/bots", { name: "Scout" })).json()) as BotView;
+		await writeFile(join(bot.dir, "scout", "work-log.md"), "- (2026-11-10) checked fares\n");
+		await bot.memory.remember("Prefers window seats", "profile", ["@scout"]);
+		const routine = (await (await send(bot.base, "POST", "/api/routines", { title: "Fares", prompt: "Check fares", cron: "@every 1s", bot: scout.id })).json()) as RoutineView;
+		const before = (await routineTasks(bot.harness)).map((task) => task.record.id);
+
+		assert.equal((await send(bot.base, "PUT", `/api/bots/${scout.id}`, { name: "Travel", instructions: "" })).status, 200);
+		const renamedAt = Date.now();
+		assert.equal(existsSync(join(bot.dir, "scout")), false, "the old folder is gone");
+		assert.deepEqual(
+			JSON.parse(await readFile(join(bot.dir, "travel", "routines.json"), "utf8")).map((def: { id: string }) => def.id),
+			[routine.id],
+			"the routine file moved with the folder",
+		);
+		assert.equal(await readFile(join(bot.dir, "travel", "work-log.md"), "utf8"), "- (2026-11-10) checked fares\n", "so did the work log");
+		assert.deepEqual((await bot.memory.all()).profile.map((fact) => [fact.text, fact.tags]), [["Prefers window seats", ["@travel"]]], "the fact moved to the new tag");
+
+		assert.deepEqual((await routineTasks(bot.harness)).map((task) => task.record.id), before, "the same sleepers run");
+		await until(
+			async () => (await (await fetch(`${bot.base}/api/chat?bot=${scout.id}`)).json()).items as ChatItem[],
+			(items) => items.some((item) => item.kind === "routine" && item.at > renamedAt && item.text.includes('"Fares"')),
+		);
 		const listed = (await (await fetch(`${bot.base}/api/routines`)).json()).routines as RoutineView[];
-		assert.deepEqual(listed.map((view) => [view.title, view.botName]).sort(), [
-			["Fares", "Travel"],
-			["Old agenda", "cua-bot"],
-		]);
+		assert.deepEqual(listed.find((view) => view.id === routine.id)?.botName, "Travel");
+		assert.deepEqual(bot.syncErrors, []);
+	} finally {
+		await bot.close();
+	}
+});
+
+test("a rename resyncs the bot's routines, so a routines.json deleted by hand comes back in the new folder", { timeout: 20_000 }, async () => {
+	const bot = await open();
+	try {
+		const scout = (await (await send(bot.base, "POST", "/api/bots", { name: "Scout" })).json()) as BotView;
+		const routine = (await (await send(bot.base, "POST", "/api/routines", { title: "Fares", prompt: "Check fares", cron: "@daily", bot: scout.id })).json()) as RoutineView;
+		await bot.bots.close(); // no watch, so only the rename can sync
+		await rm(join(bot.dir, "scout", "routines.json"));
+		await bot.bots.update(scout.id, { name: "Travel", instructions: "" });
+		assert.deepEqual(
+			JSON.parse(await readFile(join(bot.dir, "travel", "routines.json"), "utf8")).map((def: { id: string }) => def.id),
+			[routine.id],
+			"adopted from what runs",
+		);
+	} finally {
+		await bot.close();
+	}
+});
+
+test("deleting a bot cancels its routines, takes its tag off its facts and the owner's tags, and deletes its folder", { timeout: 20_000 }, async () => {
+	const bot = await open();
+	try {
+		const scout = (await (await send(bot.base, "POST", "/api/bots", { name: "Scout" })).json()) as BotView;
+		await bot.memory.remember("Prefers window seats", "profile", ["@scout", "every-bot"]);
+		await bot.memory.createTag("Travel bots", [scout.id, bot.bots.main()]);
+		await send(bot.base, "POST", "/api/routines", { title: "Fares", prompt: "Check fares", cron: "@daily", bot: scout.id });
+		assert.equal((await routineTasks(bot.harness)).length, 2, "the main bot's routine and Scout's");
 
 		assert.equal((await send(bot.base, "DELETE", `/api/bots/${scout.id}`)).status, 204);
-		assert.equal(existsSync(join(bot.dir, "travel", "routines.json")), false, "a deleted bot's routines go with it");
-		const task = (await bot.harness.inspect(context)).tasks.filter((t) => t.record.kind === "cua-bot.routine");
-		assert.equal(task.length, 1, "only the main bot's sleeper is left");
+		const left = await routineTasks(bot.harness);
+		assert.deepEqual(left.map((task) => Number(task.record.conversationId)), [bot.bots.main()], "only the main bot's sleeper is left");
+		assert.equal(existsSync(join(bot.dir, "scout")), false, "the folder and its routine file are gone");
+		assert.deepEqual((await bot.memory.all()).profile.map((fact) => [fact.text, fact.tags]), [["Prefers window seats", ["every-bot"]]]);
+		assert.deepEqual((await bot.memory.tagViews(bot.bots.list())).find((tag) => tag.slug === "travel-bots")?.bots, [bot.bots.main()]);
+		const listed = (await (await fetch(`${bot.base}/api/routines`)).json()).routines as RoutineView[];
+		assert.deepEqual(listed.map((view) => view.botName), ["cua-bot"]);
+	} finally {
+		await bot.close();
+	}
+});
+
+test("a hand edit to a bot's routines.json is synced into running routines", { timeout: 20_000 }, async () => {
+	const bot = await open();
+	try {
+		const scout = (await (await send(bot.base, "POST", "/api/bots", { name: "Scout" })).json()) as BotView;
+		await writeFile(join(bot.dir, "scout", "routines.json"), JSON.stringify([{ id: "by-hand", title: "Visa check", prompt: "Check the visa rules", cron: "@daily" }]));
+		const listed = await until(
+			async () => (await (await fetch(`${bot.base}/api/routines`)).json()).routines as RoutineView[],
+			(views) => views.some((view) => view.id === "by-hand"),
+		);
+		assert.deepEqual(listed.find((view) => view.id === "by-hand")?.botName, "Scout");
+		assert.equal((await routineTasks(bot.harness)).filter((task) => Number(task.record.conversationId) === scout.id).length, 1, "it has a sleeper in Scout's conversation");
+		assert.deepEqual(bot.syncErrors, []);
 	} finally {
 		await bot.close();
 	}
@@ -305,6 +391,7 @@ test("bots are added, renamed, and deleted over HTTP; the main bot stays", { tim
 		);
 		assert.equal((await fetch(`${bot.base}/api/chat?bot=${scout.id}`)).status, 404);
 		assert.equal((await send(bot.base, "PUT", `/api/bots/${scout.id}`, { name: "Gone" })).status, 404);
+		assert.equal((await send(bot.base, "DELETE", `/api/bots/${scout.id}`)).status, 404, "a bot is deleted once");
 	} finally {
 		await bot.close();
 	}
@@ -337,7 +424,6 @@ test("each bot's folder holds its agent file and follows it through hand edits, 
 		await send(bot.base, "PUT", `/api/bots/${scout.id}`, { name: "Travel", instructions: "Plan trips." });
 		assert.equal(existsSync(join(bot.dir, "scout")), false);
 		assert.equal(await readFile(join(bot.dir, "travel", "agent.md"), "utf8"), "Plan trips.\n", "the folder follows the rename");
-		assert.deepEqual(bot.renames, [[scout.id, "Scout", "Travel"]], "memory hears the old and new name, to move the bot's tag");
 
 		assert.equal((await send(bot.base, "DELETE", `/api/bots/${scout.id}`)).status, 204);
 		assert.equal(existsSync(join(bot.dir, "travel")), false, "a deleted bot's folder goes with it");

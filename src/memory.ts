@@ -19,7 +19,7 @@ import { join } from "node:path";
 import { Type } from "typebox";
 import type { Context } from "@earendil-works/chord";
 import { type ConversationId, defineExtension, defineTool, type Extension, type Harness, section } from "@earendil-works/pi-durable";
-import { botFolder, slugOf } from "./bots.ts";
+import { botFile, type BotFile, botFolder, slugOf } from "./bots.ts";
 
 export type Tier = "profile" | "log";
 export type Fact = { text: string; date: string; tier: Tier; file: string; tags: string[] };
@@ -28,7 +28,7 @@ export type Change = { fact: string; tier: Tier; to?: string; tags?: string[]; f
 /** Judges how likely each of these saved facts or work-log records is to bear on a message: one probability from 0 to 1 per text, in their order. src/jev.ts makes one. */
 export type Relevance = (message: string, facts: string[]) => Promise<number[]>;
 /** The file in a bot's folder for the records of its own work, one per line starting with a dash. The memory section sends bots there. */
-export const WORK_LOG = "work-log.md";
+export const WORK_LOG = "work-log.md" satisfies BotFile;
 /** A tag and the bots that get its facts. */
 export type TagView = { slug: string; name: string; kind: "every" | "custom" | "bot"; bots: number[] };
 type BotRef = { id: number; name: string };
@@ -183,10 +183,10 @@ export function createMemory(options: { dir: string; now?: () => Date; relevance
 		return { profile: stored.profile.filter((fact) => canSee(fact, seen)), recent, older: log.slice(0, log.length - recent.length) };
 	}
 
-	// The records in this bot's work log, without their dash: each line of <botsDir>/<bot folder>/work-log.md that starts with one.
+	// The records in this bot's work log, without their dash: each line of the bot's work-log.md in `botsDir` that starts with one.
 	async function workLog(bot: BotRef | undefined): Promise<string[]> {
 		if (options.botsDir === undefined || bot === undefined) return [];
-		const text = await readText(join(options.botsDir, botFolder(bot), WORK_LOG));
+		const text = await readText(botFile(options.botsDir, bot, WORK_LOG));
 		return (text ?? "").split(/\r?\n/).flatMap((line) => /^-\s+(\S.*?)\s*$/.exec(line)?.[1] ?? []);
 	}
 
@@ -466,10 +466,10 @@ export function createMemory(options: { dir: string; now?: () => Date; relevance
 				return true;
 			}),
 
-		/** Keeps a renamed bot's facts on its tag. Called by createBots through main.ts. */
+		/** Keeps a renamed bot's facts on its tag. Called by createBots in src/bots.ts. */
 		botRenamed: (before: BotRef, after: BotRef) => serial(() => renameTag(botTag(before), botTag(after))),
 
-		/** Takes a deleted bot off its facts and out of the owner's tags. Called by createBots through main.ts. */
+		/** Takes a deleted bot off its facts and out of the owner's tags. Called by createBots in src/bots.ts. */
 		botRemoved: (bot: BotRef) =>
 			serial(async () => {
 				const tags = await customTags();

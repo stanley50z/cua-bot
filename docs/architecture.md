@@ -35,13 +35,14 @@ Everything else a bot owns lives in `bots/<folder>/` in the project root (gitign
 | --- | --- |
 | `agent.md` | Standing instructions. Plain markdown, no length cap, empty until the bot gets instructions. |
 | `routines.json` | Routine definitions, present only while the bot has routines. See [Routines](#routines). |
+| `work-log.md` | The bot's records of its own work, which the bot writes. See [Memory](#memory). |
 
-`agent.md` is re-read on every request, so a hand edit applies on the bot's next turn; the web portal picks it up within a second.
+`src/bots.ts` builds the paths into a bot's folder, and routines and memory ask it for their file. The one exception is the move to tags at startup, which reads each folder's old `memory/` folder (see [Memory](#memory)). One watch on `bots/` catches hand edits: `agent.md` is re-read on every request, so a hand edit applies on the bot's next turn, and the web portal picks it up within a second. A hand edit to `routines.json` syncs within a second or two.
 
 Folder rules:
 
-- Renaming a bot moves its folder. A rename onto an existing folder is refused.
-- Deleting a bot deletes its folder.
+- Renaming a bot moves its folder with everything in it. Then the bot's memory tag is renamed and its routines resync from the moved file. A rename onto an existing folder is refused.
+- Deleting a bot first takes its tag off its facts and ends its routines, then stops its turn, drops it from the list and deletes its folder.
 - Creating a bot whose folder you already made by hand adopts that folder.
 - A folder whose name matches no bot is ignored.
 - Two bots whose names give the same folder aren't allowed.

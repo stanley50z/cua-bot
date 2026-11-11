@@ -97,7 +97,8 @@ export function createComputerView(deps: {
 	storage: Storage;
 	conversation: Conversation;
 	shotsDir: string;
-	space?: string;
+	/** The default Space's name, or main.ts's pending lookup of it, which each snapshot waits for. */
+	space?: string | Promise<string | undefined>;
 	context: Context;
 }) {
 	const { harness, storage, conversation, shotsDir, context } = deps;
@@ -111,8 +112,9 @@ export function createComputerView(deps: {
 			}
 			const child = childId === undefined ? undefined : await harness.conversation(childId, context);
 			const taskSpace = childId === undefined ? undefined : await taskSpaceName(harness, childId, context);
+			const space = await deps.space;
 			return {
-				...(deps.space === undefined ? {} : { space: deps.space }),
+				...(space === undefined ? {} : { space }),
 				...(taskSpace === undefined ? {} : { taskSpace }),
 				...(await newestShot(shotsDir).then((shot) => (shot === undefined ? {} : { shot }))),
 				steps: child === undefined ? [] : await stepsOf(child, context),

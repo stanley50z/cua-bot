@@ -12,6 +12,7 @@ import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { type FauxResponseStep, type Message } from "@earendil-works/pi-ai";
 import { createModels } from "@earendil-works/pi-ai/models";
 import { fauxAssistantMessage, fauxProvider, fauxText } from "@earendil-works/pi-ai/providers/faux";
+import { botLookup } from "../src/bots.ts";
 import {
 	type Conversation,
 	createRegistry,
@@ -77,7 +78,7 @@ async function open(): Promise<Session> {
 	);
 	const root = await harness.root(context, { agent: { model: { provider: "faux", modelId: "faux-1" } } });
 	const syncErrors: unknown[] = [];
-	bindRoutines({ harness, root, dir: dirname(dirname(file)), now: () => clock.now, onError: (error) => syncErrors.push(error) });
+	bindRoutines({ harness, bots: botLookup(harness, root, dirname(dirname(file))), now: () => clock.now, onError: (error) => syncErrors.push(error) });
 	harness.resume();
 	return { dir, file, clock, harness, root, syncErrors };
 }
