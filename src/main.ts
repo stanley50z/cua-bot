@@ -137,9 +137,9 @@ const lookup = botLookup(harness, root);
 const logRoutineSyncFailure = (error: unknown) =>
 	log("routine file sync failed:", error instanceof Error ? error.message : String(error));
 bindRoutines({ harness, bots: lookup, legacyFile: LEGACY_ROUTINE_FILE, onError: logRoutineSyncFailure });
-// The Spaces listing is a Cua round trip, so it runs before work resumes: between resume() and the first sync a due
-// routine can fire on its stored task, before a routines.json edited while the service was down is applied.
-const space = await defaultSpaceLabel();
+// The default Space's name for the computer pane. Cua answers it in a round trip, so startup doesn't wait for it:
+// work resumes and routines sync without it, and the pane shows the name once Cua answers.
+const space = defaultSpaceLabel();
 harness.resume();
 // The bots come before the first routine sync, so their watch on the bot folders already sees any hand edit to a
 // routines.json that the sync doesn't.
@@ -153,7 +153,7 @@ const bots = await createBots({
 	sent: (bot, text) => void push.send({ title: bot.name, body: text, bot: bot.id }),
 	memoryNote,
 	computer: (conversation) =>
-		createComputerView({ harness, storage, conversation, shotsDir: join(DATA_DIR, "shots"), context, ...(space === undefined ? {} : { space }) }),
+		createComputerView({ harness, storage, conversation, shotsDir: join(DATA_DIR, "shots"), context, space }),
 });
 log(`bots: ${bots.list().map((bot) => bot.name).join(", ")}`);
 const synced = await syncRoutines(context);
