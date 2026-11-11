@@ -80,10 +80,9 @@ export function createTurns(memoryNote: MemoryNote) {
 		const { search, draft } = draftOf(turn);
 		if (search !== undefined) {
 			const note = await memoryNote(Number(to.id), search, read, context);
-			// A write without a run. On an idle bot with nothing queued it lands right before the message. Otherwise every
-			// queued note lands at the conversation's next boundary (the end of the current tool round, or of the run),
-			// and a message at the first boundary that selects it: one steer per boundary, one followUp per run end. A
-			// note can then land before other messages, or a whole run before its own (issue 6).
+			// The note is a write of its own, committed before the message, and the Harness places the two independently.
+			// On an idle bot with nothing queued, and no other delivery in between, the note lands right before the
+			// message. Otherwise it can land before other messages, or a whole run before its own (issue 6).
 			if (note !== undefined) await to.submit({ type: "write", entry: { kind: MEMORY_NOTE, model: [{ role: "user", content: note, timestamp: Date.now() }] } }, context);
 		}
 		return to.submit(draft, context);
