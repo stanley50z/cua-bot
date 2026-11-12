@@ -6,7 +6,7 @@
 // here from the data their entries keep.
 // main.ts calls createTurns(memoryNote) once and hands the result to createBotsExtension, bindRoutines, and
 // createBots (which gives it to each bot's Chat), and routes approval outcomes through approval().
-import type { Context } from "@earendil-works/chord";
+import type { Context } from "@earendil-works/chord/context";
 import type { ConversationHandle, Harness, InputSubmissionDraft, Submission, UserInput } from "@earendil-works/pi-durable";
 import type { BotLookup } from "./bots.ts";
 import { APPROVAL_OUTCOME, BOT_MESSAGE, type BotMessage, MEMORY_NOTE, REACTION, type Reaction, reactionText, ROUTINE_FIRING, textOf, type WhenBusy } from "./chat.ts";

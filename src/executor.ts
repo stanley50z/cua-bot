@@ -7,7 +7,7 @@
 // actions the owner approves. Sends (except mail only to the owner), deletes, and calls Executor pauses
 // for approval become approval cards instead of running. Executor's `execute` (a JavaScript program over every tool) is left out on
 // purpose: the check below reads a tool path, not a program.
-import type { Context } from "@earendil-works/chord";
+import type { Context } from "@earendil-works/chord/context";
 import { Type } from "typebox";
 import { defineExtension, defineTool, section, type Extension } from "@earendil-works/pi-durable";
 import { type CallToolResult, McpClient, McpSessionExpiredError, StreamableHttpTransport, toLlmContent } from "@earendil-works/pi-mcp";

@@ -5,7 +5,7 @@
 // for live updates: the streaming partial reply, running tool calls, every new transcript entry, and
 // computer pane snapshots while computer_use runs. Entries are normalized to ChatItem so the browser
 // never sees provider message shapes.
-import type { Context } from "@earendil-works/chord";
+import type { Context } from "@earendil-works/chord/context";
 import type { AssistantMessage, ToolResultMessage, UserMessage } from "@earendil-works/pi-ai";
 import {
 	AssistantEntry,

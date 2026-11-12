@@ -5,7 +5,7 @@
 // so the newest conversation the bot owns is its latest run.
 import { readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
-import type { Context } from "@earendil-works/chord";
+import type { Context } from "@earendil-works/chord/context";
 import type { AssistantMessage, ToolResultMessage } from "@earendil-works/pi-ai";
 import {
 	AssistantEntry,

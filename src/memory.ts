@@ -17,7 +17,7 @@ import { existsSync } from "node:fs";
 import { cp, mkdir, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { Type } from "typebox";
-import type { Context } from "@earendil-works/chord";
+import type { Context } from "@earendil-works/chord/context";
 import { type ConversationId, defineExtension, defineTool, type Extension, type Harness, section } from "@earendil-works/pi-durable";
 import { botFile, type BotFile, botFolder, slugOf } from "./bots.ts";
 
