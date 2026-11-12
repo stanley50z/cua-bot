@@ -14,12 +14,12 @@
     "node": ">=22.19.0"
   },
   "dependencies": {
-    "@earendil-works/chord": "^1.5.0",
-    "@earendil-works/pi-ai": "^1.5.0",
-    "@earendil-works/pi-codemode": "^1.5.0",
-    "@earendil-works/pi-durable": "^1.5.0",
-    "@earendil-works/pi-env": "^1.5.0",
-    "@earendil-works/pi-mcp": "^1.5.0",
+    "@earendil-works/chord": "^1.5.1",
+    "@earendil-works/pi-ai": "^1.5.1",
+    "@earendil-works/pi-codemode": "^1.5.1",
+    "@earendil-works/pi-durable": "^1.5.1",
+    "@earendil-works/pi-env": "^1.5.1",
+    "@earendil-works/pi-mcp": "^1.5.1",
     "@trycua/cua": "^0.9.0",
     "@typesafe-ai/sdk": "^0.7.0",
     "croner": "^11.0.0",

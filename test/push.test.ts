@@ -1,6 +1,6 @@
 // Web Push (src/push.ts): keys persist across restarts, one subscription per browser endpoint, a message
 // reaches every subscription, and one the push service reports gone is dropped. Plus the web portal's
-// /api/push and /sw.js routes, and a body cut to fit a push. Run from the repo root:  node --test test/push.test.ts
+// /api/push, /sw.js and /manifest.webmanifest routes, and a body cut to fit a push. Run from the repo root:  node --test test/push.test.ts
 import assert from "node:assert/strict";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -51,7 +51,7 @@ test("a message reaches every subscribed browser, and a gone one is dropped", ()
 		);
 	}));
 
-test("the web portal serves the push key and service worker and saves a browser's subscription", () =>
+test("the web portal serves the push key, service worker and manifest and saves a browser's subscription", () =>
 	inTempDir(async (file) => {
 		const push = createPush({ file, deliver: async () => undefined });
 		const server = createBotServer({ say: async () => "", context: BACKGROUND_CONTEXT, push });
@@ -64,6 +64,11 @@ test("the web portal serves the push key and service worker and saves a browser'
 			const worker = await fetch(`${base}/sw.js`);
 			assert.match(worker.headers.get("content-type") ?? "", /javascript/);
 			assert.match(await worker.text(), /addEventListener\("push"/);
+			// iOS gives a Home Screen web app Web Push only when the page links a manifest with a standalone display.
+			assert.match(await (await fetch(`${base}/`)).text(), /<link rel="manifest" href="\/manifest.webmanifest">/);
+			const manifest = await fetch(`${base}/manifest.webmanifest`);
+			assert.match(manifest.headers.get("content-type") ?? "", /^application\/manifest\+json/);
+			assert.equal(((await manifest.json()) as { display?: string }).display, "standalone");
 
 			const post = (body: unknown) => fetch(`${base}/api/push`, { method: "POST", body: JSON.stringify(body) });
 			assert.equal((await post({ endpoint: "http://insecure.example/x", keys: { p256dh: "a", auth: "b" } })).status, 400);

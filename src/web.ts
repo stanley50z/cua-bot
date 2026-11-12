@@ -1,4 +1,4 @@
-// The bot's HTTP surface on 127.0.0.1: the web portal at GET / with its service worker at /sw.js, its JSON
+// The bot's HTTP surface on 127.0.0.1: the web portal at GET / with its service worker at /sw.js and web app manifest at /manifest.webmanifest, its JSON
 // API under /api/ (the bot list and its edits, routines CRUD, each bot's chat history/send/react/stop and the owner's pasted images, a server-sent
 // event stream of one bot's live chat state, Web Push subscriptions, the Connections tab's check, start at sign-in, the bots' model and reasoning effort, and the default Space's live screen with the owner's control of it), screenshots under /shots/, and the original POST /say. Listens on loopback only, no auth; an HTTPS proxy such as Tailscale Serve can
 // reach it under a name in allowedHosts. isOwnRequest refuses requests other sites make through the owner's browser.
@@ -33,7 +33,7 @@ import {
 	runRoutineNow,
 	updateRoutine,
 } from "./routines.ts";
-import { LIBRARIES, PAGE, SERVICE_WORKER } from "./web-page.ts";
+import { LIBRARIES, MANIFEST, PAGE, SERVICE_WORKER } from "./web-page.ts";
 
 const MAX_BODY_BYTES = 64 * 1024;
 // POST /api/chat carries pasted images as base64, so it takes far more than the other JSON bodies.
@@ -447,6 +447,10 @@ async function route(req: IncomingMessage, res: ServerResponse, deps: BotServerD
 	}
 	if (method === "GET" && url.pathname === "/sw.js") {
 		res.writeHead(200, { "content-type": "text/javascript; charset=utf-8", "cache-control": "no-cache" }).end(SERVICE_WORKER);
+		return;
+	}
+	if (method === "GET" && url.pathname === "/manifest.webmanifest") {
+		res.writeHead(200, { "content-type": "application/manifest+json; charset=utf-8", "cache-control": "no-cache" }).end(MANIFEST);
 		return;
 	}
 	const library = LIBRARIES.get(url.pathname);

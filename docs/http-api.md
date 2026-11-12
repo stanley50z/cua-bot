@@ -91,6 +91,7 @@ Code: [src/approvals.ts](../src/approvals.ts).
 | `GET /api/push` | The Web Push public key ([src/push.ts](../src/push.ts)). |
 | `POST /api/push` | Saves a browser's `PushSubscription`. |
 | `GET /sw.js` | The service worker that shows the pushes ([src/sw.js](../src/sw.js)). |
+| `GET /manifest.webmanifest` | The web app manifest ([src/web-page.ts](../src/web-page.ts)). Its standalone display is what gives a Home Screen icon on iPhone and iPad Web Push. |
 | `GET /api/autostart` | `{supported, enabled, where}`: whether `start.py` runs when the owner signs in, and where that is saved ([src/autostart.ts](../src/autostart.ts)). |
 | `PUT /api/autostart` | `{"enabled": true}` or `false` adds or removes the sign-in entry and returns the new state. |
 | `GET /api/model` | `{model, thinkingLevel, choices}`: the bots' model as `provider/model`, their reasoning effort, and every model with a key or sign-in with the efforts it supports ([src/model-settings.ts](../src/model-settings.ts)). |

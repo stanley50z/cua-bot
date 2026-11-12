@@ -4,12 +4,14 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>cua-bot</title>
+<link rel="manifest" href="/manifest.webmanifest">
 <!--
  The cua-bot web portal (Workbench layout), served by src/web.ts at GET /. One self-contained document:
  inline CSS and JS, no dependencies, works offline. Talks to /api/bots (the bot list and its edits),
  /api/chat?bot=<id> (one bot's history, send, react, stop),
  /api/chat/events (server-sent live state), /api/chat/computer, /api/computer/control, /api/push, /api/routines, /api/connections, /api/autostart, /api/model,
- and /shots/. Registers /sw.js for Web Push once the owner turns notifications on.
+ and /shots/. Registers /sw.js for Web Push once the owner turns notifications on. Links /manifest.webmanifest,
+ without which an iPhone or iPad Home Screen icon gets no Web Push.
  Every server string is rendered with textContent or built DOM nodes, never parsed as HTML.
 -->
 <style>

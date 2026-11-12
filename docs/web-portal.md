@@ -18,7 +18,7 @@ CUABOT_ALLOWED_HOSTS=<machine>.<tailnet>.ts.net
 
 Restart the bot, then open `https://<machine>.<tailnet>.ts.net/` on the phone. `http://<tailscale-ip>:43142` can't work, because nothing listens on that address. Notifications and the live screen also need HTTPS.
 
-Every device on your tailnet can then use the bot without a login, including its computer control. On iPhone, add the page to the Home Screen before turning on notifications.
+Every device on your tailnet can then use the bot without a login, including its computer control. On iPhone and iPad, Safari has no notifications for a web page, only for a Home Screen web app. In Safari, tap Share, then Add to Home Screen, keep Open as Web App on, and turn on notifications from the Home Screen icon. An icon added before 2026-11-12, when the page got its web app manifest, opens without Web Push: delete it and add it again.
 
 The layout is three columns: bots on the left, the chat in the middle, the Space's screen on the right. A rail on the far left switches to Routines (clock icon), Memory (page icon) and Settings (gear).
 
