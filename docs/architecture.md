@@ -245,6 +245,7 @@ Waiting cards are kept in `data/approvals.json` across restarts and expire after
 Executor is the only email path. Bots report to you with `send_message`, which reaches your browser as a notification, and email you only when you ask.
 
 - The bot sends with Executor's `tools.google.gmail.send`, which takes To, Cc, Subject and body as fields and keeps replies in their thread.
+- **A draft is a card.** When you ask for a draft or reply to someone else, the bot calls `tools.google.gmail.send`, and the card is where you edit and approve it. The tool description and prompt in `src/executor.ts` say so, because bots told only that send makes a card treated "draft" as text to write in chat.
 - **Mail to you skips the card.** A `tools.google.gmail.send` or `tools.google.gmail.draft` whose every recipient (To, Cc, Bcc) is `OWNER_EMAIL` runs at once, so a routine you asked to email you works on its own. Executor's Google app still holds both tools for approval (`approval: always()` in its `tools/gmail.ts`); for these calls only, the bot accepts that hold itself.
 - A reply with no To still gets a card, since it goes to the original sender.
 - **Gmail labels can skip the card.** With Settings > Approvals on, a `tools.google.gmail.modify` that only adds or removes your own labels runs at once, and the bot accepts Executor's hold itself. Any other field on the call, or a built-in label such as `TRASH` or `INBOX`, still gets a card, because those move, hide or delete mail.
