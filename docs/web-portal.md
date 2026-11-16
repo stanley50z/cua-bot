@@ -190,6 +190,6 @@ The interpreter is the one `start.py` last ran under (Windows uses `pythonw.exe`
 
 ## Notifications
 
-Click Turn on notifications in the chat header once and allow them. From then on a browser notification pops up for every `send_message` (titled with the bot's name, first 500 characters of the message) and every approval card. It pops up even with every cua-bot tab closed, as long as the browser runs, and even while you look at that chat. Clicking one opens the chat of the bot that sent it, in the tab you already have open if there is one.
+The page asks for notification permission on your first click or key press in a browser that hasn't answered yet. Browsers show the prompt only after a gesture like that, so it can't appear on load. Allow it. If you dismissed the prompt, click Turn on notifications in the chat header. From then on a browser notification pops up for every `send_message` (titled with the bot's name, first 500 characters of the message) and every approval card. It pops up even with every cua-bot tab closed, as long as the browser runs, and even while you look at that chat. Clicking one opens the chat of the bot that sent it, in the tab you already have open if there is one.
 
 This is Web Push through the browser's push service (FCM for Chrome), so the bot needs internet access. Cua's own `notify_user` tool is turned off for the bots for now (`DISABLED` in [src/cua-mcp.ts](../src/cua-mcp.ts)).

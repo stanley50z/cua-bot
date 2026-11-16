@@ -2623,10 +2623,24 @@ async function subscribePush() {
   await request("POST", "/api/push", subscription.toJSON());
 }
 const turnOnPush = () => subscribePush().catch((error) => showChatError("Could not turn on notifications: " + error.message));
-for (const id of ["notify", "notify-bell"]) $(id).addEventListener("click", async () => {
-  if (await Notification.requestPermission() === "granted") await turnOnPush();
-  showNotifyState();
-});
+// Shows the browser's permission prompt and subscribes once allowed. Call it straight from a click or key press:
+// Safari and Firefox show the prompt only during a user gesture. A second call while the prompt is open shares the first.
+let askingPush;
+const askForPush = () => askingPush ??= Notification.requestPermission()
+  .then((permission) => permission === "granted" && turnOnPush())
+  .finally(() => { askingPush = undefined; showNotifyState(); });
+for (const id of ["notify", "notify-bell"]) $(id).addEventListener("click", askForPush);
+// A fresh install (a new browser, or the app re-added to an iPhone home screen) has no answer yet,
+// so the page asks on the owner's first click or key press instead of waiting for the button.
+if (pushSupported && Notification.permission === "default") {
+  const askOnce = () => {
+    removeEventListener("click", askOnce, true);
+    removeEventListener("keydown", askOnce, true);
+    askForPush();
+  };
+  addEventListener("click", askOnce, true);
+  addEventListener("keydown", askOnce, true);
+}
 // A clicked notification names its bot here when a tab is already open (src/sw.js).
 if (pushSupported) navigator.serviceWorker.addEventListener("message", (event) => {
   goTo("chat");
