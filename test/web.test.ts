@@ -20,7 +20,7 @@ import { createTurns } from "../src/turns.ts";
 import { createLiveScreen, type InputEvent } from "../src/live-screen.ts";
 import { createScreenControl } from "../src/screen-control.ts";
 import type { ConnectionsSnapshot } from "../src/connections.ts";
-import { createBotServer } from "../src/web.ts";
+import { createBotServer, fromThisComputer } from "../src/web.ts";
 
 const context = BACKGROUND_CONTEXT;
 // Tue 2023-11-14T22:13:20Z.
@@ -400,6 +400,19 @@ test("the owner takes control, drives the Mac through the live session, and hand
 	} finally {
 		await close(session);
 	}
+});
+
+test("fromThisComputer: loopback, or a proxy forwarding one of this computer's addresses, is this computer", () => {
+	const addresses = ["192.168.1.20", "100.64.0.7", "fd7a:115c::7"];
+	assert.equal(fromThisComputer("127.0.0.1", undefined, addresses), true);
+	assert.equal(fromThisComputer("::ffff:127.0.0.1", undefined, addresses), true);
+	assert.equal(fromThisComputer("::1", undefined, addresses), true);
+	// Tailscale Serve on this computer, opened from this computer and from a phone.
+	assert.equal(fromThisComputer("127.0.0.1", "100.64.0.7", addresses), true);
+	assert.equal(fromThisComputer("127.0.0.1", "FD7A:115C::7", addresses), true);
+	assert.equal(fromThisComputer("127.0.0.1", "100.64.0.9", addresses), false);
+	// A chain of proxies: the last hop names the address that reached this computer's proxy.
+	assert.equal(fromThisComputer("127.0.0.1", "10.0.0.5, 100.64.0.9", addresses), false);
 });
 
 test("GET /api/computer/live frames each access unit as flag, length, bytes, and 404s without a Space", { timeout: 20_000 }, async () => {

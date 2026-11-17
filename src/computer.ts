@@ -12,7 +12,7 @@
 import { traceExtension } from "./trace.ts";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
-import { homedir, tmpdir } from "node:os";
+import { homedir, hostname, tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import type { Context } from "@earendil-works/chord/context";
 import type { AssistantMessage, ToolResultMessage } from "@earendil-works/pi-ai";
@@ -188,6 +188,19 @@ const labels = new Map<string, Promise<string>>();
 /** Used by main.ts for the computer pane. A Space's display name, falling back to its id; looked up once per Space. */
 export function spaceLabel(id: string): Promise<string> {
 	return once(labels, id, async () => (await listSpaces()).find((space) => space.id === id)?.name ?? id);
+}
+
+const homes = new Map<string, Promise<boolean>>();
+
+/**
+ * Used by main.ts for the computer pane. Whether the Space is the desktop of the computer cua-bot runs on: its spacesd
+ * reports this computer's hostname. Asked once per Space; a Space that can't be reached is asked again next time.
+ */
+export function isThisComputer(id: string): Promise<boolean> {
+	return once(homes, id, async () => {
+		const { hostname: name } = JSON.parse((await connectSpace(id)).capabilitiesJson()) as { hostname?: string };
+		return name?.toLowerCase() === hostname().toLowerCase();
+	});
 }
 
 /** Used by preflight.ts. The default Space's display name, falling back to its id. */

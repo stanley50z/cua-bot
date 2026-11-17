@@ -74,7 +74,7 @@ A bot talks to you only through its `send_message` tool ([src/bots.ts](../src/bo
 - Messages stream in as the bot writes them, in a grey bubble.
 - Each message shows its time under it. Hover for the full date.
 - While a reply runs, the chat title says Working or Using the computer.
-- Enter sends, Shift+Enter adds a line, the stop button ends the current reply. A touch keyboard [differs](#on-a-phone).
+- Enter sends, Shift+Enter adds a line, the stop button ends the current reply. Ctrl+Enter (Cmd+Enter on a Mac) sends the other way from Settings > Chat's choice for a busy bot, so by default it waits for the turn to end. Settings > Chat can make Ctrl+Enter the send key instead; Enter then adds a line and Ctrl+Shift+Enter sends the other way. A touch keyboard [differs](#on-a-phone).
 - A message sent while the bot is busy reaches it after the tool call it's running, in the same turn, so you can correct it without pressing stop. A running computer-use task stops once its current action finishes, so the bot reads the message right away and starts a new task if one is needed. Settings > Chat can make it wait for the turn to end instead.
 
 **Tool steps.** With Show tool steps on, each tool the bot used shows as a chip above its reply. Chips from consecutive steps that sent nothing run on in one wrapping row, up to the next message. Click a finished chip for the tool's result; screenshots appear as thumbnails, and clicking one opens it in the image viewer. A turn where nothing needs you shows only its chips. With the setting off (the default), that turn shows nothing.
@@ -109,6 +109,8 @@ The right column shows a Space's screen live, plus each click and keystroke of t
 
 All open panes share one media session: about 15 fps at the display's native resolution, roughly 100 KB/s on a quiet screen and more when it changes a lot, decoded with WebCodecs. A pane streams only while its tab is visible and the pane is on screen, unless you have control. The session closes when the last pane closes. If the stream is down, or the browser lacks WebCodecs, the pane stays black. The caption says Connecting… while it retries, or that the browser can't play the live screen.
 
+When the Space on screen is the computer your browser runs on, the pane never streams, because it would film itself, and Expand and Take control are off, because your input would loop back into the same desktop. The pane says you're on this computer, and the steps still show. A Space counts as this computer when its spacesd reports the hostname of the computer cua-bot runs on. Your browser counts as being on it when it opens `http://127.0.0.1:43142/` there, or the Tailscale Serve name from there. A browser on another computer that reaches the bot through an SSH tunnel looks local too, so it gets the same treatment.
+
 ### Expanded screen and Take control
 
 Click the live screen (it shows an Expand badge) to fill the window with it. If no bot is driving that Space, the click also gives you control. While a bot drives it, you watch, and a bar under the screen shows what the bot is doing, with a Take control button. To always open for watching, turn off Take control when I open the live screen in [Settings](#chat-1). The Take control button in the pane's header always opens the view in control, pausing any bot that's driving.
@@ -141,6 +143,7 @@ Saved in this browser's `localStorage` (`cua-bot.settings`), so each browser kee
 | Show tool steps | off | See [Chat](#chat) |
 | Show routine runs | off | See [Chat](#chat) |
 | Take control when I open the live screen | on | See [Expanded screen and Take control](#expanded-screen-and-take-control) |
+| Send with | Enter | Enter sends, or Ctrl+Enter sends and Enter adds a line. The other key (Ctrl+Enter, or Ctrl+Shift+Enter) sends with the other choice below |
 | Messages sent while a bot is working | After its current step | After its current step puts the message in the running turn and stops any running computer-use task after its current action; When it finishes holds it for a turn of its own |
 | Quick replies | Yes, No, Explain | One phrase per line |
 | Quick emoji | 👍 👎 ❤️ 😂 🎉 😮 | Typed or pasted in any spacing; anything that isn't an emoji is dropped when you leave the field. Clearing it hides the smiley. |

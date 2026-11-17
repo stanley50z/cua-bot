@@ -129,6 +129,12 @@ export type BotServerDeps = {
 	live?: LiveScreen;
 	/** With `live`, enables POST /api/computer/control and /api/computer/input: the owner driving the shown Space. */
 	control?: ScreenControl;
+	/**
+	 * With `control`, lets each chat stream tell its page whether the shown Space is the desktop that page's browser
+	 * runs on (`here` in the `control` event), so the page turns its live screen off instead of filming itself.
+	 * `addresses` are this computer's network addresses; `isSpace` says whether a Space is this computer's desktop.
+	 */
+	thisComputer?: { addresses: readonly string[]; isSpace: (space: string) => Promise<boolean> };
 	/** Enables GET/POST /api/push: the VAPID public key, and a browser's push subscription. */
 	push?: Push;
 	/** Enables GET /api/connections: this computer, the owner's SSH machines, and the Cua Spaces, checked on each call. */
@@ -205,20 +211,42 @@ function reactionInput(body: unknown): { entryId: number; emoji: string; on: boo
 	return { entryId, emoji, on };
 }
 
+/**
+ * Whether a request's browser runs on this computer. The server listens on loopback, so the socket's address is
+ * this computer's; a proxy here such as Tailscale Serve names the browser's address in X-Forwarded-For, which is
+ * one of this computer's own when the browser opened the proxy's name on this computer. Exported for test/web.test.ts.
+ */
+export function fromThisComputer(remoteAddress: string | undefined, forwardedFor: string | undefined, addresses: readonly string[]): boolean {
+	const client = (forwardedFor?.split(",").at(-1)?.trim() || remoteAddress || "").toLowerCase().replace(/^::ffff:/, "");
+	return /^127\./.test(client) || client === "::1" || addresses.some((address) => address.toLowerCase() === client);
+}
+
 // One SSE client of one bot's chat: a `live` snapshot right away, then every chat event, the full
 // approvals list whenever it changes, the bot list whenever it changes, and the Space on the live screen and who
-// drives it (a `control` event with `space`, `owner` and `driving`, right away and on every change), until the socket closes.
+// drives it (a `control` event with `space`, `owner`, `driving`, and `here`: whether that Space is the desktop this
+// client's browser runs on; right away and on every change), until the socket closes.
 function streamChat(req: IncomingMessage, res: ServerResponse, chat: Chat, bots: Bots, deps: BotServerDeps): void {
 	res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-store", connection: "keep-alive" });
 	const send = (event: unknown) => res.write(`data: ${JSON.stringify(event)}\n\n`);
 	send({ type: "live", live: chat.live });
-	const { control } = deps;
-	const sendControl = () => control && send({ type: "control", space: control.space, owner: control.owner, driving: control.driving });
-	sendControl();
+	const { control, thisComputer } = deps;
+	const forwarded = req.headers["x-forwarded-for"];
+	const local =
+		thisComputer !== undefined && fromThisComputer(req.socket.remoteAddress, Array.isArray(forwarded) ? forwarded.at(-1) : forwarded, thisComputer.addresses);
+	// Asking a Space for its hostname can take a moment, so only the newest change is sent.
+	let changes = 0;
+	const sendControl = async () => {
+		if (control === undefined) return;
+		const change = ++changes;
+		const { space } = control;
+		const here = local && space !== undefined && (await thisComputer.isSpace(space).catch(() => false));
+		if (change === changes && !res.destroyed) send({ type: "control", space, owner: control.owner, driving: control.driving, here });
+	};
+	void sendControl();
 	const unsubscribe = chat.subscribe(send);
 	const unwatch = deps.approvals?.subscribe((list) => send({ type: "approvals", approvals: list }));
 	const unwatchBots = bots.subscribe((list) => send({ type: "bots", bots: list }));
-	const unwatchControl = control?.subscribe(sendControl);
+	const unwatchControl = control?.subscribe(() => void sendControl());
 	const ping = setInterval(() => res.write(": ping\n\n"), 25_000);
 	req.on("close", () => {
 		clearInterval(ping);

@@ -10,7 +10,7 @@ import { createRegistry, defineExtension, Harness, section } from "@earendil-wor
 import { createNodePhotonImages } from "@earendil-works/pi-durable/images/node";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { botLookup, createBots, createBotsExtension, DEFAULT_BOTS_DIR, readBots } from "./bots.ts";
-import { createComputerExtension, defaultSpaceId, openLiveStream, registrySpaces, screenControl, spaceLabel, spacesText } from "./computer.ts";
+import { createComputerExtension, defaultSpaceId, isThisComputer, openLiveStream, registrySpaces, screenControl, spaceLabel, spacesText } from "./computer.ts";
 import { createConnections, listCuaSpaces, probeTcp } from "./connections.ts";
 import { createLiveScreen } from "./live-screen.ts";
 import { createBotToolSearchExtension } from "./tool-search.ts";
@@ -179,6 +179,9 @@ screenControl.subscribe(() => {
 	shownSpace = screenControl.space;
 	live.restart(`the live screen moved to ${shownSpace}`);
 });
+// This computer's network addresses: the Connections tab places SSH hosts and Spaces with them, and the web portal
+// tells a browser on this computer from one elsewhere.
+const addresses = Object.values(networkInterfaces()).flatMap((list) => (list ?? []).map((nic) => nic.address));
 // The Connections tab: this computer, which runs the Harness and every bot, then the owner's SSH machines and the Spaces.
 const defaultSpace = defaultSpaceId();
 const connections = createConnections({
@@ -186,7 +189,7 @@ const connections = createConnections({
 		name: hostname(),
 		os: process.platform === "win32" ? `${version()} (${release()})` : `${type()} ${release()}`,
 		user: userInfo().username,
-		addresses: Object.values(networkInterfaces()).flatMap((list) => (list ?? []).map((nic) => nic.address)),
+		addresses,
 		pid: process.pid,
 		startedAt: Date.now() - Math.round(process.uptime() * 1000),
 		database: DATABASE,
@@ -202,7 +205,7 @@ const connections = createConnections({
 const autostart = createAutostart({ startScript: join(import.meta.dirname, "..", "start.py") });
 // Settings > Model: the model and reasoning effort in .env, applied to every bot without a restart.
 const modelSettings = createModelSettings({ models, apply: bots.applyAgent });
-createBotServer({ say: (text) => mainChat.say(text), bots, memory, memoryBots: () => bots.list(), images, context, log, control: screenControl, live, push, connections, autostart, modelSettings, allowedHosts: ALLOWED_HOSTS, ...(approvals === undefined ? {} : { approvals }) }).listen(PORT, "127.0.0.1", () =>
+createBotServer({ say: (text) => mainChat.say(text), bots, memory, memoryBots: () => bots.list(), images, context, log, control: screenControl, live, thisComputer: { addresses, isSpace: isThisComputer }, push, connections, autostart, modelSettings, allowedHosts: ALLOWED_HOSTS, ...(approvals === undefined ? {} : { approvals }) }).listen(PORT, "127.0.0.1", () =>
 	log(`listening: web portal http://127.0.0.1:${PORT}/ · chat POST http://127.0.0.1:${PORT}/say`),
 );
 

@@ -22,7 +22,7 @@ import { createMemory } from "../src/memory.ts";
 import { createPcExtensions } from "../src/pc.ts";
 import { createScreenControl, type ScreenControl } from "../src/screen-control.ts";
 import { createTurns, type MemoryNote } from "../src/turns.ts";
-import { createBotServer } from "../src/web.ts";
+import { type BotServerDeps, createBotServer } from "../src/web.ts";
 
 const context = BACKGROUND_CONTEXT;
 
@@ -46,7 +46,7 @@ const SCRIPT: FauxResponseStep[] = [
 	end,
 ];
 
-async function open(responses = SCRIPT, images?: ImageProcessor, memoryNote: MemoryNote = async () => undefined, options: { extensions?: Extension[]; sent?: (text: string) => void; control?: ScreenControl } = {}) {
+async function open(responses = SCRIPT, images?: ImageProcessor, memoryNote: MemoryNote = async () => undefined, options: { extensions?: Extension[]; sent?: (text: string) => void; control?: ScreenControl; thisComputer?: BotServerDeps["thisComputer"] } = {}) {
 	const dir = await mkdtemp(join(tmpdir(), "cua-bot-chat-"));
 	const faux = fauxProvider();
 	const models = createModels();
@@ -61,7 +61,7 @@ async function open(responses = SCRIPT, images?: ImageProcessor, memoryNote: Mem
 	const root = await harness.root(context, { agent: { model: MODEL } });
 	harness.resume();
 	const bots = await createBots({ harness, lookup: botLookup(harness, root, join(dir, "bots")), context, agent: () => ({ model: MODEL }), memory: createMemory({ dir: join(dir, "memory") }), onError: (error) => assert.fail(String(error)), turns, sent: (_bot, text) => options.sent?.(text) });
-	const server = createBotServer({ say: async (text) => text, bots, context, shotsDir: dir, ...(images === undefined ? {} : { images }), ...(options.control === undefined ? {} : { control: options.control }) });
+	const server = createBotServer({ say: async (text) => text, bots, context, shotsDir: dir, ...(images === undefined ? {} : { images }), ...(options.control === undefined ? {} : { control: options.control }), ...(options.thisComputer === undefined ? {} : { thisComputer: options.thisComputer }) });
 	await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
 	const address = server.address();
 	assert.ok(address !== null && typeof address === "object");
@@ -122,6 +122,20 @@ test("the event stream says when a task runs on the live screen, and a failed ta
 		});
 		assert.deepEqual(driving(events), [false, true, false]);
 		assert.equal(control.driving, false);
+	} finally {
+		await bot.close();
+	}
+});
+
+test("the event stream tells a browser on this computer when the live screen shows this computer", { timeout: 30_000 }, async () => {
+	const control = createScreenControl({ space: () => "pc" });
+	const bot = await open(SCRIPT, undefined, undefined, { control, thisComputer: { addresses: [], isSpace: async (space) => space === "pc" } });
+	const here = (events: unknown[]) => (events as { type: string; space?: string; here?: boolean }[]).filter((event) => event.type === "control").map((event) => [event.space, event.here]);
+	try {
+		// The test's fetch connects over loopback, as a browser on this computer does; the drive moves the screen to the Mac.
+		const events = await collect(bot.base, (seen) => here(seen).some(([space]) => space === "mac"), () => control.drive("mac", async () => {}));
+		assert.deepEqual(here(events)[0], ["pc", true]);
+		assert.deepEqual(here(events).at(-1), ["mac", false]);
 	} finally {
 		await bot.close();
 	}

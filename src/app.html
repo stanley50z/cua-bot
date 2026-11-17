@@ -257,6 +257,11 @@ dialog .row .btn.danger { margin-right: auto; }
 .screen .expand { position: absolute; right: 8px; top: 8px; display: flex; align-items: center; gap: 5px; background: rgba(20,20,20,.72); color: #fff; font: 600 11.5px "Bahnschrift", sans-serif; padding: 3px 8px 3px 6px; border-radius: 5px; opacity: .8; transition: opacity .12s; }
 .screen:hover .expand, .screen:focus-visible .expand { opacity: 1; }
 .screen .expand svg { width: 13px; height: 13px; }
+/* On the computer it shows, the live screen would film itself, so the pane says so instead. */
+.screen .note { display: none; color: #9AA1AB; font-size: 13px; padding: 0 24px; text-align: center; }
+.screen.here { cursor: default; }
+.screen.here .expand { display: none; }
+.screen.here .note { display: block; }
 
 /* expanded live screen: the pane's canvas moves in here, sized to the video so pointer positions map 1:1 */
 #screen-view, #image-view { width: 100vw; height: 100vh; max-width: none; max-height: none; margin: 0; padding: 56px 40px 22px; border: 0; border-radius: 0; background: #141414; color: #fff; box-shadow: none; }
@@ -678,7 +683,7 @@ dialog .row { display: flex; gap: 8px; justify-content: flex-end; margin-top: 18
      <label class="setting"><span><b>Show tool steps</b><small>A chip for each tool a bot runs, like space bash or Remembered, that opens its output, plus its screenshots. Repeats share one chip, like space bash ×3.</small></span><input type="checkbox" data-setting="tools"></label>
      <label class="setting"><span><b>Show routine runs</b><small>A line in the bot's chat each time one of its routines starts.</small></span><input type="checkbox" data-setting="routineRuns"></label>
      <label class="setting"><span><b>Take control when I open the live screen</b><small>Clicking the live screen takes control right away if no bot is driving it. Off, it opens for watching and you click Take control yourself.</small></span><input type="checkbox" data-setting="controlOnExpand"></label>
-     <label class="setting field"><span><b>Messages sent while a bot is working</b><small>After its current step puts the message in the turn it's on, so you can correct it mid-task. A running computer task stops after its current action, and the bot decides what to do next. When it finishes holds the message for a turn of its own. Stop drops a message still waiting either way.</small></span><select id="set-when-busy"><option value="steer">After its current step</option><option value="followUp">When it finishes</option></select></label>
+     <label class="setting field"><span><b>Send with</b><small>Enter sends and Shift+Enter adds a line, or Ctrl+Enter sends and Enter adds a line. Ctrl+Enter, or Ctrl+Shift+Enter when Ctrl+Enter sends, sends the other way below.</small></span><select id="set-send-key"><option value="enter">Enter</option><option value="ctrlEnter">Ctrl+Enter</option></select></label><label class="setting field"><span><b>Messages sent while a bot is working</b><small>After its current step puts the message in the turn it's on, so you can correct it mid-task. A running computer task stops after its current action, and the bot decides what to do next. When it finishes holds the message for a turn of its own. Stop drops a message still waiting either way. The send button and send key use this; the other key uses the other.</small></span><select id="set-when-busy"><option value="steer">After its current step</option><option value="followUp">When it finishes</option></select></label>
      <label class="setting field"><span><b>Quick replies</b><small>One per line. They show on the bar over text you select in a message; clicking one adds that text to the message box as a quote, with the reply after it.</small></span><textarea id="set-phrases" rows="4" spellcheck="false"></textarea></label>
      <label class="setting field"><span><b>Quick emoji</b><small>The reactions under a reply's smiley, and emoji replies on the bar over selected text, which add that text to the message box as a quote with the emoji after it.</small></span><input type="text" id="set-emoji" spellcheck="false" autocomplete="off"></label>
     </div>
@@ -720,7 +725,7 @@ dialog .row { display: flex; gap: 8px; justify-content: flex-end; margin-top: 18
 
  <aside class="side" aria-labelledby="space-h">
   <div class="bar"><h1 id="space-h">Computer</h1><span class="state" id="space-state"></span><button class="btn" id="take-control" type="button" title="Expand the live screen and drive it with your mouse and keyboard">Take control</button></div>
-  <button type="button" class="screen" id="screen" aria-label="Expand the live screen"><canvas id="live-screen" aria-label="Live screen of the computer"></canvas><span class="expand"><svg aria-hidden="true"><use href="#i-expand"/></svg>Expand</span><span class="tag" hidden>Bot is driving</span></button>
+  <button type="button" class="screen" id="screen" aria-label="Expand the live screen"><canvas id="live-screen" aria-label="Live screen of the computer"></canvas><span class="expand"><svg aria-hidden="true"><use href="#i-expand"/></svg>Expand</span><span class="note">You're on this computer, so its live screen is off here.</span><span class="tag" hidden>Bot is driving</span></button>
   <div class="shot-time" id="shot-time"></div>
   <div class="steps"><h2 id="steps-h">Steps</h2><ol id="steps"></ol></div>
  </aside>
@@ -903,15 +908,17 @@ function markdown(text) {
 // `reacting` holds reactions sent but not yet back as items, by "<reply id>:<emoji>".
 const state = { bot: null, bots: [], items: [], ids: new Set(), before: null, live: { busy: false, partial: "", tools: [] }, queued: [], open: new Set(), computer: { steps: [] }, approvals: [], picking: null, tapped: null, reacting: new Map() };
 // The expanded live screen (see "expanded live screen" below): whether the owner has control of the Space, whether
-// any bot's task is running on it, the keys they hold down there, and their input on its way.
-const view = { space: undefined, owner: false, driving: false, held: new Map(), queue: [], sending: null, lastMove: 0 };
+// any bot's task is running on it, the keys they hold down there, and their input on its way. `here` says the Space is
+// the desktop this browser runs on, so the live screen stays off; it is undefined until the event stream says.
+const view = { space: undefined, here: undefined, owner: false, driving: false, held: new Map(), queue: [], sending: null, lastMove: 0 };
 // The owner's display choices, kept in this browser. `botTalk` shows the messages bots send each other, `tools` the
 // tool chips and screenshots in replies, `routineRuns` the line each routine firing leaves in its chat,
-// `controlOnExpand` makes clicking an undriven live screen take control. `phrases` and `emoji` are the quick replies
-// on the selection bar, and `emoji` also fills a reply's reaction picker.
+// `controlOnExpand` makes clicking an undriven live screen take control. `sendKey` ("enter" or "ctrlEnter") is the
+// key that sends with `whenBusy` ("steer" or "followUp"); see the composer's keydown for the key that sends with the
+// other. `phrases` and `emoji` are the quick replies on the selection bar, and `emoji` also fills a reply's reaction picker.
 const SETTINGS_KEY = "cua-bot.settings";
 const QUICK = { phrases: ["Yes", "No", "Explain"], emoji: ["👍", "👎", "❤️", "😂", "🎉", "😮"] };
-const settings = { botTalk: false, tools: false, routineRuns: false, controlOnExpand: true, whenBusy: "steer", ...QUICK };
+const settings = { botTalk: false, tools: false, routineRuns: false, controlOnExpand: true, sendKey: "enter", whenBusy: "steer", ...QUICK };
 try { Object.assign(settings, JSON.parse(localStorage.getItem(SETTINGS_KEY) || "{}")); } catch { /* unreadable: keep the defaults */ }
 for (const key of ["phrases", "emoji"]) {
   if (!Array.isArray(settings[key]) || !settings[key].every((x) => typeof x === "string")) settings[key] = QUICK[key];
@@ -1843,6 +1850,9 @@ function renderLive() {
   $("screen").classList.toggle("drive", botDriving);
   $("screen").querySelector(".tag").hidden = !botDriving;
   $("to-computer").classList.toggle("drive", botDriving);
+  // On the computer the screen shows, the pane would film itself and driving it would feed its own input back.
+  $("screen").disabled = $("take-control").disabled = view.here === true;
+  $("screen").classList.toggle("here", view.here === true);
   $("view-keyboard").hidden = !(view.owner && touch.matches);
   const who = $("view-who");
   who.className = "who" + (view.owner ? " mine" : botDriving ? " drive" : "");
@@ -1872,7 +1882,7 @@ function renderComputer() {
 }
 
 function captionScreen() {
-  const caption = liveScreen.playing ? "Live"
+  const caption = view.here ? "" : liveScreen.playing ? "Live"
     : typeof VideoDecoder === "undefined" ? "This browser can't play the live screen" : "Connecting…";
   $("shot-time").textContent = caption;
   $("view-wait").textContent = caption;
@@ -1886,8 +1896,9 @@ function captionScreen() {
 const liveScreen = { playing: false, abort: null, retry: null, delay: 2000 };
 
 // Whether the owner can see the live screen: this tab is visible, and the pane is on screen or the expanded view
-// is open. In the phone layout the pane is a screen of its own.
-const watching = () => !document.hidden && ($("screen-view").open || $("screen").getClientRects().length > 0);
+// is open. In the phone layout the pane is a screen of its own. A browser on the computer the screen shows never
+// watches, or it would film itself.
+const watching = () => view.here === false && !document.hidden && ($("screen-view").open || $("screen").getClientRects().length > 0);
 
 // "avc1.PPCCLL" from the SPS (NAL type 7) that leads each keyframe.
 function avcCodec(data) {
@@ -1962,10 +1973,11 @@ async function playLive() {
 
 // Starts the stream when the live screen comes into view and stops it when it leaves: the tab hides or shows, the
 // window turns into or out of the phone layout, or showView changes screens. The stream stays up out of
-// view while the owner has control: the server hands control back to the bots once no pane watches.
+// view while the owner has control: the server hands control back to the bots once no pane watches. It stops on the
+// computer it shows, control or not.
 function syncLive() {
   if (watching()) { liveScreen.delay = 2000; playLive(); }
-  else if (!view.owner) { clearTimeout(liveScreen.retry); liveScreen.abort?.abort(); }
+  else if (!view.owner || view.here) { clearTimeout(liveScreen.retry); liveScreen.abort?.abort(); }
 }
 document.addEventListener("visibilitychange", syncLive);
 phone.addEventListener("change", syncLive);
@@ -2177,6 +2189,14 @@ function connect() {
       if (view.space !== undefined && data.space !== view.space) loadComputer(state.bot);
       view.space = data.space;
       view.driving = data.driving;
+      const here = data.here === true;
+      if (here !== view.here) {
+        view.here = here;
+        // On the computer it shows, the expanded view closes, which hands control back.
+        if (here) $("screen-view").close();
+        captionScreen();
+        syncLive();
+      }
       applyControl(data.owner);
     }
   };
@@ -2487,9 +2507,10 @@ $("b-delete").addEventListener("click", async () => {
 });
 
 // Sends the owner's message to the open bot with any pasted `images` ({ data, mimeType }), showing it queued until it
-// lands in the chat. Resolves to whether it went; a failure shows in the chat's error line.
-async function sendMessage(text, images = []) {
-  const queued = { text, images, whenBusy: settings.whenBusy };
+// lands in the chat. `whenBusy` is what it does if the bot is busy. Resolves to whether it went; a failure shows in the
+// chat's error line.
+async function sendMessage(text, images = [], whenBusy = settings.whenBusy) {
+  const queued = { text, images, whenBusy };
   state.queued.push(queued);
   renderChat();
   $("msgs").scrollTop = $("msgs").scrollHeight;
@@ -2559,8 +2580,9 @@ $("input").addEventListener("paste", async (event) => {
   } catch (error) { showChatError("Could not read the pasted image: " + error.message); }
 });
 
-$("composer").addEventListener("submit", async (event) => {
-  event.preventDefault();
+// Sends what's in the composer with `whenBusy`. The send button and the send key use the setting; the composer's
+// keydown passes the other method for the other key.
+async function sendComposer(whenBusy) {
   const input = $("input");
   const text = composedText();
   const bot = state.bot, images = imagesOf(bot);
@@ -2569,13 +2591,17 @@ $("composer").addEventListener("submit", async (event) => {
   const sending = images.splice(0);
   input.replaceChildren();
   renderAttachments();
-  if (!(await sendMessage(text, sending))) {
+  if (!(await sendMessage(text, sending, whenBusy))) {
     // The owner may have opened another bot meanwhile, so the message goes back to the bot it was for.
     saveDraft(bot, parts);
     if (bot === state.bot) restoreDraft();
     images.unshift(...sending);
     renderAttachments();
   }
+}
+$("composer").addEventListener("submit", (event) => {
+  event.preventDefault();
+  sendComposer(settings.whenBusy);
 });
 // Whether an on-screen keyboard covers the bottom of the page: the visual viewport, unzoomed, falls well short of
 // the layout viewport. A tablet with a hardware keyboard shows at most a shortcut bar there, so this stays false.
@@ -2584,9 +2610,19 @@ function onScreenKeyboard() {
   return touch.matches && document.documentElement.clientHeight - area.height * area.scale > 150;
 }
 
-// Enter sends. On an on-screen keyboard, which has no Shift+Enter, it starts a new line and the send button sends.
+// The send key (Settings > Chat) sends with the chosen method, and the other key with the other method: with Enter,
+// Ctrl+Enter is the other key; with Ctrl+Enter, Enter adds a line and Ctrl+Shift+Enter is the other key. Cmd counts
+// as Ctrl. On an on-screen keyboard, which has no Shift+Enter, Enter starts a new line and the send button sends.
+const otherWhenBusy = () => (settings.whenBusy === "steer" ? "followUp" : "steer");
 $("input").addEventListener("keydown", (event) => {
-  if (event.key === "Enter" && !event.shiftKey && !event.isComposing && !onScreenKeyboard()) { event.preventDefault(); $("composer").requestSubmit(); }
+  if (event.key !== "Enter" || event.isComposing || onScreenKeyboard()) return;
+  const ctrl = event.ctrlKey || event.metaKey;
+  const whenBusy = settings.sendKey === "ctrlEnter"
+    ? (ctrl ? (event.shiftKey ? otherWhenBusy() : settings.whenBusy) : null)
+    : (event.shiftKey ? null : ctrl ? otherWhenBusy() : settings.whenBusy);
+  if (whenBusy === null) return;
+  event.preventDefault();
+  sendComposer(whenBusy);
 });
 $("stop").addEventListener("click", async () => {
   $("stop").disabled = true;
@@ -2758,12 +2794,18 @@ document.querySelectorAll("input[data-setting]").forEach((input) => {
   });
 });
 
-// What messages sent while a bot works do, as POST /api/chat's whenBusy. A message already sent keeps its own.
-$("set-when-busy").value = settings.whenBusy;
-$("set-when-busy").addEventListener("change", (event) => {
-  settings.whenBusy = event.target.value;
-  localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
-});
+// The send key and what messages sent while a bot works do, as POST /api/chat's whenBusy. A message already sent keeps
+// its own. The send button's tooltip names the send key.
+const showSendKey = () => { $("send").title = settings.sendKey === "ctrlEnter" ? "Send (Ctrl+Enter)" : "Send (Enter)"; };
+for (const [id, key] of [["set-send-key", "sendKey"], ["set-when-busy", "whenBusy"]]) {
+  $(id).value = settings[key];
+  $(id).addEventListener("change", (event) => {
+    settings[key] = event.target.value;
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+    showSendKey();
+  });
+}
+showSendKey();
 
 // The quick replies and quick emoji save as the owner types. Leaving a field tidies it to what was kept: one phrase
 // per line, the emoji spaced out with anything that isn't one dropped.
