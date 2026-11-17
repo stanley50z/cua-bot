@@ -75,7 +75,7 @@ A bot talks to you only through its `send_message` tool ([src/bots.ts](../src/bo
 - Each message shows its time under it. Hover for the full date.
 - While a reply runs, the chat title says Working or Using the computer.
 - Enter sends, Shift+Enter adds a line, the stop button ends the current reply. A touch keyboard [differs](#on-a-phone).
-- A message sent while the bot is busy reaches it after the tool call it's running, in the same turn, so you can correct it without pressing stop. A running computer-use task also gets the message after its own current step. Settings > Chat can make it wait for the turn to end instead.
+- A message sent while the bot is busy reaches it after the tool call it's running, in the same turn, so you can correct it without pressing stop. A running computer-use task stops once its current action finishes, so the bot reads the message right away and starts a new task if one is needed. Settings > Chat can make it wait for the turn to end instead.
 
 **Tool steps.** With Show tool steps on, each tool the bot used shows as a chip above its reply. Chips from consecutive steps that sent nothing run on in one wrapping row, up to the next message. Click a finished chip for the tool's result; screenshots appear as thumbnails, and clicking one opens it in the image viewer. A turn where nothing needs you shows only its chips. With the setting off (the default), that turn shows nothing.
 
@@ -141,7 +141,7 @@ Saved in this browser's `localStorage` (`cua-bot.settings`), so each browser kee
 | Show tool steps | off | See [Chat](#chat) |
 | Show routine runs | off | See [Chat](#chat) |
 | Take control when I open the live screen | on | See [Expanded screen and Take control](#expanded-screen-and-take-control) |
-| Messages sent while a bot is working | After its current step | After its current step puts the message in the running turn and any running computer-use task; When it finishes holds it for a turn of its own |
+| Messages sent while a bot is working | After its current step | After its current step puts the message in the running turn and stops any running computer-use task after its current action; When it finishes holds it for a turn of its own |
 | Quick replies | Yes, No, Explain | One phrase per line |
 | Quick emoji | 👍 👎 ❤️ 😂 🎉 😮 | Typed or pasted in any spacing; anything that isn't an emoji is dropped when you leave the field. Clearing it hides the smiley. |
 

@@ -17,6 +17,7 @@ import { createNodePhotonImages } from "@earendil-works/pi-durable/images/node";
 import type { ImageProcessor } from "@earendil-works/pi-durable/tools";
 import { botLookup, createBots, createBotsExtension } from "../src/bots.ts";
 import { BOT_MESSAGE, type ChatEvent, type ChatItem, REACTION, reactionText, SEND_MESSAGE, toChatItem, toChatLive } from "../src/chat.ts";
+import { runComputerTask, stoppedReport } from "../src/computer.ts";
 import { createMemory } from "../src/memory.ts";
 import { createPcExtensions } from "../src/pc.ts";
 import { createScreenControl, type ScreenControl } from "../src/screen-control.ts";
@@ -397,12 +398,27 @@ test("a message sent while the bot works reaches it after the current tool round
 	}
 });
 
-// Shaped like computer_use in src/computer.ts: the bot waits on a child conversation that does the work. `onChild` runs
-// once the child exists; `idle` leaves it without a run, as when another task still holds the Space.
-const delegateExtension = (onChild: () => Promise<void>, idle = false) =>
-	defineExtension({
+// A child action that runs until `release` resolves; `started` resolves once it runs.
+const holdTool = (started: PromiseWithResolvers<void>, release: Promise<void>) =>
+	defineTool({
+		name: "hold",
+		description: "Click and wait for the page.",
+		parameters: Type.Object({}),
+		execute: async () => {
+			started.resolve();
+			await release;
+			return { output: [{ type: "text" as const, text: "Clicked." }] };
+		},
+	});
+
+// Shaped like computer_use in src/computer.ts: the bot waits on a child conversation that does the work, through the
+// same runComputerTask(). `queue` stands in for waiting for the Space's screen; `tool` is the child's one action.
+const delegateExtension = (options: { queue?: <T>(work: () => Promise<T>) => Promise<T>; tool?: ReturnType<typeof holdTool> } = {}) => {
+	const tool = options.tool ?? lookTool;
+	return defineExtension({
 		name: "delegate",
 		tools: [
+			tool,
 			defineTool({
 				name: "computer_use",
 				description: "Delegate an on-screen task.",
@@ -410,18 +426,22 @@ const delegateExtension = (onChild: () => Promise<void>, idle = false) =>
 				execute: async (_args, api, callContext) => {
 					const child = await api.commit(async (tx) => {
 						const { id } = await tx.createConversation({ ownership: { kind: "task", taskId: api.taskId } });
-						await configure(tx, id, { model: MODEL, tools: [lookTool], modelTools: [lookTool] });
+						await configure(tx, id, { model: MODEL, tools: [tool], modelTools: [tool] });
 						return id;
 					}, callContext);
 					await api.details({ conversationId: child }, callContext);
-					await onChild();
-					if (!idle) await (await (await api.conversation(child, callContext))!.submit({ type: "input", content: "click it" }, callContext)).wait(callContext);
-					return { output: [{ type: "text" as const, text: "Clicked." }], details: { conversationId: child } };
+					const settled = await runComputerTask(api, child, { type: "input", content: "click it" }, callContext, options.queue);
+					const text = settled === "stopped" ? await stoppedReport(api, child, callContext) : "Clicked.";
+					return { output: [{ type: "text" as const, text }], details: { conversationId: child } };
 				},
 			}),
 		],
 	});
+};
 const delegate = fauxAssistantMessage([fauxToolCall("computer_use", {}, { id: "call-1" })], { stopReason: "toolUse" });
+// The tool results a model request carries, oldest first.
+const results = (context: Parameters<FauxResponseFactory>[0]) =>
+	context.messages.flatMap((message) => (message.role === "toolResult" ? [message.content.map((part) => (part.type === "text" ? part.text : "")).join("")] : []));
 
 test("the live state says which Space a running computer_use call is on", () => {
 	const tool = (details: unknown) => toChatLive({ tools: [{ callId: "a", name: "computer_use", status: "running", details }] } as never).tools[0];
@@ -429,54 +449,95 @@ test("the live state says which Space a running computer_use call is on", () => 
 	assert.deepEqual(tool(null), { callId: "a", name: "computer_use", status: "running" }, "no Space until the call has picked one");
 });
 
-test("a steer reaches the running computer_use child at its next step, and the bot when that call returns", async () => {
-	const started = Promise.withResolvers<void>();
-	const finish = Promise.withResolvers<void>();
-	let childSaw: string[] = [];
+test("a steer while the computer_use child runs an action lets it finish, then ends the call so the bot reads the steer", async () => {
+	const holding = Promise.withResolvers<void>();
+	const release = Promise.withResolvers<void>();
 	let botSaw: string[] = [];
+	let botResults: string[] = [];
 	const bot = await open(
 		[
 			delegate,
-			async () => {
-				started.resolve();
-				await finish.promise;
-				return fauxAssistantMessage([fauxToolCall("look", {}, { id: "child-1" })], { stopReason: "toolUse" });
-			},
-			(context) => {
-				childSaw = told(context);
-				return fauxAssistantMessage([fauxText("Clicked the other window.")]);
-			},
+			fauxAssistantMessage([fauxToolCall("hold", {}, { id: "child-1" })], { stopReason: "toolUse" }),
+			// The child would take its next action here; the bot's reply must come instead.
 			(context) => {
 				botSaw = told(context);
-				return send("Done.");
+				botResults = results(context);
+				return send("Switching windows.");
 			},
 			end,
 		],
 		undefined,
 		undefined,
-		{ extensions: [delegateExtension(async () => {})] },
+		{ extensions: [delegateExtension({ tool: holdTool(holding, release.promise) })] },
 	);
 	try {
 		await collect(bot.base, wentIdle, async () => {
 			await post(bot.base, "/api/chat", { text: "do it" });
-			await started.promise;
+			await holding.promise;
 			assert.equal((await post(bot.base, "/api/chat", { text: "use the other window" })).status, 202);
+			release.resolve();
+		});
+		assert.deepEqual(botSaw, ["do it", "use the other window"]);
+		assert.match(botResults[0]!, /^Stopped early/);
+		assert.match(botResults[0]!, /^- hold$/m, "the action in progress finished");
+	} finally {
+		release.resolve();
+		await bot.close();
+	}
+});
+
+test("a steer while the computer_use child thinks ends the call before its next action", async () => {
+	const thinking = Promise.withResolvers<void>();
+	const finish = Promise.withResolvers<void>();
+	let looked = 0;
+	let botResults: string[] = [];
+	const counted = defineTool({
+		name: "hold",
+		description: "Click.",
+		parameters: Type.Object({}),
+		execute: async () => {
+			looked += 1;
+			return { output: [{ type: "text" as const, text: "Clicked." }] };
+		},
+	});
+	const bot = await open(
+		[
+			delegate,
+			async () => {
+				thinking.resolve();
+				await finish.promise;
+				return fauxAssistantMessage([fauxToolCall("hold", {}, { id: "child-1" })], { stopReason: "toolUse" });
+			},
+			(context) => {
+				botResults = results(context);
+				return send("Switching windows.");
+			},
+			end,
+		],
+		undefined,
+		undefined,
+		{ extensions: [delegateExtension({ tool: counted })] },
+	);
+	try {
+		await collect(bot.base, wentIdle, async () => {
+			await post(bot.base, "/api/chat", { text: "do it" });
+			await thinking.promise;
+			await post(bot.base, "/api/chat", { text: "use the other window" });
 			finish.resolve();
 		});
-		assert.equal(childSaw[0], "click it");
-		assert.equal(childSaw.length, 2);
-		assert.match(childSaw[1]!, /use the other window$/);
-		assert.deepEqual(botSaw, ["do it", "use the other window"]);
+		assert.equal(looked, 0);
+		assert.match(botResults[0]!, /No step was taken/);
 	} finally {
 		finish.resolve();
 		await bot.close();
 	}
 });
 
-test("a followUp leaves the running computer_use child alone", async () => {
+test("a followUp lets the running computer_use call finish its task", async () => {
 	const started = Promise.withResolvers<void>();
 	const finish = Promise.withResolvers<void>();
 	let childSaw: string[] = [];
+	let botResults: string[] = [];
 	const bot = await open(
 		[
 			delegate,
@@ -489,14 +550,17 @@ test("a followUp leaves the running computer_use child alone", async () => {
 				childSaw = told(context);
 				return fauxAssistantMessage([fauxText("Clicked.")]);
 			},
-			send("Done."),
+			(context) => {
+				botResults = results(context);
+				return send("Done.");
+			},
 			end,
 			send("Noted."),
 			end,
 		],
 		undefined,
 		undefined,
-		{ extensions: [delegateExtension(async () => {})] },
+		{ extensions: [delegateExtension()] },
 	);
 	try {
 		await collect(bot.base, wentIdle, async () => {
@@ -506,21 +570,24 @@ test("a followUp leaves the running computer_use child alone", async () => {
 			finish.resolve();
 		});
 		assert.deepEqual(childSaw, ["click it"]);
+		assert.equal(botResults[0], "Clicked.");
 	} finally {
 		finish.resolve();
 		await bot.close();
 	}
 });
 
-test("a steer while the computer_use child has no run still reaches the bot", async () => {
+test("a steer while computer_use waits for the screen ends the call without starting it", async () => {
 	const waiting = Promise.withResolvers<void>();
 	const finish = Promise.withResolvers<void>();
 	let botSaw: string[] = [];
+	let botResults: string[] = [];
 	const bot = await open(
 		[
 			delegate,
 			(context) => {
 				botSaw = told(context);
+				botResults = results(context);
 				return send("Done.");
 			},
 			end,
@@ -529,10 +596,13 @@ test("a steer while the computer_use child has no run still reaches the bot", as
 		undefined,
 		{
 			extensions: [
-				delegateExtension(async () => {
-					waiting.resolve();
-					await finish.promise;
-				}, true),
+				delegateExtension({
+					queue: async (work) => {
+						waiting.resolve();
+						await finish.promise;
+						return work();
+					},
+				}),
 			],
 		},
 	);
@@ -544,6 +614,7 @@ test("a steer while the computer_use child has no run still reaches the bot", as
 			finish.resolve();
 		});
 		assert.deepEqual(botSaw, ["do it", "use the other window"]);
+		assert.match(botResults[0]!, /No step was taken/);
 	} finally {
 		finish.resolve();
 		await bot.close();

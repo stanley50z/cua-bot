@@ -15,19 +15,27 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import type { Context } from "@earendil-works/chord/context";
+import type { AssistantMessage, ToolResultMessage } from "@earendil-works/pi-ai";
 import { embedded } from "@trycua/cua";
 import { Type } from "typebox";
 import {
 	AssistantEntry,
 	configure,
 	type ConversationId,
+	type Cursor,
 	defineDoc,
 	defineExtension,
 	defineTool,
+	type EntryRecord,
 	type Extension,
 	type Harness,
+	type InputSubmissionDraft,
+	LiveDoc,
+	type Page,
 	type Registry,
+	type SettledSubmissionRecord,
 	type ToolExecutionApi,
+	ToolResultEntry,
 	type ToolRegistration,
 } from "@earendil-works/pi-durable";
 import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
@@ -343,10 +351,11 @@ const computerUse = defineTool({
 			return id;
 		}, callContext);
 		await api.details({ conversationId: child, space: space.name ?? space.id }, callContext);
-		const handle = await api.conversation(child, callContext);
-		if (handle === undefined) throw new Error("computer_use lost its child conversation");
 		const request = { type: "input", content: `${instructions}\n\nTask:\n${task}`, requestId: `computer:${api.taskId}` } as const;
-		const settled = await onScreen(space.id, async () => (await handle.submit(request, callContext)).wait(callContext));
+		const settled = await runComputerTask(api, child, request, callContext, (work) => onScreen(space.id, work));
+		if (settled === "stopped") {
+			return { output: [{ type: "text", text: await stoppedReport(api, child, callContext) }], details: { conversationId: child } };
+		}
 		if (settled.status !== "done" || settled.type !== "input") {
 			throw new Error(`computer_use failed: ${settled.status}`);
 		}
@@ -359,6 +368,133 @@ const computerUse = defineTool({
 		};
 	},
 });
+
+// How to stop each computer_use call in progress, by its child conversation. Filled by runComputerTask().
+const stops = new Map<ConversationId, () => void>();
+
+/**
+ * Used by src/chat.ts when the owner steers a bot. Ends the computer_use call driving `child` as soon as the child's
+ * action in progress returns, so the bot reads the owner's message next. Does nothing when no call drives `child`.
+ */
+export function stopComputerTask(child: ConversationId): void {
+	stops.get(child)?.();
+}
+
+/**
+ * Runs `request` in computer_use's child conversation `child` and returns its settled submission, or "stopped" when
+ * stopComputerTask() ended it first. `queue` holds the run until the Space's screen is free; a call stopped while it
+ * waits never starts. Used by computer_use, and by tests shaped like it.
+ */
+export async function runComputerTask(
+	api: Pick<ToolExecutionApi, "conversation" | "watchDoc">,
+	child: ConversationId,
+	request: InputSubmissionDraft,
+	context: Context,
+	queue = <T>(work: () => Promise<T>) => work(),
+): Promise<SettledSubmissionRecord | "stopped"> {
+	const stop = Promise.withResolvers<"stopped">();
+	let stopped = false;
+	stops.set(child, () => {
+		stopped = true;
+		stop.resolve("stopped");
+	});
+	try {
+		return await queue(async () => {
+			if (stopped) return "stopped";
+			const handle = await api.conversation(child, context);
+			if (handle === undefined) throw new Error("computer_use lost its child conversation");
+			const settled = (await handle.submit(request, context)).wait(context);
+			const first = await Promise.race([settled, stop.promise]);
+			if (first !== "stopped") return first;
+			await actionEnds(api, child, context);
+			await handle.abort(context);
+			const last = await settled;
+			return last.status === "done" ? last : "stopped";
+		});
+	} finally {
+		stops.delete(child);
+	}
+}
+
+// Resolves once none of `child`'s tool calls is running: at once while its model thinks or between two calls, else when
+// the call in progress returns.
+async function actionEnds(api: Pick<ToolExecutionApi, "watchDoc">, child: ConversationId, context: Context): Promise<void> {
+	const idle = (live: { tools?: readonly { status: string }[] } | undefined) => !live?.tools?.some((tool) => tool.status === "running");
+	const watch = await api.watchDoc(LiveDoc, child, context);
+	if (watch === undefined || idle(watch.value)) {
+		await watch?.stop();
+		return;
+	}
+	const ended = Promise.withResolvers<void>();
+	watch.start(async (call) => {
+		if (call.kind === "value" && idle(call.value)) ended.resolve();
+	});
+	await ended.promise;
+	await watch.stop();
+}
+
+/** What computer_use answers when the owner's steer stopped it: that it stopped, and the steps its child took. */
+export async function stoppedReport(api: Pick<ToolExecutionApi, "commit">, child: ConversationId, context: Context): Promise<string> {
+	const steps = await stepsOf((cursor) => api.commit((tx) => tx.scanEntries({ conversationId: child, order: "ascending" }, 200, cursor), context));
+	const lines = steps.map((step) => `- ${step.name}${step.detail === "" ? "" : ` ${step.detail}`}${step.status === "done" ? "" : ` (${step.status === "error" ? "failed" : "cut off"})`}`);
+	return [
+		"Stopped early: the owner sent you a new message, which follows. The task is unfinished; the screen is as the last step left it.",
+		lines.length === 0 ? "No step was taken." : `Steps taken:\n${lines.join("\n")}`,
+	].join("\n");
+}
+
+const MAX_STEPS = 40;
+const DETAIL_LIMIT = 80;
+
+/** One tool call of a computer_use child, for the portal's step log (src/computer-view.ts) and stoppedReport(). */
+export type ComputerStep = { callId: string; name: string; detail: string; at: number; status: "running" | "done" | "error" };
+
+const clipDetail = (text: string) => (text.length > DETAIL_LIMIT ? `${text.slice(0, DETAIL_LIMIT)}…` : text);
+
+/** A short human summary of a driver call's arguments, for one line of the step log. */
+export function stepDetail(args: Record<string, unknown>): string {
+	for (const key of ["text", "app_name", "name", "bundle_id", "element_description", "query", "url", "keys", "key", "command"]) {
+		const value = args[key];
+		if (typeof value === "string" && value !== "") return clipDetail(key === "text" ? `"${value}"` : value);
+		if (Array.isArray(value) && value.length > 0) return clipDetail(value.join("+"));
+	}
+	if (typeof args.x === "number" && typeof args.y === "number") return `at ${args.x}, ${args.y}`;
+	// The driver's session label and image sizing say nothing about what the step did.
+	const { session: _session, max_image_dimension: _a, max_dimension: _b, maxDimension: _c, ...meaningful } = args;
+	const rest = JSON.stringify(meaningful);
+	return rest === "{}" ? "" : clipDetail(rest);
+}
+
+/** The last MAX_STEPS tool calls of a child conversation, oldest first; `page` reads its entries in ascending order. */
+export async function stepsOf(page: (cursor: Cursor | undefined) => Promise<Page<EntryRecord, Cursor>>): Promise<ComputerStep[]> {
+	const steps = new Map<string, ComputerStep>();
+	let cursor: Cursor | undefined;
+	do {
+		const { items, next } = await page(cursor);
+		for (const entry of items) {
+			const message = entry.model?.[0];
+			if (AssistantEntry.is(entry) && message?.role === "assistant") {
+				const reply = message as AssistantMessage;
+				for (const part of reply.content) {
+					if (part.type !== "toolCall") continue;
+					steps.set(part.id, {
+						callId: part.id,
+						name: part.name,
+						detail: stepDetail(part.arguments as Record<string, unknown>),
+						at: reply.timestamp,
+						status: "running",
+					});
+				}
+			} else if (ToolResultEntry.is(entry) && message?.role === "toolResult") {
+				const result = message as ToolResultMessage;
+				const step = steps.get(result.toolCallId);
+				if (step !== undefined) step.status = result.isError ? "error" : "done";
+			}
+		}
+		cursor = next;
+	} while (cursor !== undefined);
+	return [...steps.values()].slice(-MAX_STEPS);
+}
 
 const spaceBash = defineTool({
 	name: "space_bash",

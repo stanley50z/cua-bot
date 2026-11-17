@@ -6,22 +6,9 @@
 import { readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
 import type { Context } from "@earendil-works/chord/context";
-import type { AssistantMessage, ToolResultMessage } from "@earendil-works/pi-ai";
-import {
-	AssistantEntry,
-	type Conversation,
-	type ConversationId,
-	type Cursor,
-	type Harness,
-	type Storage,
-	ToolResultEntry,
-} from "@earendil-works/pi-durable";
-import { taskSpaceName } from "./computer.ts";
+import type { Conversation, ConversationId, Harness, Storage } from "@earendil-works/pi-durable";
+import { type ComputerStep, stepsOf, taskSpaceName } from "./computer.ts";
 
-const MAX_STEPS = 40;
-const DETAIL_LIMIT = 80;
-
-export type ComputerStep = { callId: string; name: string; detail: string; at: number; status: "running" | "done" | "error" };
 export type ComputerSnapshot = {
 	/** The default Space, which the live screen shows. */
 	space?: string;
@@ -30,22 +17,6 @@ export type ComputerSnapshot = {
 	shot?: { name: string; at: number };
 	steps: ComputerStep[];
 };
-
-const clip = (text: string) => (text.length > DETAIL_LIMIT ? `${text.slice(0, DETAIL_LIMIT)}…` : text);
-
-/** A short human summary of a driver call's arguments, for one line of the step log. */
-export function stepDetail(args: Record<string, unknown>): string {
-	for (const key of ["text", "app_name", "name", "bundle_id", "element_description", "query", "url", "keys", "key", "command"]) {
-		const value = args[key];
-		if (typeof value === "string" && value !== "") return clip(key === "text" ? `"${value}"` : value);
-		if (Array.isArray(value) && value.length > 0) return clip(value.join("+"));
-	}
-	if (typeof args.x === "number" && typeof args.y === "number") return `at ${args.x}, ${args.y}`;
-	// The driver's session label and image sizing say nothing about what the step did.
-	const { session: _session, max_image_dimension: _a, max_dimension: _b, maxDimension: _c, ...meaningful } = args;
-	const rest = JSON.stringify(meaningful);
-	return rest === "{}" ? "" : clip(rest);
-}
 
 // computer.ts names screenshots by ISO time (2026-10-31T09-42-00-000Z.png, maybe with a -n suffix), so
 // the newest sorts last. Other files in the folder are ignored.
@@ -57,36 +28,6 @@ async function newestShot(dir: string): Promise<ComputerSnapshot["shot"]> {
 	if (name === undefined) return undefined;
 	const info = await stat(join(dir, name)).catch(() => undefined);
 	return info === undefined ? undefined : { name, at: info.mtimeMs };
-}
-
-async function stepsOf(conversation: Conversation, context: Context): Promise<ComputerStep[]> {
-	const steps = new Map<string, ComputerStep>();
-	let cursor: Cursor | undefined;
-	do {
-		const page = await conversation.entries({ order: "ascending" }, 200, cursor, context);
-		for (const entry of page.items) {
-			const message = entry.model?.[0];
-			if (AssistantEntry.is(entry) && message?.role === "assistant") {
-				const reply = message as AssistantMessage;
-				for (const part of reply.content) {
-					if (part.type !== "toolCall") continue;
-					steps.set(part.id, {
-						callId: part.id,
-						name: part.name,
-						detail: stepDetail(part.arguments as Record<string, unknown>),
-						at: reply.timestamp,
-						status: "running",
-					});
-				}
-			} else if (ToolResultEntry.is(entry) && message?.role === "toolResult") {
-				const result = message as ToolResultMessage;
-				const step = steps.get(result.toolCallId);
-				if (step !== undefined) step.status = result.isError ? "error" : "done";
-			}
-		}
-		cursor = page.next;
-	} while (cursor !== undefined);
-	return [...steps.values()].slice(-MAX_STEPS);
 }
 
 export type ComputerView = ReturnType<typeof createComputerView>;
@@ -117,7 +58,7 @@ export function createComputerView(deps: {
 				...(space === undefined ? {} : { space }),
 				...(taskSpace === undefined ? {} : { taskSpace }),
 				...(await newestShot(shotsDir).then((shot) => (shot === undefined ? {} : { shot }))),
-				steps: child === undefined ? [] : await stepsOf(child, context),
+				steps: child === undefined ? [] : await stepsOf((cursor) => child.entries({ order: "ascending" }, 200, cursor, context)),
 			};
 		},
 	};

@@ -9,7 +9,8 @@ import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { createModels } from "@earendil-works/pi-ai/models";
 import { fauxProvider } from "@earendil-works/pi-ai/providers/faux";
 import { AssistantEntry, createRegistry, Harness, MemoryStorage, ToolResultEntry } from "@earendil-works/pi-durable";
-import { createComputerView, stepDetail } from "../src/computer-view.ts";
+import { stepDetail } from "../src/computer.ts";
+import { createComputerView } from "../src/computer-view.ts";
 
 const context = BACKGROUND_CONTEXT;
 
