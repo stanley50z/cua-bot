@@ -105,7 +105,7 @@ If the bot is working, the change waits for that turn to end, and until then onl
 
 ## Computer pane
 
-The right column shows the default Space's screen live, plus each click and keystroke of the most recent computer-use task. When that task ran on another Space, the steps heading names it. The frame turns amber while the bot is driving the Space on screen. While it works on another Space, the frame stays plain and the status above it names that Space.
+The right column shows a Space's screen live, plus each click and keystroke of the open bot's most recent computer-use task. The screen follows the bots: when any bot starts a computer-use task, the pane switches to that task's Space (the heading names it) and stays there after the task ends, across restarts too. Before any task, it shows the default Space. While you have control, the screen doesn't switch. A task on another Space then runs there, the frame stays plain, and the status above it names that Space. When the open bot's last task ran on a Space other than the one on screen, the steps heading names it. The frame turns amber while a bot is driving the Space on screen.
 
 All open panes share one media session: about 15 fps at the display's native resolution, roughly 100 KB/s on a quiet screen and more when it changes a lot, decoded with WebCodecs. A pane streams only while its tab is visible and the pane is on screen, unless you have control. The session closes when the last pane closes. If the stream is down, or the browser lacks WebCodecs, the pane stays black. The caption says Connecting… while it retries, or that the browser can't play the live screen.
 
@@ -172,7 +172,7 @@ Lists the computers the bot can reach ([src/connections.ts](../src/connections.t
 - a relay Space under the host its `host_name` names,
 - anything else, like cloud Spaces, under Other Spaces.
 
-The Default label marks the bots' default Space: `computer_use`, `space_bash` and `space_read` use it when the bot names no Space, and the live screen shows it. The bots can use every Space listed here. The list is Cua's live one (`list_spaces`, through the same `cua mcp` session as the bots' `cua_*` tools). If Cua doesn't answer, the tab shows `~/.cua/spaces.json` without status and says why.
+The Default label marks the bots' default Space: `computer_use`, `space_bash` and `space_read` use it when the bot names no Space, and the live screen shows it until a computer-use task moves it. The bots can use every Space listed here. The list is Cua's live one (`list_spaces`, through the same `cua mcp` session as the bots' `cua_*` tools). If Cua doesn't answer, the tab shows `~/.cua/spaces.json` without status and says why.
 
 The tab blurs users, SSH addresses, `direct:` Space ids and the database path, so a screenshot doesn't leak them. Click one (or focus it and press Enter) to reveal it until the next check.
 

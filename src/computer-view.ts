@@ -1,4 +1,4 @@
-// What the web portal's computer pane shows: the default Space's name, the newest screenshot, and the
+// What the web portal's computer pane shows: the name of the Space on the live screen, the newest screenshot, and the
 // driver steps of the bot's most recent computer_use run, with the Space it ran on. src/bots.ts builds one per bot with
 // createComputerView() and hands it to createChat(), which pushes fresh snapshots while a computer_use
 // call is running. computer_use runs its driver calls in a child conversation of the bot's (src/computer.ts),
@@ -10,7 +10,7 @@ import type { Conversation, ConversationId, Harness, Storage } from "@earendil-w
 import { type ComputerStep, stepsOf, taskSpaceName } from "./computer.ts";
 
 export type ComputerSnapshot = {
-	/** The default Space, which the live screen shows. */
+	/** The Space the live screen shows. */
 	space?: string;
 	/** The Space the steps ran on. */
 	taskSpace?: string;
@@ -38,8 +38,8 @@ export function createComputerView(deps: {
 	storage: Storage;
 	conversation: Conversation;
 	shotsDir: string;
-	/** The default Space's name, or main.ts's pending lookup of it, which each snapshot waits for. */
-	space?: string | Promise<string | undefined>;
+	/** The name of the Space the live screen shows, read for each snapshot. */
+	space?: () => string | undefined | Promise<string | undefined>;
 	context: Context;
 }) {
 	const { harness, storage, conversation, shotsDir, context } = deps;
@@ -53,7 +53,7 @@ export function createComputerView(deps: {
 			}
 			const child = childId === undefined ? undefined : await harness.conversation(childId, context);
 			const taskSpace = childId === undefined ? undefined : await taskSpaceName(harness, childId, context);
-			const space = await deps.space;
+			const space = await deps.space?.();
 			return {
 				...(space === undefined ? {} : { space }),
 				...(taskSpace === undefined ? {} : { taskSpace }),

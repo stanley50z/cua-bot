@@ -113,12 +113,12 @@ async function collect(base: string, done: (events: ChatEvent[]) => boolean, act
 }
 
 test("the event stream says when a task runs on the live screen, and a failed task stops counting", { timeout: 30_000 }, async () => {
-	const control = createScreenControl();
+	const control = createScreenControl({ space: () => "mac" });
 	const bot = await open(SCRIPT, undefined, undefined, { control });
 	const driving = (events: unknown[]) => (events as { type: string; driving?: boolean }[]).filter((event) => event.type === "control").map((event) => event.driving);
 	try {
 		const events = await collect(bot.base, (seen) => driving(seen).length === 3, async () => {
-			await assert.rejects(control.drive(async () => { throw new Error("task failed"); }), /task failed/);
+			await assert.rejects(control.drive("mac", async () => { throw new Error("task failed"); }), /task failed/);
 		});
 		assert.deepEqual(driving(events), [false, true, false]);
 		assert.equal(control.driving, false);

@@ -1,5 +1,5 @@
-// The computer pane's live view of the default Space. src/main.ts builds one with createLiveScreen(openLiveStream)
-// and src/web.ts streams it to each open pane at GET /api/computer/live. Every pane shares one H.264 media
+// The computer pane's live view of the Space the screen shows (src/screen-control.ts). src/main.ts builds one with
+// createLiveScreen(openLiveStream), restarts it when the screen moves to another Space, and src/web.ts streams it to each open pane at GET /api/computer/live. Every pane shares one H.264 media
 // session: the first viewer opens it, the last one to leave closes it, and a viewer that joins late, or falls
 // behind, skips frames until the next keyframe so its decoder never sees a broken GOP. The same session carries
 // the owner's mouse and keyboard (POST /api/computer/input) while they have control.
@@ -104,6 +104,16 @@ export function createLiveScreen(open: OpenLiveStream) {
 				session = undefined;
 				void stream?.close().catch(() => {});
 			};
+		},
+		/**
+		 * Ends every viewer and closes the media session, so the panes reconnect to a fresh one. src/main.ts calls it when
+		 * the screen moves to another Space.
+		 */
+		restart(reason: string): void {
+			const current = session;
+			const stream = current?.stream;
+			if (current !== undefined) endAll(current, reason);
+			void stream?.close().catch(() => {});
 		},
 		/** How many viewers are subscribed. */
 		watching: () => viewers.size,

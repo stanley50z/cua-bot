@@ -10,7 +10,7 @@ import { createRegistry, defineExtension, Harness, section } from "@earendil-wor
 import { createNodePhotonImages } from "@earendil-works/pi-durable/images/node";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { botLookup, createBots, createBotsExtension, DEFAULT_BOTS_DIR, readBots } from "./bots.ts";
-import { createComputerExtension, defaultSpaceId, defaultSpaceLabel, openLiveStream, registrySpaces, screenControl, spacesText } from "./computer.ts";
+import { createComputerExtension, defaultSpaceId, openLiveStream, registrySpaces, screenControl, spaceLabel, spacesText } from "./computer.ts";
 import { createConnections, listCuaSpaces, probeTcp } from "./connections.ts";
 import { createLiveScreen } from "./live-screen.ts";
 import { createBotToolSearchExtension } from "./tool-search.ts";
@@ -142,9 +142,9 @@ const lookup = botLookup(harness, root);
 const logRoutineSyncFailure = (error: unknown) =>
 	log("routine file sync failed:", error instanceof Error ? error.message : String(error));
 bindRoutines({ harness, bots: lookup, turns, legacyFile: LEGACY_ROUTINE_FILE, onError: logRoutineSyncFailure });
-// The default Space's name for the computer pane. Cua answers it in a round trip, so startup doesn't wait for it:
-// work resumes and routines sync without it, and the pane shows the name once Cua answers.
-const space = defaultSpaceLabel();
+// The name of the Space on the live screen, for the computer pane. Cua answers it in a round trip, which only the
+// pane's snapshots wait for.
+const space = () => (screenControl.space === undefined ? undefined : spaceLabel(screenControl.space));
 harness.resume();
 // The bots come before the first routine sync, so their watch on the bot folders already sees any hand edit to a
 // routines.json that the sync doesn't.
@@ -172,6 +172,13 @@ const mainChat = await bots.chat();
 if (mainChat === undefined) throw new Error("The main bot has no chat.");
 
 const live = createLiveScreen(openLiveStream);
+// When a task moves the screen to another Space, the open panes reconnect to that Space's stream.
+let shownSpace = screenControl.space;
+screenControl.subscribe(() => {
+	if (screenControl.space === shownSpace) return;
+	shownSpace = screenControl.space;
+	live.restart(`the live screen moved to ${shownSpace}`);
+});
 // The Connections tab: this computer, which runs the Harness and every bot, then the owner's SSH machines and the Spaces.
 const defaultSpace = defaultSpaceId();
 const connections = createConnections({

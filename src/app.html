@@ -904,7 +904,7 @@ function markdown(text) {
 const state = { bot: null, bots: [], items: [], ids: new Set(), before: null, live: { busy: false, partial: "", tools: [] }, queued: [], open: new Set(), computer: { steps: [] }, approvals: [], picking: null, tapped: null, reacting: new Map() };
 // The expanded live screen (see "expanded live screen" below): whether the owner has control of the Space, whether
 // any bot's task is running on it, the keys they hold down there, and their input on its way.
-const view = { owner: false, driving: false, held: new Map(), queue: [], sending: null, lastMove: 0 };
+const view = { space: undefined, owner: false, driving: false, held: new Map(), queue: [], sending: null, lastMove: 0 };
 // The owner's display choices, kept in this browser. `botTalk` shows the messages bots send each other, `tools` the
 // tool chips and screenshots in replies, `routineRuns` the line each routine firing leaves in its chat,
 // `controlOnExpand` makes clicking an undriven live screen take control. `phrases` and `emoji` are the quick replies
@@ -1831,8 +1831,8 @@ function renderLive() {
   label.className = "state" + (live.retry ? " bad" : driving ? " drive" : live.busy ? " busy" : "");
   label.textContent = live.retry ? `Retrying after an error: ${live.retry.error}` : driving ? "Using the computer" : live.busy ? (live.partial ? "Replying" : "Working") : "";
   $("stop").hidden = !live.busy;
-  // The pane shows only the default Space, so a task on another Space neither drives this screen nor waits for the
-  // owner. `view.driving` covers every bot's task there; the open bot's own task also counts while it is starting.
+  // The pane shows one Space, the one the bots last drove, so a task on another Space while the owner has control
+  // neither drives this screen nor waits for the owner. `view.driving` covers every bot's task there; the open bot's own task also counts while it is starting.
   const onScreen = view.driving || (driving && task.space === state.computer.space);
   const elsewhere = driving && !onScreen ? task.space : undefined;
   // While the owner has control, a running computer task waits for them instead of driving.
@@ -1879,7 +1879,7 @@ function captionScreen() {
 }
 
 /* ---------- live screen ---------- */
-// GET /api/computer/live (src/live-screen.ts) streams the default Space's screen as H.264 access units, each a
+// GET /api/computer/live (src/live-screen.ts) streams the shown Space's screen as H.264 access units, each a
 // 1-byte flag (1 = keyframe), a 4-byte big-endian length, then Annex-B bytes. WebCodecs decodes them onto
 // the pane's canvas. The pane streams only while it is watched (see watching), and reconnects with backoff after a
 // failure. Without WebCodecs, or while the stream is down, the pane stays black.
@@ -2172,7 +2172,13 @@ function connect() {
     else if (data.type === "computer") { state.computer = data.computer; renderComputer(); }
     else if (data.type === "approvals") { state.approvals = data.approvals; renderChat(); }
     else if (data.type === "bots") { state.bots = data.bots; renderBots(); refreshBotTags(); }
-    else if (data.type === "control") { view.driving = data.driving; applyControl(data.owner); }
+    else if (data.type === "control") {
+      // A task moved the live screen to another Space, so the pane's heading names that one.
+      if (view.space !== undefined && data.space !== view.space) loadComputer(state.bot);
+      view.space = data.space;
+      view.driving = data.driving;
+      applyControl(data.owner);
+    }
   };
 }
 
@@ -2311,9 +2317,13 @@ async function selectBot(id, push = false) {
   renderChat();
   renderComputer();
   connect();
-  request("GET", "/api/chat/computer?bot=" + id).then((c) => { if (id === state.bot) { state.computer = c; renderComputer(); } }).catch(() => {});
+  loadComputer(id);
   await loadHistory().catch((error) => showChatError("Could not load the conversation: " + error.message));
   if (place.view === "chat") focusChat();
+}
+
+function loadComputer(id) {
+  request("GET", "/api/chat/computer?bot=" + id).then((c) => { if (id === state.bot) { state.computer = c; renderComputer(); } }).catch(() => {});
 }
 
 // The bot dialog's avatar: `picked` is what it shows and what Save sends; Reset goes back to `pickDefault`,
@@ -2874,7 +2884,7 @@ function spaceList(spaces) {
     head.append(el("b", "", space.name || space.id));
     if (space.isDefault) {
       const tag = el("span", "default", "Default");
-      tag.title = "The bots' default Space: computer_use and space_bash use it when the bot names no Space, and the live screen shows it";
+      tag.title = "The bots' default Space: computer_use and space_bash use it when the bot names no Space, and the live screen shows it until a computer task moves it";
       head.append(tag);
     }
     // A `direct:<host>:<port>` id carries the machine's address.

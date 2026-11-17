@@ -352,7 +352,7 @@ test("the owner takes control, drives the Mac through the live session, and hand
 		setImmediate(() => sink.frame({ keyframe: true, data: new Uint8Array([0, 0, 1, 0x67]) }));
 		return { requestKeyframe: () => {}, input: (events) => void sent.push(events), close: async () => {} };
 	});
-	const control = createScreenControl();
+	const control = createScreenControl({ space: () => "mac" });
 	const server = createBotServer({ say: async () => "", context, live, control });
 	await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
 	const address = server.address();
@@ -373,7 +373,7 @@ test("the owner takes control, drives the Mac through the live session, and hand
 		const taken = await fetch(`${base}/api/computer/control`, { method: "POST", body: JSON.stringify({ owner: true }) });
 		assert.deepEqual(await taken.json(), { owner: true });
 		let botResumed = false;
-		void control.botTurn().then(() => (botResumed = true));
+		void control.botTurn("mac").then(() => (botResumed = true));
 		assert.equal(await post("/api/computer/input", { events: click }), 204);
 		assert.deepEqual(sent, [click]);
 		assert.equal(await post("/api/computer/input", { events: [{ kind: "launch", app: "Terminal" }] }), 400);
@@ -414,6 +414,7 @@ test("GET /api/computer/live frames each access unit as flag, length, bytes, and
 				setImmediate(() => end("done"));
 				return () => void unsubscribed++;
 			},
+			restart: () => {},
 			watching: () => 0,
 			input: () => false,
 		},

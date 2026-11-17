@@ -1,6 +1,6 @@
 // The bot's HTTP surface on 127.0.0.1: the web portal at GET / with its service worker at /sw.js and web app manifest at /manifest.webmanifest, its JSON
 // API under /api/ (the bot list and its edits, routines CRUD, each bot's chat history/send/react/stop and the owner's pasted images, a server-sent
-// event stream of one bot's live chat state, Web Push subscriptions, the Connections tab's check, start at sign-in, the bots' model and reasoning effort, and the default Space's live screen with the owner's control of it), screenshots under /shots/, and the original POST /say. Listens on loopback only, no auth; an HTTPS proxy such as Tailscale Serve can
+// event stream of one bot's live chat state, Web Push subscriptions, the Connections tab's check, start at sign-in, the bots' model and reasoning effort, and the live screen of the Space the bots last drove, with the owner's control of it), screenshots under /shots/, and the original POST /say. Listens on loopback only, no auth; an HTTPS proxy such as Tailscale Serve can
 // reach it under a name in allowedHosts. isOwnRequest refuses requests other sites make through the owner's browser.
 // Mutations go through the routines manager and the chat module, so every surface agrees.
 import { readFile } from "node:fs/promises";
@@ -125,9 +125,9 @@ export type BotServerDeps = {
 	/** Fits pasted chat images to the model's limits, converting formats it does not take. Without it, images pass as they are. */
 	images?: ImageProcessor;
 	shotsDir?: string;
-	/** Enables GET /api/computer/live: the default Space's screen as a stream of H.264 access units. */
+	/** Enables GET /api/computer/live: the shown Space's screen as a stream of H.264 access units. */
 	live?: LiveScreen;
-	/** With `live`, enables POST /api/computer/control and /api/computer/input: the owner driving that Space. */
+	/** With `live`, enables POST /api/computer/control and /api/computer/input: the owner driving the shown Space. */
 	control?: ScreenControl;
 	/** Enables GET/POST /api/push: the VAPID public key, and a browser's push subscription. */
 	push?: Push;
@@ -206,14 +206,14 @@ function reactionInput(body: unknown): { entryId: number; emoji: string; on: boo
 }
 
 // One SSE client of one bot's chat: a `live` snapshot right away, then every chat event, the full
-// approvals list whenever it changes, the bot list whenever it changes, and who drives the default Space (a `control`
-// event with `owner` and `driving`, right away and on every change), until the socket closes.
+// approvals list whenever it changes, the bot list whenever it changes, and the Space on the live screen and who
+// drives it (a `control` event with `space`, `owner` and `driving`, right away and on every change), until the socket closes.
 function streamChat(req: IncomingMessage, res: ServerResponse, chat: Chat, bots: Bots, deps: BotServerDeps): void {
 	res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-store", connection: "keep-alive" });
 	const send = (event: unknown) => res.write(`data: ${JSON.stringify(event)}\n\n`);
 	send({ type: "live", live: chat.live });
 	const { control } = deps;
-	const sendControl = () => control && send({ type: "control", owner: control.owner, driving: control.driving });
+	const sendControl = () => control && send({ type: "control", space: control.space, owner: control.owner, driving: control.driving });
 	sendControl();
 	const unsubscribe = chat.subscribe(send);
 	const unwatch = deps.approvals?.subscribe((list) => send({ type: "approvals", approvals: list }));
@@ -257,7 +257,7 @@ function streamLive(res: ServerResponse, live: LiveScreen, control: ScreenContro
 	});
 }
 
-// The owner driving the default Space from the expanded live view. POST /api/computer/control with `{ owner }` takes
+// The owner driving the shown Space from the expanded live view. POST /api/computer/control with `{ owner }` takes
 // control (the bots' on-screen steps wait) or hands it back; POST /api/computer/input with `{ events }`
 // performs the owner's mouse and keyboard on the Space, in order, and is refused while the bots have control.
 async function routeControl(req: IncomingMessage, res: ServerResponse, deps: BotServerDeps, url: URL, method: string) {

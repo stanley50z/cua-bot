@@ -116,3 +116,20 @@ test("input goes over the open session, and is refused until one is open", async
 	assert.equal(live.watching(), 0);
 	assert.equal(live.input(typed), false);
 });
+
+test("restart ends every viewer and closes the session, and the next viewer opens a fresh one", async () => {
+	const { mac, open } = fakeMac();
+	const live = createLiveScreen(open);
+	const ended: string[] = [];
+	live.subscribe(() => true, (reason) => ended.push(reason));
+	await settle();
+	live.restart("moved to the PC");
+	await settle();
+	assert.deepEqual(ended, ["moved to the PC"]);
+	assert.equal(mac.closes, 1);
+	assert.equal(live.watching(), 0);
+
+	live.subscribe(() => true, () => {});
+	await settle();
+	assert.equal(mac.opens, 2);
+});

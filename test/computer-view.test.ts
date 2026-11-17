@@ -63,7 +63,7 @@ test("a snapshot pairs the child's driver calls with their results and shows the
 		await writeFile(join(dir, "notes.txt"), "not a shot");
 		await writeFile(join(dir, "zz-browser-test.png"), "a png the bot did not take");
 
-		const view = createComputerView({ harness, storage, conversation: root, shotsDir: dir, space: "Mac mini", context });
+		const view = createComputerView({ harness, storage, conversation: root, shotsDir: dir, space: () => "Mac mini", context });
 		const snapshot = await view.snapshot(child.id);
 		assert.equal(snapshot.space, "Mac mini");
 		assert.equal(snapshot.shot?.name, "2026-10-31T09-42-00-000Z.png");
@@ -79,10 +79,10 @@ test("a snapshot pairs the child's driver calls with their results and shows the
 		const empty = await createComputerView({ harness, storage, conversation: root, shotsDir: join(dir, "missing"), context }).snapshot();
 		assert.deepEqual(empty, { steps: [] }, "no owned child and no shots folder");
 
-		// main.ts hands over its Cua lookup of the name unanswered, so startup doesn't wait on it; the pane waits instead.
-		let answer: (name: string) => void = () => {};
-		const pending = createComputerView({ harness, storage, conversation: root, shotsDir: dir, space: new Promise((resolve) => (answer = resolve)), context }).snapshot();
-		answer("Mac mini");
+		// main.ts's lookup of the name takes a Cua round trip, which the snapshot waits for.
+		const name = Promise.withResolvers<string>();
+		const pending = createComputerView({ harness, storage, conversation: root, shotsDir: dir, space: () => name.promise, context }).snapshot();
+		name.resolve("Mac mini");
 		assert.equal((await pending).space, "Mac mini", "the name from a lookup that answers later");
 	} finally {
 		await harness.close(context);

@@ -95,7 +95,7 @@ All three take `space`, a Space's name (any case) or its id. Without it they use
 
 Each Space's driver tools sit in their own extension, `space:<id>`, installed by that Space's first `computer_use` call, because a Mac and a Windows PC both have a `click` with different schemas. Only that Space's child selects the extension. The main agent never gets driver tools: `tool_search` skips them and code mode can't call them. To call one driver tool directly, a bot uses `cua_call_tool` with the Space's id.
 
-The live screen and Take control stay on the default Space. Owner control pauses only that Space's driver calls.
+The live screen and Take control follow the bots: they show the Space a `computer_use` task last started on, or the default until one has. `data/screen.json` keeps that Space across restarts. While you have control, the screen stays put, a task on another Space runs there unseen, and owner control pauses only the shown Space's driver calls. Code: [src/screen-control.ts](../src/screen-control.ts).
 
 ### Coding tools on every machine
 

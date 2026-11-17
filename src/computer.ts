@@ -47,6 +47,8 @@ import { createScreenControl } from "./screen-control.ts";
 
 const SHOT_EDGE = 1200;
 const SHOTS_DIR = join(import.meta.dirname, "..", "data", "shots");
+// The Space the live screen last moved to, so it shows the same one after a restart: `{ "space": "<id>" }`.
+const SCREEN_FILE = join(import.meta.dirname, "..", "data", "screen.json");
 const CHILD_BRIEF = [
 	"Operate the computer only with your tools.",
 	"Take a screenshot first (get_desktop_state returns one).",
@@ -176,15 +178,22 @@ export async function listSpaces(): Promise<SpaceEntry[]> {
 	}
 }
 
-/** The bots' default Space: CUA_SPACE_ID, else the first in ~/.cua/spaces.json. The live screen shows it. */
+/** The bots' default Space: CUA_SPACE_ID, else the first in ~/.cua/spaces.json. The live screen shows it until a task moves it. */
 export function defaultSpaceId(): string | undefined {
 	return process.env.CUA_SPACE_ID?.trim() || registrySpaces()[0]?.id;
 }
 
-/** Used by main.ts and preflight.ts. The default Space's display name, falling back to its id. */
+const labels = new Map<string, Promise<string>>();
+
+/** Used by main.ts for the computer pane. A Space's display name, falling back to its id; looked up once per Space. */
+export function spaceLabel(id: string): Promise<string> {
+	return once(labels, id, async () => (await listSpaces()).find((space) => space.id === id)?.name ?? id);
+}
+
+/** Used by preflight.ts. The default Space's display name, falling back to its id. */
 export async function defaultSpaceLabel(): Promise<string | undefined> {
 	const id = defaultSpaceId();
-	return (await listSpaces()).find((space) => space.id === id)?.name ?? id;
+	return id === undefined ? undefined : spaceLabel(id);
 }
 
 /**
@@ -305,16 +314,34 @@ export async function captureScreenshot(ref?: string): Promise<string> {
 	return savePng(new Uint8Array(shot.image));
 }
 
+function savedScreen(): string | undefined {
+	try {
+		const { space } = JSON.parse(readFileSync(SCREEN_FILE, "utf8")) as { space?: unknown };
+		return typeof space === "string" && space !== "" ? space : undefined;
+	} catch {
+		return undefined;
+	}
+}
+
+const saved = savedScreen();
+
 /**
- * Used by src/main.ts for the web portal's Take control of the default Space, the one the live screen shows. While the
- * owner has control, every driver call on that Space waits.
+ * Used by src/main.ts for the web portal's live screen and Take control. It shows the Space a computer_use task last
+ * started on (kept in data/screen.json), else the default. While the owner has control, every driver call on that
+ * Space waits.
  */
-export const screenControl = createScreenControl();
+export const screenControl = createScreenControl({
+	space: () => saved ?? defaultSpaceId(),
+	shown: (space) => {
+		mkdirSync(join(SCREEN_FILE, ".."), { recursive: true });
+		writeFileSync(SCREEN_FILE, `${JSON.stringify({ space })}\n`);
+	},
+});
 
 // Bots that share a Space share its screen, so computer_use runs one task at a time on each Space.
 const screens = new Map<string, Promise<unknown>>();
 function onScreen<T>(id: string, work: () => Promise<T>): Promise<T> {
-	const run = (screens.get(id) ?? Promise.resolve()).then(() => (id === defaultSpaceId() ? screenControl.drive(work) : work()));
+	const run = (screens.get(id) ?? Promise.resolve()).then(() => screenControl.drive(id, work));
 	screens.set(id, run.catch(() => undefined));
 	return run;
 }
@@ -570,13 +597,15 @@ export function readFromSpace(read: ToolRegistration, download: SpaceDownload): 
 let spaceRead = readFromSpace(createReadTool(), downloadFromSpace);
 
 /**
- * Used by src/main.ts as createLiveScreen's opener (src/live-screen.ts). An H.264 stream of the default Space's
- * primary display, decoded by the web portal, that also takes the owner's input while they have control. The SDK's own
- * streamSession needs the Cua Spaces app's streaming client, so this mints a media ticket and attaches to it
- * directly.
+ * Used by src/main.ts as createLiveScreen's opener (src/live-screen.ts). An H.264 stream of the primary display of the
+ * Space screenControl shows (the default when that Space is gone from Cua's list), decoded by the web portal, that also
+ * takes the owner's input while they have control. The SDK's own streamSession needs the Cua Spaces app's streaming
+ * client, so this mints a media ticket and attaches to it directly.
  */
 export const openLiveStream: OpenLiveStream = async (sink) => {
-	const space = await connectSpace((await resolveSpace(undefined)).id);
+	const listed = await listSpaces();
+	const shown = listed.some((space) => space.id === screenControl.space) ? screenControl.space : undefined;
+	const space = await connectSpace(pickSpace(listed, shown, defaultSpaceId()).id);
 	const ticket = await space.openStream({ codecs: ["h264"], maxFps: 15, maxDimension: 0, audio: false, policy: "allow_activation" });
 	// Input batches carry contiguous sequence numbers; the first one on a socket may start anywhere, and after a
 	// gap cua-spacesd names the sequence it expects next.
@@ -666,7 +695,7 @@ function driverTool(id: string, service: string | undefined, info: DriverInfo, u
 		executionMode: "sequential",
 		outputLimits: { maxBytes: 256 * 1024, maxLines: 4000, retain: "tail" },
 		execute: async (args) => {
-			if (id === defaultSpaceId()) await screenControl.botTurn();
+			await screenControl.botTurn(id);
 			const space = await connectSpace(id);
 			const callArgs = shotArgs(schema, args);
 			const result = await space.callTool(info.name, JSON.stringify(callArgs), service, undefined);
