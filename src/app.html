@@ -389,6 +389,21 @@ dialog .row .btn.danger { margin-right: auto; }
 .navrow[aria-current="page"] { background: var(--panel); box-shadow: 0 0 0 1px var(--line); }
 
 /* connections: this computer, the owner's SSH machines, and the Spaces under the computer that provides each */
+.versions-head { display: flex; align-items: center; gap: 12px; max-width: 760px; margin: 22px 0 0; }
+.versions-head h2 { font: 600 13px "Bahnschrift", sans-serif; color: var(--muted); letter-spacing: .02em; margin: 0; }
+.versions-head .btn { margin-left: auto; }
+.versions-note { max-width: 760px; margin: 4px 0 6px; color: var(--muted); font-size: 12.5px; }
+.versions { width: 100%; max-width: 760px; border-collapse: collapse; font-size: 13.5px; }
+.versions th { text-align: left; font: 600 12.5px "Bahnschrift", sans-serif; color: var(--muted); padding: 10px 8px 8px; border-bottom: 1px solid var(--line); letter-spacing: .02em; }
+.versions td { padding: 9px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+.versions td.machine { font-weight: 600; overflow-wrap: anywhere; }
+.versions td.machine small { display: block; font-weight: 400; color: var(--muted); }
+.versions .ver { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.versions .ver.new { color: var(--drive); font-weight: 600; }
+.versions .ver.same { color: var(--ok); }
+.versions td.act { text-align: right; white-space: nowrap; }
+.versions .job { display: block; font-size: 12.5px; color: var(--muted); text-align: left; white-space: pre-wrap; overflow-wrap: anywhere; max-width: 260px; margin-left: auto; }
+.versions .job.failed { color: var(--bad); } .versions .job.done { color: var(--ok); }
 .conns { padding: 4px 24px 24px; overflow: auto; flex: 1; }
 .conns h2 { max-width: 760px; font: 600 13px "Bahnschrift", sans-serif; color: var(--muted); letter-spacing: .02em; margin: 16px 0 0; }
 .conns .hint { max-width: 760px; margin: 2px 0 4px; color: var(--muted); font-size: 12.5px; }
@@ -668,15 +683,25 @@ dialog .row { display: flex; gap: 8px; justify-content: flex-end; margin-top: 18
    <nav class="botlist" aria-labelledby="settings-h">
     <div class="bar"><h2 id="settings-h">Settings</h2></div>
     <ul id="settings-tabs">
-     <li><button type="button" class="navrow" data-tab="chat" aria-current="page"><svg aria-hidden="true"><use href="#i-chat"/></svg>Chat</button></li>
+     <li><button type="button" class="navrow" data-tab="general" aria-current="page"><svg aria-hidden="true"><use href="#i-gear"/></svg>General</button></li>
+     <li><button type="button" class="navrow" data-tab="chat" aria-current="false"><svg aria-hidden="true"><use href="#i-chat"/></svg>Chat</button></li>
      <li><button type="button" class="navrow" data-tab="model" aria-current="false"><svg aria-hidden="true"><use href="#i-chip"/></svg>Model</button></li>
      <li><button type="button" class="navrow" data-tab="approvals" aria-current="false"><svg aria-hidden="true"><use href="#i-check"/></svg>Approvals</button></li>
      <li><button type="button" class="navrow" data-tab="connections" aria-current="false"><svg aria-hidden="true"><use href="#i-screen"/></svg>Connections</button></li>
-     <li><button type="button" class="navrow" data-tab="startup" aria-current="false"><svg aria-hidden="true"><use href="#i-power"/></svg>Startup</button></li>
      <li><button type="button" class="navrow" data-tab="tags" aria-current="false"><svg aria-hidden="true"><use href="#i-mem"/></svg>Memory tags</button></li>
     </ul>
    </nav>
-   <div class="pane" id="tab-chat">
+   <div class="pane" id="tab-general">
+    <div class="bar"><h1>General</h1><span class="aside" id="versions-checked"></span><button type="button" class="btn" id="versions-refresh">Check again</button></div>
+    <div class="banner" id="general-error" role="alert" hidden></div>
+    <div class="settings">
+     <label class="setting"><span><b>Start when I sign in</b><small id="autostart-hint">Runs start.py each time you sign in to this computer, so a restart doesn't leave the bots off until someone starts them.</small></span><input type="checkbox" id="set-autostart" disabled></label>
+     <div class="versions-head"><h2>Versions</h2><button type="button" class="btn primary" id="versions-all" hidden></button></div>
+     <p class="versions-note">Pi and the cua SDK are cua-bot's packages on this computer; updating them checks the build, then restarts cua-bot. cua updates on every computer with a Cua Space, through that Space, and restarts its Cua host service. Each computer logs its cua update to ~/.cua/cua-bot-update.log.</p>
+     <table class="versions"><thead><tr><th>Computer</th><th>What</th><th>Installed</th><th>Latest</th><th></th></tr></thead><tbody id="versions-rows"></tbody></table>
+    </div>
+   </div>
+   <div class="pane" id="tab-chat" hidden>
     <div class="bar"><h1>Chat</h1><span class="aside">Saved in this browser.</span></div>
     <div class="settings">
      <label class="setting"><span><b>Show messages between bots</b><small>What one bot sends another, in both bots' chats and the bot list.</small></span><input type="checkbox" data-setting="botTalk"></label>
@@ -712,13 +737,6 @@ dialog .row { display: flex; gap: 8px; justify-content: flex-end; margin-top: 18
     <div class="bar"><h1>Memory tags</h1><span class="aside"></span><button type="button" class="btn" id="tag-new">New tag</button></div>
     <div class="banner" id="tags-error" role="alert" hidden></div>
     <div class="settings"><p class="tag-note">Every bot and each bot's own tag are always there.</p><div id="tag-rows"></div></div>
-   </div>
-   <div class="pane" id="tab-startup" hidden>
-    <div class="bar"><h1>Startup</h1><span class="aside">Saved on this computer.</span></div>
-    <div class="banner" id="startup-error" role="alert" hidden></div>
-    <div class="settings">
-     <label class="setting"><span><b>Start when I sign in</b><small id="autostart-hint">Runs start.py each time you sign in to this computer, so a restart doesn't leave the bots off until someone starts them.</small></span><input type="checkbox" id="set-autostart" disabled></label>
-    </div>
    </div>
   </section>
  </main>
@@ -2695,13 +2713,13 @@ if (pushSupported) navigator.serviceWorker.addEventListener("message", (event) =
 
 /* ---------- views and the URL ---------- */
 // The URL's hash keeps the owner's place, so a reload, Back, or a copied link lands there again: `view` (routines,
-// memory, settings; the chat when absent), `tab` (Settings' model, connections, startup or tags; its chat tab when absent), `tag` (the
+// memory, settings; the chat when absent), `tab` (Settings' chat, model, approvals, connections or tags; its General tab when absent), `tag` (the
 // memory tag open in Memory; Every bot when absent), and `bot` (the open bot; the main bot when absent). #bot=<id> links from before views had URLs still open that bot's chat.
 // `pane` is which of a view's screens the phone layout shows (see its styles): the detail when absent, or `list`
 // or `computer`. A wide window shows them side by side and never writes it.
-const VIEWS = ["chat", "routines", "memory", "settings"], TABS = ["chat", "model", "approvals", "connections", "startup", "tags"];
+const VIEWS = ["chat", "routines", "memory", "settings"], TABS = ["general", "chat", "model", "approvals", "connections", "tags"];
 const PANES = ["detail", "list", "computer"];
-let place = { view: "chat", tab: "chat", pane: "detail" };
+let place = { view: "chat", tab: TABS[0], pane: "detail" };
 
 function readPlace() {
   const hash = new URLSearchParams(location.hash.slice(1));
@@ -2713,7 +2731,7 @@ function readPlace() {
 function savePlace(push) {
   const hash = new URLSearchParams();
   if (place.view !== "chat") hash.set("view", place.view);
-  if (place.view === "settings" && place.tab !== "chat") hash.set("tab", place.tab);
+  if (place.view === "settings" && place.tab !== TABS[0]) hash.set("tab", place.tab);
   if (place.view === "memory" && memoryView.tag !== EVERY_BOT) hash.set("tag", memoryView.tag);
   if (place.pane !== "detail") hash.set("pane", place.pane);
   if (state.bot !== null && state.bot !== mainId()) hash.set("bot", state.bot);
@@ -2745,7 +2763,7 @@ function loadView() {
   else if (place.view === "settings" && place.tab === "model") loadModelSettings();
   else if (place.view === "settings" && place.tab === "approvals") loadApprovalSettings();
   else if (place.view === "settings" && place.tab === "connections") loadConnections();
-  else if (place.view === "settings" && place.tab === "startup") loadAutostart();
+  else if (place.view === "settings" && place.tab === "general") { loadAutostart(); loadVersions(); }
   else if (place.view === "settings" && place.tab === "tags") loadTags();
   else if (place.view === "chat") focusChat();
 }
@@ -2839,7 +2857,7 @@ $("set-auto-labels").addEventListener("change", async () => {
   catch (error) { input.checked = !wanted; input.disabled = false; showApprovalsError("Could not change it: " + error.message); }
 });
 
-/* ---------- startup ---------- */
+/* ---------- general: start at sign-in ---------- */
 // Start at sign-in lives on the bot's computer (src/autostart.ts), not in this browser, so the toggle reads and
 // writes /api/autostart and shows what the computer says.
 function showAutostart({ supported, enabled, where }) {
@@ -2850,17 +2868,75 @@ function showAutostart({ supported, enabled, where }) {
     ? `Runs start.py each time you sign in to this computer, so a restart doesn't leave the bots off until someone starts them. Saved as ${where}.`
     : "This computer's OS has no sign-in entry cua-bot can add.";
 }
-function showStartupError(message) { $("startup-error").textContent = message; $("startup-error").hidden = !message; }
+function showGeneralError(message) { $("general-error").textContent = message; $("general-error").hidden = !message; }
 async function loadAutostart() {
-  try { showAutostart(await request("GET", "/api/autostart")); showStartupError(""); }
-  catch (error) { showStartupError("Could not read the startup setting: " + error.message); }
+  try { showAutostart(await request("GET", "/api/autostart")); showGeneralError(""); }
+  catch (error) { showGeneralError("Could not read the startup setting: " + error.message); }
 }
 $("set-autostart").addEventListener("change", async () => {
   const input = $("set-autostart"), wanted = input.checked;
   input.disabled = true;
-  try { showAutostart(await request("PUT", "/api/autostart", { enabled: wanted })); showStartupError(""); }
-  catch (error) { input.checked = !wanted; input.disabled = false; showStartupError("Could not change it: " + error.message); }
+  try { showAutostart(await request("PUT", "/api/autostart", { enabled: wanted })); showGeneralError(""); }
+  catch (error) { input.checked = !wanted; input.disabled = false; showGeneralError("Could not change it: " + error.message); }
 });
+
+/* ---------- general: versions ---------- */
+// GET /api/versions checks Pi, the cua SDK and cua on each computer against their newest releases (src/updates.ts),
+// and POST /api/versions/update starts updates. While one runs the page checks again every few seconds; an update
+// of cua-bot's own packages restarts it, so those checks fail until it answers again.
+const VERSIONS_POLL_MS = 5000;
+let versionsTimer = 0, versionsRestarting = false;
+function showVersions(data) {
+  versionsRestarting = data.rows.some((row) => row.job?.state === "done" && (row.target === "pi" || row.target === "cua-sdk"));
+  $("versions-checked").textContent = versionsRestarting ? "cua-bot is restarting…" : `Checked ${time(data.checkedAt)}`;
+  showGeneralError(data.errors.join("\n"));
+  const rows = [];
+  for (const [machine, group] of Map.groupBy(data.rows, (row) => row.machine)) group.forEach((row, index) => {
+    const tr = el("tr");
+    if (index === 0) {
+      const name = el("td", "machine", machine);
+      if (row.here) name.append(el("small", "", "runs cua-bot"));
+      name.rowSpan = group.length;
+      tr.append(name);
+    }
+    const act = el("td", "act");
+    const job = row.job?.state;
+    if (row.outdated && job !== "running" && job !== "done") {
+      const button = el("button", "btn primary", "Update");
+      button.type = "button";
+      button.addEventListener("click", () => startUpdates([row.target]));
+      act.append(button);
+    }
+    if (job) act.append(el("span", "job " + job, job === "running" ? "Updating…" : job === "done" ? `Updated${row.job.message ? `: ${row.job.message}` : ""}` : `Failed: ${row.job.message ?? ""}`));
+    const latest = el("td", "ver" + (row.outdated ? " new" : row.latest && row.installed ? " same" : ""), row.latest ?? "unknown");
+    tr.append(el("td", "", row.what), el("td", "ver", row.installed ?? "unknown"), latest, act);
+    rows.push(tr);
+  });
+  $("versions-rows").replaceChildren(...rows);
+  const outdated = data.rows.filter((row) => row.outdated && row.job?.state !== "running" && row.job?.state !== "done");
+  $("versions-all").hidden = outdated.length < 2;
+  $("versions-all").disabled = false;
+  $("versions-all").textContent = `Update all (${outdated.length})`;
+  $("versions-all").onclick = () => startUpdates(outdated.map((row) => row.target));
+  clearTimeout(versionsTimer);
+  if (versionsRestarting || data.rows.some((row) => row.job?.state === "running")) versionsTimer = setTimeout(loadVersions, VERSIONS_POLL_MS);
+}
+async function loadVersions() {
+  clearTimeout(versionsTimer);
+  if (place.view !== "settings" || place.tab !== "general") return;
+  $("versions-refresh").disabled = true;
+  try { showVersions(await request("GET", "/api/versions")); }
+  catch (error) {
+    if (versionsRestarting) versionsTimer = setTimeout(loadVersions, VERSIONS_POLL_MS);
+    else showGeneralError("Could not check the versions: " + error.message);
+  } finally { $("versions-refresh").disabled = false; }
+}
+async function startUpdates(targets) {
+  document.querySelectorAll("#versions-rows button, #versions-all").forEach((button) => { button.disabled = true; });
+  try { showVersions(await request("POST", "/api/versions/update", { targets })); }
+  catch (error) { await loadVersions(); showGeneralError("Could not start the update: " + error.message); }
+}
+$("versions-refresh").addEventListener("click", loadVersions);
 
 /* ---------- model ---------- */
 // The bots' model and reasoning effort live in the computer's .env (src/model-settings.ts), so these read and write

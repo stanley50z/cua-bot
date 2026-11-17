@@ -99,6 +99,8 @@ The coding tools reach any `Host` alias in your `~/.ssh/config`. cua-bot stores 
 
 Every Pi package shares the same `^` range in `package.json` because each `pi-env` release requires the exact `pi-durable` of the same version. The update moves them together.
 
-It passes `CUABOT_PYTHON` (its own interpreter, or `pythonw.exe` beside it on Windows) to the service, which Settings > Startup uses for the sign-in entry. Run without a console, as at sign-in, `start.py` writes what it would print to `data/logs/stdout.log`.
+It passes `CUABOT_PYTHON` (its own interpreter, or `pythonw.exe` beside it on Windows) to the service, which Settings > General uses for the sign-in entry and for `restart.py`. Run without a console, as at sign-in, `start.py` writes what it would print to `data/logs/stdout.log`.
 
 `python stop.py` signals only the pid in `data/cua-bot.pid.json`. It stops that process and its children, checks that the process exited and the port is free, then removes the pid file.
+
+`python restart.py` runs `stop.py`, then `start.py`. Settings > General runs it after updating Pi or the cua SDK. Because `stop.py` ends cua-bot's children, it first starts a detached copy of itself and exits, and that copy does the restart. It logs to `data/logs/stdout.log` under a `--- restart.py at` line.

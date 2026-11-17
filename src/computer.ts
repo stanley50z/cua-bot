@@ -557,6 +557,14 @@ const spaceBash = defineTool({
 	},
 });
 
+/** Used by main.ts for src/updates.ts. Runs `command` in a Space's shell, as space_bash does; throws when it fails. */
+export async function spaceShell(id: string, command: string): Promise<string> {
+	const result = await (await connectSpace(id)).bash(command, undefined);
+	const text = result.rendered.length > 0 ? result.rendered : fallbackBashText(result);
+	if (result.timedOut || result.error !== undefined || (result.exitCode ?? 0) !== 0) throw new Error(text || "the command failed");
+	return text;
+}
+
 /** The Space `ref` names; without it, a computer_use child's own Space, else the default. */
 async function callSpace(ref: string | undefined, api: ToolExecutionApi, context: Context) {
 	const own = ref?.trim() ? undefined : (await api.snapshot(ChildSpaceDoc, api.conversationId, context))?.id;

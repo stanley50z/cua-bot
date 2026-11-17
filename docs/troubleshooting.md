@@ -11,6 +11,7 @@ Start with `node --env-file-if-exists=.env src/preflight.ts` while the bot is st
 | `data/logs/cua-bot.log` | Service log, one line per event. Lists the bots on start (`bots: ...`), web edits to them, and failed pushes as `push:` lines. |
 | `data/logs/stdout.log` | stdout and stderr of the process `start.py` launched, including the full `pnpm update` output. A `start.py` run at sign-in logs here too, under a `--- start.py at` line. |
 | `data/crash/` | Crash reports. Each file is named by the time and holds the stack trace. |
+| `~/.cua/cua-bot-update.log` | On each computer Settings > General updated cua on: the installer's and `cua host setup`'s output, ending in a `cua-bot-update: done` or `cua-bot-update: failed` line. The script it ran is beside it, as `cua-bot-update.sh` or `cua-bot-update.ps1`. |
 
 ## Data files
 
@@ -38,6 +39,10 @@ Start with `node --env-file-if-exists=.env src/preflight.ts` while the bot is st
 
 **The computer pane stays black.** If the caption says Connecting…, the live stream is down and the pane retries with backoff. Otherwise the browser lacks WebCodecs; use a current Chrome or Edge.
 
+**A cua update stays at Updating….** Read `~/.cua/cua-bot-update.log` on that computer. While its host service restarts, the Space doesn't answer, so the row can't read the log until it's back. If the update failed at `cua host setup`, run `cua host setup` there by hand with the same `--runner`, `--name` and, for a direct host, `--direct` as its `~/.cua/host/config.json`.
+
+**An update of Pi or the cua SDK failed its check.** The row shows `pnpm check`'s errors. `package.json` and `pnpm-lock.yaml` are already back as they were. A big jump in a 0.x package can change its API, so cua-bot's code has to change before it can move to that release.
+
 **`start.py` refuses to start.** `data/cua-bot.pid.json` points at a live process that answers on the bot's port. Run `python stop.py` first.
 
-**The bot didn't come back after a restart.** Turn on Settings > Startup > Start when I sign in. It starts the bot when you sign in, not at boot, so a machine that sits at the sign-in screen stays off. If it's on and the bot still didn't start, look for the `--- start.py at` line in `data/logs/stdout.log`.
+**The bot didn't come back after a restart.** Turn on Settings > General > Start when I sign in. It starts the bot when you sign in, not at boot, so a machine that sits at the sign-in screen stays off. If it's on and the bot still didn't start, look for the `--- start.py at` line in `data/logs/stdout.log`.

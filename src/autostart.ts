@@ -1,4 +1,4 @@
-// Start at sign-in (Settings > Startup): registers start.py to run when the owner signs in to this computer, so a
+// Start at sign-in (Settings > General): registers start.py to run when the owner signs in to this computer, so a
 // restart doesn't leave the bots off until someone starts them. Windows gets a value under HKCU's Run key, macOS a
 // LaunchAgent in ~/Library/LaunchAgents, Linux an XDG autostart entry in ~/.config/autostart; none needs admin rights.
 // main.ts builds one with createAutostart() and web.ts serves it at GET/PUT /api/autostart.

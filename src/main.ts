@@ -10,7 +10,7 @@ import { createRegistry, defineExtension, Harness, section } from "@earendil-wor
 import { createNodePhotonImages } from "@earendil-works/pi-durable/images/node";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { botLookup, createBots, createBotsExtension, DEFAULT_BOTS_DIR, readBots } from "./bots.ts";
-import { createComputerExtension, defaultSpaceId, isThisComputer, openLiveStream, registrySpaces, screenControl, spaceLabel, spacesText } from "./computer.ts";
+import { createComputerExtension, defaultSpaceId, isThisComputer, openLiveStream, registrySpaces, screenControl, spaceLabel, spaceShell, spacesText } from "./computer.ts";
 import { createConnections, listCuaSpaces, probeTcp } from "./connections.ts";
 import { createLiveScreen } from "./live-screen.ts";
 import { createBotToolSearchExtension } from "./tool-search.ts";
@@ -30,6 +30,7 @@ import { bindRoutines, createRoutinesExtension, routineDir, syncRoutines } from 
 import { today } from "./today.ts";
 import { traceExtension } from "./trace.ts";
 import { createTurns } from "./turns.ts";
+import { createUpdates, dependencies, installedPackage, latestCua, latestPackage, localCua, runHere, updatePackages } from "./updates.ts";
 import { createBotServer } from "./web.ts";
 import { createModelSettings } from "./model-settings.ts";
 import { botAgent, botModel, botThinking, createBotModels } from "./models.ts";
@@ -201,11 +202,25 @@ const connections = createConnections({
 	fallback: registrySpaces,
 	...(defaultSpace === undefined ? {} : { defaultSpace }),
 });
-// Settings > Startup: start.py at sign-in.
+// Settings > General: start.py at sign-in.
 const autostart = createAutostart({ startScript: join(import.meta.dirname, "..", "start.py") });
+// Settings > General's Versions: Pi, the cua SDK and cua here, cua on every other computer with a Space, and their updates.
+const updates = createUpdates({
+	hereName: hostname(),
+	hereWindows: process.platform === "win32",
+	installed: installedPackage,
+	latestPackage,
+	latestCua,
+	spaces: () => listCuaSpaces(cua),
+	isHere: isThisComputer,
+	localCua,
+	run: (where, command) => (where === "here" ? runHere(command) : spaceShell(where.id, command)),
+	dependencies,
+	updatePackages,
+});
 // Settings > Model: the model and reasoning effort in .env, applied to every bot without a restart.
 const modelSettings = createModelSettings({ models, apply: bots.applyAgent });
-createBotServer({ say: (text) => mainChat.say(text), bots, memory, memoryBots: () => bots.list(), images, context, log, control: screenControl, live, thisComputer: { addresses, isSpace: isThisComputer }, push, connections, autostart, modelSettings, allowedHosts: ALLOWED_HOSTS, ...(approvals === undefined ? {} : { approvals }) }).listen(PORT, "127.0.0.1", () =>
+createBotServer({ say: (text) => mainChat.say(text), bots, memory, memoryBots: () => bots.list(), images, context, log, control: screenControl, live, thisComputer: { addresses, isSpace: isThisComputer }, push, connections, autostart, updates, modelSettings, allowedHosts: ALLOWED_HOSTS, ...(approvals === undefined ? {} : { approvals }) }).listen(PORT, "127.0.0.1", () =>
 	log(`listening: web portal http://127.0.0.1:${PORT}/ · chat POST http://127.0.0.1:${PORT}/say`),
 );
 

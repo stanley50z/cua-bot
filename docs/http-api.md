@@ -75,7 +75,7 @@ Code: [src/approvals.ts](../src/approvals.ts).
 | `POST /api/approvals/<id>/discard` | Drops it. |
 | `GET /api/approvals/settings`, `PUT` with `{autoLabels}` | Whether bots may change your own Gmail labels without a card. |
 
-## Memory, connections, push, startup, model
+## Memory, connections, push, general, model
 
 | Route | Does |
 | --- | --- |
@@ -94,5 +94,7 @@ Code: [src/approvals.ts](../src/approvals.ts).
 | `GET /manifest.webmanifest` | The web app manifest ([src/web-page.ts](../src/web-page.ts)). Its standalone display is what gives a Home Screen icon on iPhone and iPad Web Push. |
 | `GET /api/autostart` | `{supported, enabled, where}`: whether `start.py` runs when the owner signs in, and where that is saved ([src/autostart.ts](../src/autostart.ts)). |
 | `PUT /api/autostart` | `{"enabled": true}` or `false` adds or removes the sign-in entry and returns the new state. |
+| `GET /api/versions` | `{rows, errors, checkedAt}`: one row per version in Settings > General as `{target, machine, here, what, installed, latest, outdated, job}`. `job` is `{state, message, startedAt}` while an update runs or after it ends ([src/updates.ts](../src/updates.ts)). `errors` names each newest-release lookup that failed. |
+| `POST /api/versions/update` | `{"targets": [...]}` starts updates for rows' `target`s (`pi`, `cua-sdk`, `cua:here`, `cua:<space id>`) and answers with a fresh check. 400 for an empty or malformed list. 409 for a target that isn't listed or is already updating. A passing `pi` or `cua-sdk` update restarts cua-bot. |
 | `GET /api/model` | `{model, thinkingLevel, choices}`: the bots' model as `provider/model`, their reasoning effort, and every model with a key or sign-in with the efforts it supports ([src/model-settings.ts](../src/model-settings.ts)). |
 | `PUT /api/model` | `{"model", "thinkingLevel"}` saves both to `.env`, applies them to every bot and returns the new state. An effort the model doesn't support becomes its nearest one. 400 for a model with no key or sign-in. |

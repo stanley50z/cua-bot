@@ -50,7 +50,7 @@ The URL hash keeps your place, so a reload, Back, or a copied link lands in the 
 | Key | Values | When absent |
 | --- | --- | --- |
 | `view` | `routines`, `memory`, `settings` | The chat |
-| `tab` | `model`, `approvals`, `connections`, `startup`, `tags` | Settings' Chat tab |
+| `tab` | `chat`, `model`, `approvals`, `connections`, `tags` | Settings' General tab |
 | `tag` | A memory tag, in Memory | Every bot |
 | `bot` | A bot id | The main bot |
 | `pane` | `list`, `computer`; only the [phone layout](#on-a-phone) reads or writes it | The chat, or the page a list row opens |
@@ -179,7 +179,9 @@ The Default label marks the bots' default Space: `computer_use`, `space_bash` an
 
 The tab blurs users, SSH addresses, `direct:` Space ids and the database path, so a screenshot doesn't leak them. Click one (or focus it and press Enter) to reveal it until the next check.
 
-### Startup
+### General
+
+General opens first in Settings. It holds Start when I sign in and the Versions list.
 
 **Start when I sign in** (off by default) runs `start.py` each time you sign in to the bot's computer, so a restart doesn't leave the bots off until someone starts them. Unlike the Chat tab, it's saved on that computer, not in the browser ([src/autostart.ts](../src/autostart.ts)). None of these entries needs admin rights:
 
@@ -190,6 +192,20 @@ The tab blurs users, SSH addresses, `direct:` Space ids and the database path, s
 | Linux | `~/.config/autostart/cua-bot.desktop`, for desktop sessions that follow the XDG autostart spec |
 
 The interpreter is the one `start.py` last ran under (Windows uses `pythonw.exe` from the same folder). On macOS and Linux the entry also carries the bot's `PATH`, so `node` and `pnpm` are found at sign-in. If you move the checkout or change Python, turn the setting off and on again. On other OSes the toggle is disabled.
+
+**Versions** lists what cua-bot runs on and its newest release ([src/updates.ts](../src/updates.ts)). It checks again each time you open the tab or click Check again:
+
+| Row | Installed | Newest |
+| --- | --- | --- |
+| Pi, on the computer cua-bot runs on | `@earendil-works/pi-durable` in `node_modules` | npm's `latest` |
+| cua SDK, same computer | `@trycua/cua` in `node_modules` | npm's `latest` |
+| cua, same computer | Its Space's `cua-spacesd` version, or `cua --version` when it has no Space | The `cli` version in the release manifest the [cua installer](https://cua.ai/install.sh) reads |
+| cua, every other computer with a Space | That Space's `cua-spacesd` version | Same |
+
+Only computers count: Spaces Cua lists as `direct:` or `relay:`. Sandboxes get their cua from their image, so they aren't listed. A newer release gets an Update button, and Update all runs every update at once.
+
+- **Pi or the cua SDK** runs `pnpm update --latest` on those packages (every `@earendil-works/*` dependency for Pi), then `pnpm check`. When the check passes, `restart.py` restarts cua-bot, and the page reconnects once it's back. When the update or the check fails, `package.json` and `pnpm-lock.yaml` go back to how they were, `pnpm install` puts `node_modules` back, and the row shows the error. pnpm's one-day minimum release age still applies, so a release from today can stay listed as newer.
+- **cua** runs the official installer for the CLI only (`install.sh --cli-only --yes`, or `install.ps1 -CliOnly -Yes` on Windows). It then runs `cua host setup` again with the runner, name and direct address from that computer's `~/.cua/host/config.json`. That installs the matching `cua-spacesd` and restarts the host service. On the computer cua-bot runs on, this runs there directly. Elsewhere it runs through that computer's Space, the same way `space_bash` does. The script runs outside the host service, so the restart doesn't end it: `systemd-run`, `setsid` or Perl's `setsid` on macOS and Linux, a WMI-created process on Windows. It writes its progress to `~/.cua/cua-bot-update.log` on that computer, and the row says Updating… until the log's last line says done or failed. The Cua Spaces desktop app updates itself and isn't touched.
 
 ## Notifications
 
