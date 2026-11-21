@@ -21,6 +21,7 @@ import {
 	type LiveState,
 	ResetEntry,
 	ToolResultEntry,
+	type ToolSlot,
 	UserEntry,
 	type UserInput,
 } from "@earendil-works/pi-durable";
@@ -95,7 +96,7 @@ export type ChatLive = {
 	/** What the in-flight reply has sent the owner so far, as send_message's text streams in. */
 	partial: string;
 	/** `child` is the conversation a running computer_use call drives the Space from, and `space` that Space's name. */
-	tools: { callId: string; name: string; status: "pending" | "running" | "done"; output?: string; child?: number; space?: string }[];
+	tools: { callId: string; name: string; status: ToolSlot["status"]; output?: string; child?: number; space?: string }[];
 	retry?: { at: number; error: string };
 };
 

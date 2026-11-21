@@ -178,7 +178,7 @@ async function sleepDeadline(harness: Harness): Promise<number> {
 		const inspection = await harness.inspect(context);
 		for (const task of inspection.tasks) {
 			const state = task.record.state;
-			if (task.record.kind === "cua-bot.routine" && state.status === "sleeping") {
+			if (task.record.kind === "cua-bot.routine" && state.status === "sleeping" && state.until !== undefined) {
 				until = state.until;
 				return true;
 			}

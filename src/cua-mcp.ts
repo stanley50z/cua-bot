@@ -62,6 +62,7 @@ export async function createCuaExtension(
 
 	return defineExtension({
 		name: "cua",
+		namespace: { name: "cua", description: "Cua Spaces: Spaces, sandboxes, files, apps, windows, sharing, volumes" },
 		tools,
 		sections: [
 			section("cua", () =>

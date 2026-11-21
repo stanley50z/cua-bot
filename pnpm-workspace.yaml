@@ -1,3 +1,6 @@
 allowBuilds:
   '@google/genai': false
   protobufjs: false
+# windowsHide on pi-env's ssh spawns, so a windowless cua-bot opens no console windows. Drop once upstream has it.
+patchedDependencies:
+  '@earendil-works/pi-env': patches/@earendil-works__pi-env.patch

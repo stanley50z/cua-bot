@@ -1,0 +1,35 @@
+diff --git a/dist/connection.js b/dist/connection.js
+index 1cc86eeafb31831033565b3963179019c097db2c..870c8ab66651caaa385a85245b7a1bfb0a92055d 100644
+--- a/dist/connection.js
++++ b/dist/connection.js
+@@ -267,7 +267,7 @@ export class Connection {
+         if (program === undefined)
+             throw new RemoteError({ code: "spawn_error", message: "No daemon command" });
+         const token = randomBytes(16).toString("hex");
+-        const child = spawn(program, [...args, "serve", "--token", token], { stdio: ["pipe", "pipe", "pipe"] });
++        const child = spawn(program, [...args, "serve", "--token", token], { stdio: ["pipe", "pipe", "pipe"], windowsHide: true });
+         const session = new Session(++this.#sessions, child, token);
+         this.#session = session;
+         let ready = false;
+diff --git a/dist/ssh.js b/dist/ssh.js
+index 7113405d857c01b1e1c2ecbc3a8dd09c8707224a..62dc3b4406bfcb99d053cac6397d531542d89d1f 100644
+--- a/dist/ssh.js
++++ b/dist/ssh.js
+@@ -91,7 +91,7 @@ const UPLOAD_TIMEOUT_MS = 300_000;
+ function runSsh(target, command, options = {}) {
+     return new Promise((resolve, reject) => {
+         const args = options.args ?? sshArguments(target);
+-        const child = spawn(target.ssh ?? "ssh", [...args, command], { stdio: ["pipe", "pipe", "pipe"] });
++        const child = spawn(target.ssh ?? "ssh", [...args, command], { stdio: ["pipe", "pipe", "pipe"], windowsHide: true });
+         const timeoutMs = options.timeoutMs ?? SSH_TIMEOUT_MS;
+         const timer = setTimeout(() => {
+             child.kill();
+@@ -144,7 +144,7 @@ export async function scanHostKey(target) {
+         if (lines.length === 0)
+             throw new Error(`No host key received from ${target.host}`);
+         const fingerprints = await new Promise((resolve, reject) => {
+-            const child = spawn("ssh-keygen", ["-lf", scanned], { stdio: ["ignore", "pipe", "pipe"] });
++            const child = spawn("ssh-keygen", ["-lf", scanned], { stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
+             let output = "";
+             child.stdout.on("data", (chunk) => {
+                 output += chunk.toString("utf8");

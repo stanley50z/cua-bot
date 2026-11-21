@@ -26,6 +26,7 @@ test("every Cua tool but notify_user is deferred as cua_<name>, and tool_search 
 		(extension.tools ?? []).map((tool) => [tool.name, tool.deferred]),
 		[["cua_space_bash", true], ["cua_upload", true]],
 	);
+	assert.equal(extension.namespace?.name, "cua", "codemode groups the cua_ tools under the cua namespace");
 
 	let results: ToolResultMessage[] = [];
 	const faux = fauxProvider();

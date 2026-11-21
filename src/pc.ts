@@ -26,7 +26,6 @@ const pcSection = defineExtension({
 export function createPcExtensions() {
 	const codemode = createCodemodeExtension({
 		sandbox: new CodemodeSandbox({ memoryLimitBytes: 256 * 1024 * 1024 }),
-		namespaces: [{ name: "cua", description: "Cua Spaces: Spaces, sandboxes, files, apps, windows, sharing, volumes", prefix: "cua_" }],
 	});
 	return [pcSection, codemode];
 }

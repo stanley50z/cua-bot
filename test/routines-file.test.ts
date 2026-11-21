@@ -104,7 +104,7 @@ async function sleeping(session: Session, count: number): Promise<Array<{ id: Ta
 		const inspection = await session.harness.inspect(context);
 		found = [];
 		for (const task of inspection.tasks) {
-			if (task.record.kind === "cua-bot.routine" && task.record.state.status === "sleeping") {
+			if (task.record.kind === "cua-bot.routine" && task.record.state.status === "sleeping" && task.record.state.until !== undefined) {
 				found.push({ id: task.record.id, until: task.record.state.until });
 			}
 		}
