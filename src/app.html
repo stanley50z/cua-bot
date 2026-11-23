@@ -1661,8 +1661,7 @@ function renderChat() {
     more.addEventListener("click", loadEarlier);
     box.append(more);
   }
-  const results = new Map();
-  for (const item of state.items) if (item.kind === "tool") results.set(item.callId, item);
+  const results = toolResults();
   const running = new Map(state.live.tools.map((tool) => [tool.callId, tool]));
   const reactions = reactionsOf();
   let day = "";
@@ -1755,6 +1754,20 @@ function shows(item, results) {
   if (item.kind === "routine") return settings.routineRuns;
   if (item.kind !== "assistant" || settings.tools || item.text || item.error || item.aborted) return true;
   return item.tools.some((call) => approvalFor(call.id) || relayed(call, results));
+}
+
+// The loaded tool results by call id, for `shows` and the replies that render them.
+function toolResults() {
+  const results = new Map();
+  for (const item of state.items) if (item.kind === "tool") results.set(item.callId, item);
+  return results;
+}
+
+// How many loaded messages show; paging compares it before and after a fetch. A summary marker doesn't count: alone,
+// it gives the owner nothing to read.
+function shownCount() {
+  const results = toolResults();
+  return state.items.filter((item) => item.kind !== "marker" && shows(item, results)).length;
 }
 
 // Whether a reply shows this message_bot call as the message the other bot received.
@@ -2170,6 +2183,7 @@ async function loadHistory() {
   addItems(data.items);
   state.before = data.before;
   state.live = data.live;
+  if (shownCount() === 0 && state.before && !(await fetchUntilShown(bot))) return;
   renderLive();
   renderChat();
   $("msgs").scrollTop = $("msgs").scrollHeight;
@@ -2178,13 +2192,23 @@ async function loadHistory() {
 async function loadEarlier() {
   const box = $("msgs");
   const fromBottom = box.scrollHeight - box.scrollTop;
-  const bot = state.bot;
-  const data = await request("GET", "/api/chat?limit=60&bot=" + bot + "&before=" + encodeURIComponent(state.before));
-  if (bot !== state.bot) return;
-  addItems(data.items);
-  state.before = data.before;
+  if (!(await fetchUntilShown(state.bot))) return;
   renderChat();
   box.scrollTop = box.scrollHeight - fromBottom;
+}
+
+// Fetches earlier pages of `bot`'s chat until one adds an entry the owner's settings show, or the history runs out.
+// A page can be all routine runs and tool-only replies, which show nothing with those settings off. Returns false
+// if the owner switched bots meanwhile, so the caller drops what it was about to draw.
+async function fetchUntilShown(bot) {
+  const shown = shownCount();
+  do {
+    const data = await request("GET", "/api/chat?limit=60&bot=" + bot + "&before=" + encodeURIComponent(state.before));
+    if (bot !== state.bot) return false;
+    addItems(data.items);
+    state.before = data.before;
+  } while (state.before && shownCount() === shown);
+  return true;
 }
 
 // One event stream, for the open bot's chat. It also carries approvals and the bot list.
