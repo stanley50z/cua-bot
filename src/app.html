@@ -1763,11 +1763,16 @@ function toolResults() {
   return results;
 }
 
-// How many loaded messages show; paging compares it before and after a fetch. A summary marker doesn't count: alone,
-// it gives the owner nothing to read.
-function shownCount() {
+// How many loaded turns show a message; paging fetches until enough do. A turn runs from an owner message, routine
+// firing or bot message up to the next one. A summary marker doesn't count: alone, it gives the owner nothing to read.
+function shownTurns() {
   const results = toolResults();
-  return state.items.filter((item) => item.kind !== "marker" && shows(item, results)).length;
+  let turns = 0, counted = false;
+  for (const item of state.items) {
+    if (item.kind === "user" || item.kind === "routine" || item.kind === "bot") counted = false;
+    if (!counted && item.kind !== "marker" && shows(item, results)) { turns++; counted = true; }
+  }
+  return turns;
 }
 
 // Whether a reply shows this message_bot call as the message the other bot received.
@@ -2183,7 +2188,7 @@ async function loadHistory() {
   addItems(data.items);
   state.before = data.before;
   state.live = data.live;
-  if (shownCount() === 0 && state.before && !(await fetchUntilShown(bot))) return;
+  if (!(await fetchUntilShown(bot, OPEN_TURNS))) return;
   renderLive();
   renderChat();
   $("msgs").scrollTop = $("msgs").scrollHeight;
@@ -2192,22 +2197,24 @@ async function loadHistory() {
 async function loadEarlier() {
   const box = $("msgs");
   const fromBottom = box.scrollHeight - box.scrollTop;
-  if (!(await fetchUntilShown(state.bot))) return;
+  if (!(await fetchUntilShown(state.bot, shownTurns() + 1))) return;
   renderChat();
   box.scrollTop = box.scrollHeight - fromBottom;
 }
 
-// Fetches earlier pages of `bot`'s chat until one adds an entry the owner's settings show, or the history runs out.
-// A page can be all routine runs and tool-only replies, which show nothing with those settings off. Returns false
-// if the owner switched bots meanwhile, so the caller drops what it was about to draw.
-async function fetchUntilShown(bot) {
-  const shown = shownCount();
-  do {
+// How many turns a chat opens with at least, so it never opens blank.
+const OPEN_TURNS = 3;
+
+// Fetches earlier pages of `bot`'s chat until `turns` turns show a message, or the history runs out. A page can be
+// all routine runs and tool-only replies, which show nothing with those settings off. Returns false if the owner
+// switched bots meanwhile, so the caller drops what it was about to draw.
+async function fetchUntilShown(bot, turns) {
+  while (state.before && shownTurns() < turns) {
     const data = await request("GET", "/api/chat?limit=60&bot=" + bot + "&before=" + encodeURIComponent(state.before));
     if (bot !== state.bot) return false;
     addItems(data.items);
     state.before = data.before;
-  } while (state.before && shownCount() === shown);
+  }
   return true;
 }
 
