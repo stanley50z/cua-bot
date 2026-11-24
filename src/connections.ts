@@ -9,8 +9,11 @@ import type { Executor } from "./executor.ts";
 export type Space = { id: string; name?: string; os?: string; phase?: string; version?: string; hostName?: string };
 export type SpaceView = Space & { isDefault: boolean };
 
-/** The computer cua-bot runs on. Its addresses tell which SSH hosts and Spaces are this computer. */
-export type Here = { name: string; os: string; user: string; addresses: string[]; pid: number; startedAt: number; database: string };
+/**
+ * The computer cua-bot runs on. Its addresses tell which SSH hosts and Spaces are this computer; each check reads them
+ * again, since they change while cua-bot runs.
+ */
+export type Here = { name: string; os: string; user: string; addresses: () => string[]; pid: number; startedAt: number; database: string };
 
 export type Machine = { aliases: string[]; address: string; port: number; user?: string; online: boolean; spaces: SpaceView[] };
 
@@ -104,7 +107,7 @@ function directHost(id: string): string | undefined {
 export function createConnections(deps: ConnectionsDeps) {
 	return async (): Promise<ConnectionsSnapshot> => {
 		const { here } = deps;
-		const local = new Set([...here.addresses, here.name, "localhost"].map((name) => name.toLowerCase()));
+		const local = new Set([...here.addresses(), here.name, "localhost"].map((name) => name.toLowerCase()));
 		const isHere = (address: string) => local.has(address.toLowerCase()) || /^127\./.test(address);
 
 		let spaces: Space[];

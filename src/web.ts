@@ -133,9 +133,10 @@ export type BotServerDeps = {
 	/**
 	 * With `control`, lets each chat stream tell its page whether the shown Space is the desktop that page's browser
 	 * runs on (`here` in the `control` event), so the page turns its live screen off instead of filming itself.
-	 * `addresses` are this computer's network addresses; `isSpace` says whether a Space is this computer's desktop.
+	 * `addresses` reads this computer's network addresses, on each new stream since they change while cua-bot runs;
+	 * `isSpace` says whether a Space is this computer's desktop.
 	 */
-	thisComputer?: { addresses: readonly string[]; isSpace: (space: string) => Promise<boolean> };
+	thisComputer?: { addresses: () => readonly string[]; isSpace: (space: string) => Promise<boolean> };
 	/** Enables GET/POST /api/push: the VAPID public key, and a browser's push subscription. */
 	push?: Push;
 	/** Enables GET /api/connections: this computer, the owner's SSH machines, and the Cua Spaces, checked on each call. */
@@ -235,7 +236,7 @@ function streamChat(req: IncomingMessage, res: ServerResponse, chat: Chat, bots:
 	const { control, thisComputer } = deps;
 	const forwarded = req.headers["x-forwarded-for"];
 	const local =
-		thisComputer !== undefined && fromThisComputer(req.socket.remoteAddress, Array.isArray(forwarded) ? forwarded.at(-1) : forwarded, thisComputer.addresses);
+		thisComputer !== undefined && fromThisComputer(req.socket.remoteAddress, Array.isArray(forwarded) ? forwarded.at(-1) : forwarded, thisComputer.addresses());
 	// Asking a Space for its hostname can take a moment, so only the newest change is sent.
 	let changes = 0;
 	const sendControl = async () => {

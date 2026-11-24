@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { type ConnectionsDeps, createConnections, parseSpaces, probeTcp } from "../src/connections.ts";
 
-const HERE = { name: "desk", os: "Windows 11 Pro", user: "me", addresses: ["127.0.0.1", "100.1.1.1"], pid: 42, startedAt: 1, database: "C:/db.sqlite" };
+const HERE = { name: "desk", os: "Windows 11 Pro", user: "me", addresses: () => ["127.0.0.1", "100.1.1.1"], pid: 42, startedAt: 1, database: "C:/db.sqlite" };
 const TARGETS: Record<string, { address: string; port: number; user?: string }> = {
 	mac: { address: "100.2.2.2", port: 22, user: "sid" },
 	razor: { address: "100.3.3.3", port: 22, user: "me" },

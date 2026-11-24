@@ -83,9 +83,9 @@ async function open(responses = SCRIPT, images?: ImageProcessor, memoryNote: Mem
 }
 
 // Collects SSE events from /api/chat/events until `done` returns true for the collected list.
-async function collect(base: string, done: (events: ChatEvent[]) => boolean, action: () => Promise<void>) {
+async function collect(base: string, done: (events: ChatEvent[]) => boolean, action: () => Promise<void>, headers: Record<string, string> = {}) {
 	const abort = new AbortController();
-	const response = await fetch(`${base}/api/chat/events`, { signal: abort.signal });
+	const response = await fetch(`${base}/api/chat/events`, { signal: abort.signal, headers });
 	assert.equal(response.headers.get("content-type"), "text/event-stream");
 	const reader = response.body!.pipeThrough(new TextDecoderStream()).getReader();
 	const events: ChatEvent[] = [];
@@ -129,13 +129,29 @@ test("the event stream says when a task runs on the live screen, and a failed ta
 
 test("the event stream tells a browser on this computer when the live screen shows this computer", { timeout: 30_000 }, async () => {
 	const control = createScreenControl({ space: () => "pc" });
-	const bot = await open(SCRIPT, undefined, undefined, { control, thisComputer: { addresses: [], isSpace: async (space) => space === "pc" } });
+	const bot = await open(SCRIPT, undefined, undefined, { control, thisComputer: { addresses: () => [], isSpace: async (space) => space === "pc" } });
 	const here = (events: unknown[]) => (events as { type: string; space?: string; here?: boolean }[]).filter((event) => event.type === "control").map((event) => [event.space, event.here]);
 	try {
 		// The test's fetch connects over loopback, as a browser on this computer does; the drive moves the screen to the Mac.
 		const events = await collect(bot.base, (seen) => here(seen).some(([space]) => space === "mac"), () => control.drive("mac", async () => {}));
 		assert.deepEqual(here(events)[0], ["pc", true]);
 		assert.deepEqual(here(events).at(-1), ["mac", false]);
+	} finally {
+		await bot.close();
+	}
+});
+
+test("the event stream knows this computer by an address it got after the server started", { timeout: 30_000 }, async () => {
+	// cua-bot starts at sign-in, before a VPN such as Tailscale has its address; the proxy forwards that address later.
+	let addresses: string[] = [];
+	const control = createScreenControl({ space: () => "pc" });
+	const bot = await open(SCRIPT, undefined, undefined, { control, thisComputer: { addresses: () => addresses, isSpace: async () => true } });
+	const here = (events: unknown[]) => (events as { type: string; here?: boolean }[]).filter((event) => event.type === "control").map((event) => event.here);
+	try {
+		const proxied = { "x-forwarded-for": "100.64.0.7" };
+		assert.deepEqual(here(await collect(bot.base, (seen) => here(seen).length === 1, async () => {}, proxied)), [false]);
+		addresses = ["100.64.0.7"];
+		assert.deepEqual(here(await collect(bot.base, (seen) => here(seen).length === 1, async () => {}, proxied)), [true]);
 	} finally {
 		await bot.close();
 	}

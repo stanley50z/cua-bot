@@ -181,8 +181,9 @@ screenControl.subscribe(() => {
 	live.restart(`the live screen moved to ${shownSpace}`);
 });
 // This computer's network addresses: the Connections tab places SSH hosts and Spaces with them, and the web portal
-// tells a browser on this computer from one elsewhere.
-const addresses = Object.values(networkInterfaces()).flatMap((list) => (list ?? []).map((nic) => nic.address));
+// tells a browser on this computer from one elsewhere. Read on each use, because an interface such as a VPN's can get
+// its address after cua-bot starts at sign-in.
+const addresses = () => Object.values(networkInterfaces()).flatMap((list) => (list ?? []).map((nic) => nic.address));
 // The Connections tab: this computer, which runs the Harness and every bot, then the owner's SSH machines and the Spaces.
 const defaultSpace = defaultSpaceId();
 const connections = createConnections({
