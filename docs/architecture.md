@@ -74,10 +74,25 @@ Every turn that reaches a bot goes through `deliver()` in `src/turns.ts`. For ea
 | Bot message | `message_bot` | yes | `followUp` | `bot:<task>` | `cua-bot.bot-message` |
 | Routine firing | its slot, or run now | no | `followUp` | `<task>:<due>`, or `<task>:manual:<now>` | `cua-bot.routine-firing` |
 | Approval outcome | the owner's click on a card | no | `followUp` | none | `cua-bot.approval-outcome` |
+| Topic closed by the owner | Done or Close in the web portal, to the topic | no | `followUp` | none | `cua-bot.topic-close` |
 
 A memory note is a write of its own, committed just ahead of its message (see [Memory](#memory)), and the Harness places the two independently. On an idle bot with nothing queued, and with no other delivery between them, the note lands right before the message. Otherwise it can land before other messages, or a whole run before its own ([#6](https://github.com/stanley50z/cua-bot/issues/6) lists the cases). A request id makes a firing or a bot message land once, even when the task that sends it runs again after a restart. Routine firings and approval outcomes from before their entry kinds are plain `pi.user` entries; the chat still shows them as routine and approval items by their `[routine]` and `[approval]` prefix, which is also what the bot reads them by.
 
-An approval card remembers which bot filed it, so it shows in that bot's chat and the outcome goes back to that bot. A card that names no bot, or whose bot was deleted, sends its outcome to the main bot. `computer_use` runs one task at a time on each Space across all bots, because bots on the same Space share its screen.
+An approval card remembers which bot filed it, so it shows in that bot's chat and the outcome goes back to that bot. A card filed in an open topic shows in the topic and its outcome goes back there; once the topic is closed, the outcome goes to the topic's bot. A card that names no bot, or whose bot was deleted, sends its outcome to the main bot. `computer_use` runs one task at a time on each Space across all bots and topics, because they share its screen.
+
+### Topics
+
+Code: [src/topics.ts](../src/topics.ts).
+
+A topic is a side thread split out of a bot's chat, so a temporary matter doesn't fill the bot's main conversation. It is a fork of the bot's conversation (Pi Durable's `forkConversation`) at its newest finished reply, so it knows everything said in the main chat until then. What is said in the topic stays in the topic. When it closes, its one-line outcome lands in the main chat as a `cua-bot.topic-closed` entry, which the bot reads as a `[topic]` message. A bot whose chat has no finished reply yet gets a fresh conversation on its model instead of a fork.
+
+- **Opening.** The owner opens one in the web portal, empty or from a message (Open as topic). The bot opens one with `manage_topic` (action `create`), which also sends its first message to the owner.
+- **Messages in a topic.** A main-chat message belongs to at most one topic; putting it in another moves it. A message newer than the fork is copied into the topic as a `cua-bot.topic-message` entry, so the topic's bot sees it.
+- **Renaming.** Either side can rename a topic whose subject shifted. A `cua-bot.topic-renamed` entry in the thread records it.
+- **Closing.** The bot closes a topic with `manage_topic` (action `close`) and the outcome. When the owner closes one, the topic leaves the open list at once and its bot gets a `cua-bot.topic-close` turn asking for the outcome. If the owner reopens the topic before the bot answers, the waiting turn is withdrawn. If the bot is already answering, its close is refused once.
+- **Acting as its bot.** A topic's conversation has its bot's name, instructions, memory, routines and bot messages: every tool and prompt section that works per bot reads the bot through `botOf()`. Model changes reach a bot's topics too.
+
+The topic list is the session doc `cua-bot.topics` in `data/cua-bot.sqlite`, keyed by the topic's conversation id. Deleting a bot drops its topics from the list and stops them; their conversations stay in the database, like the bot's.
 
 ## Tools
 
@@ -95,7 +110,7 @@ All three take `space`, a Space's name (any case) or its id. Without it they use
 
 Each Space's driver tools sit in their own extension, `space:<id>`, installed by that Space's first `computer_use` call, because a Mac and a Windows PC both have a `click` with different schemas. Only that Space's child selects the extension. The main agent never gets driver tools: `tool_search` skips them and code mode can't call them. To call one driver tool directly, a bot uses `cua_call_tool` with the Space's id.
 
-The live screen and Take control follow the bots: they show the Space a `computer_use` task last started on, or the default until one has. `data/screen.json` keeps that Space across restarts. While you have control, the screen stays put, a task on another Space runs there unseen, and owner control pauses only the shown Space's driver calls. Code: [src/screen-control.ts](../src/screen-control.ts).
+The live screen and Take control show the Space last switched to: by a `computer_use` task starting on it, or by the owner picking it in the computer pane's heading (`POST /api/computer/space`), or the default until either has. Picking hands back the owner's control of the old Space. `data/screen.json` keeps that Space across restarts. While you have control, the screen stays put, a task on another Space runs there unseen, and owner control pauses only the shown Space's driver calls. Code: [src/screen-control.ts](../src/screen-control.ts).
 
 ### Coding tools on every machine
 

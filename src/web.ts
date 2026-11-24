@@ -1,6 +1,6 @@
 // The bot's HTTP surface on 127.0.0.1: the web portal at GET / with its service worker at /sw.js and web app manifest at /manifest.webmanifest, its JSON
-// API under /api/ (the bot list and its edits, routines CRUD, each bot's chat history/send/react/stop and the owner's pasted images, a server-sent
-// event stream of one bot's live chat state, Web Push subscriptions, the Connections tab's check, start at sign-in, versions and their updates, the bots' model and reasoning effort, and the live screen of the Space the bots last drove, with the owner's control of it), screenshots under /shots/, and the original POST /say. Listens on loopback only, no auth; an HTTPS proxy such as Tailscale Serve can
+// API under /api/ (the bot list and its edits, routines CRUD, each bot's chat history/send/react/stop and the owner's pasted images, the same for
+// each topic split out of a bot's chat and the owner's changes to topics, a server-sent event stream of one bot's or topic's live chat state, Web Push subscriptions, the Connections tab's check, start at sign-in, versions and their updates, the bots' model and reasoning effort, and the live screen of the Space the bots last drove, with the owner's control of it), screenshots under /shots/, and the original POST /say. Listens on loopback only, no auth; an HTTPS proxy such as Tailscale Serve can
 // reach it under a name in allowedHosts. isOwnRequest refuses requests other sites make through the owner's browser.
 // Mutations go through the routines manager and the chat module, so every surface agrees.
 import { readFile } from "node:fs/promises";
@@ -130,6 +130,8 @@ export type BotServerDeps = {
 	live?: LiveScreen;
 	/** With `live`, enables POST /api/computer/control and /api/computer/input: the owner driving the shown Space. */
 	control?: ScreenControl;
+	/** With `control`, enables GET /api/computer/spaces and POST /api/computer/space: the owner picking the Space to show. */
+	spaces?: () => Promise<{ id: string; name?: string }[]>;
 	/**
 	 * With `control`, lets each chat stream tell its page whether the shown Space is the desktop that page's browser
 	 * runs on (`here` in the `control` event), so the page turns its live screen off instead of filming itself.
@@ -229,10 +231,13 @@ export function fromThisComputer(remoteAddress: string | undefined, forwardedFor
 // approvals list whenever it changes, the bot list whenever it changes, and the Space on the live screen and who
 // drives it (a `control` event with `space`, `owner`, `driving`, and `here`: whether that Space is the desktop this
 // client's browser runs on; right away and on every change), until the socket closes.
-function streamChat(req: IncomingMessage, res: ServerResponse, chat: Chat, bots: Bots, deps: BotServerDeps): void {
+// One chat's live state for the web portal: a bot's chat or one of its topics' (`chat`), with `bot`'s computer pane from
+// its chat and all its topics, the topic list, the bot list, approvals, and who controls the screen.
+function streamChat(req: IncomingMessage, res: ServerResponse, chat: Chat, bot: number, bots: Bots, deps: BotServerDeps): void {
 	res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-store", connection: "keep-alive" });
 	const send = (event: unknown) => res.write(`data: ${JSON.stringify(event)}\n\n`);
 	send({ type: "live", live: chat.live });
+	send({ type: "topics", topics: bots.topics() });
 	const { control, thisComputer } = deps;
 	const forwarded = req.headers["x-forwarded-for"];
 	const local =
@@ -247,16 +252,20 @@ function streamChat(req: IncomingMessage, res: ServerResponse, chat: Chat, bots:
 		if (change === changes && !res.destroyed) send({ type: "control", space, owner: control.owner, driving: control.driving, here });
 	};
 	void sendControl();
-	const unsubscribe = chat.subscribe(send);
+	const unsubscribe = chat.subscribe(send, { computer: false });
+	const unwatchComputer = bots.computerFeed(bot, (computer) => send({ type: "computer", computer }));
 	const unwatch = deps.approvals?.subscribe((list) => send({ type: "approvals", approvals: list }));
 	const unwatchBots = bots.subscribe((list) => send({ type: "bots", bots: list }));
+	const unwatchTopics = bots.subscribeTopics((list) => send({ type: "topics", topics: list }));
 	const unwatchControl = control?.subscribe(() => void sendControl());
 	const ping = setInterval(() => res.write(": ping\n\n"), 25_000);
 	req.on("close", () => {
 		clearInterval(ping);
 		unsubscribe();
+		unwatchComputer();
 		unwatch?.();
 		unwatchBots();
+		unwatchTopics();
 		unwatchControl?.();
 	});
 }
@@ -292,9 +301,22 @@ function streamLive(res: ServerResponse, live: LiveScreen, control: ScreenContro
 // The owner driving the shown Space from the expanded live view. POST /api/computer/control with `{ owner }` takes
 // control (the bots' on-screen steps wait) or hands it back; POST /api/computer/input with `{ events }`
 // performs the owner's mouse and keyboard on the Space, in order, and is refused while the bots have control.
+// GET /api/computer/spaces lists the Spaces with the shown one's id; POST /api/computer/space with `{ space }` (an id
+// from that list) shows that Space, idle or not.
 async function routeControl(req: IncomingMessage, res: ServerResponse, deps: BotServerDeps, url: URL, method: string) {
-	const { live, control } = deps;
-	if (live === undefined || control === undefined || method !== "POST") throw new HttpError(404, "not found");
+	const { live, control, spaces } = deps;
+	if (live === undefined || control === undefined) throw new HttpError(404, "not found");
+	if (spaces !== undefined && method === "GET" && url.pathname === "/api/computer/spaces") {
+		return sendJson(res, 200, { spaces: await spaces(), shown: control.space ?? null });
+	}
+	if (method !== "POST") throw new HttpError(404, "not found");
+	if (spaces !== undefined && url.pathname === "/api/computer/space") {
+		const { space } = ((await readJson(req)) ?? {}) as { space?: unknown };
+		if (typeof space !== "string" || !(await spaces()).some((listed) => listed.id === space)) throw new HttpError(400, "space must be the id of a listed Space");
+		if (space !== control.space) deps.log?.(`owner (web): put ${space} on the live screen`);
+		control.show(space);
+		return sendJson(res, 200, { space });
+	}
 	if (url.pathname === "/api/computer/control") {
 		const { owner } = ((await readJson(req)) ?? {}) as { owner?: unknown };
 		if (typeof owner !== "boolean") throw new HttpError(400, "owner must be true or false");
@@ -383,8 +405,25 @@ async function routeBots(req: IncomingMessage, res: ServerResponse, deps: BotSer
 	throw new HttpError(404, "not found");
 }
 
-// `bot` (a query parameter, or a field of a JSON body) picks the chat; without it, the main bot's.
-async function chatFor(bots: Bots, bot: unknown): Promise<Chat> {
+const given = (value: unknown) => value !== undefined && value !== null && value !== "";
+
+// A topic id from a query parameter or a JSON field, or undefined when there is none.
+function topicId(topic: unknown): number | undefined {
+	if (!given(topic)) return undefined;
+	const id = Number(topic);
+	if (!Number.isInteger(id)) throw new HttpError(400, "topic must be a topic id");
+	return id;
+}
+
+// `topic` (a query parameter, or a field of a JSON body) picks that topic's chat (src/topics.ts); otherwise `bot` picks
+// the bot's, and without either, the main bot's.
+async function chatFor(bots: Bots, bot: unknown, topic?: unknown): Promise<Chat> {
+	const topicChat = topicId(topic);
+	if (topicChat !== undefined) {
+		const found = await bots.topic(topicChat);
+		if (found === undefined) throw new HttpError(404, "No such topic.");
+		return found.chat;
+	}
 	const id = bot === undefined || bot === null || bot === "" ? undefined : Number(bot);
 	if (id !== undefined && !Number.isInteger(id)) throw new HttpError(400, "bot must be a bot id");
 	const chat = await bots.chat(id);
@@ -527,6 +566,7 @@ async function route(req: IncomingMessage, res: ServerResponse, deps: BotServerD
 	}
 	if (url.pathname.startsWith("/api/bots")) return routeBots(req, res, deps, url, method);
 	if (url.pathname.startsWith("/api/chat")) return routeChat(req, res, deps, url, method);
+	if (url.pathname.startsWith("/api/topics")) return routeTopics(req, res, deps, url, method);
 	if (url.pathname.startsWith("/api/memory")) return routeMemory(req, res, deps, url, method);
 	if (url.pathname.startsWith("/api/approvals")) return routeApprovals(req, res, deps, url, method);
 	if (url.pathname.startsWith("/api/")) return routeApi(req, res, deps, url, method);
@@ -697,21 +737,27 @@ async function routeChat(req: IncomingMessage, res: ServerResponse, deps: BotSer
 	const bots = deps.bots;
 	if (bots === undefined) throw new HttpError(404, "not found");
 	const bot = url.searchParams.get("bot");
+	const topic = url.searchParams.get("topic");
 	if (method === "GET" && url.pathname === "/api/chat") {
-		const chat = await chatFor(bots, bot);
+		const chat = await chatFor(bots, bot, topic);
 		const limit = Math.min(Math.max(Number(url.searchParams.get("limit")) || HISTORY_LIMIT, 1), 200);
-		const page = await chat.history(limit, decodeCursor(url.searchParams.get("before")));
-		sendJson(res, 200, { items: page.items, before: encodeCursor(page.before), live: chat.live });
+		const before = decodeCursor(url.searchParams.get("before"));
+		const page = await chat.history(limit, before);
+		// A topic's first page also carries the main-chat messages in it, which its view shows above its thread.
+		const shown = topicId(topic);
+		const extra = shown === undefined || before !== undefined ? {} : { messages: await bots.topicMessages(shown) };
+		sendJson(res, 200, { items: page.items, before: encodeCursor(page.before), live: chat.live, ...extra });
 		return;
 	}
 	if (method === "POST" && url.pathname === "/api/chat") {
 		const body = await readJson(req, CHAT_BODY_BYTES);
 		const input = chatInput(body);
 		const which = (body as { bot?: unknown }).bot ?? bot;
-		const chat = await chatFor(bots, which);
+		const inTopic = (body as { topic?: unknown }).topic ?? topic;
+		const chat = await chatFor(bots, which, inTopic);
 		const images = await prepareImages(input.images, deps.images);
 		deps.log?.(
-			`owner (web${which === null || which === undefined ? "" : `, bot ${String(which)}`}):`,
+			`owner (web${given(inTopic) ? `, topic ${String(inTopic)}` : given(which) ? `, bot ${String(which)}` : ""}):`,
 			input.text,
 			...(images.length === 0 ? [] : [`[${images.length} image${images.length === 1 ? "" : "s"}]`]),
 		);
@@ -723,7 +769,7 @@ async function routeChat(req: IncomingMessage, res: ServerResponse, deps: BotSer
 		const entry = Number(url.searchParams.get("entry"));
 		const index = Number(url.searchParams.get("index") ?? 0);
 		if (!Number.isInteger(entry) || !Number.isInteger(index) || index < 0) throw new HttpError(400, "entry and index must be integers");
-		const image = await (await chatFor(bots, bot)).image(entry, index);
+		const image = await (await chatFor(bots, bot, topic)).image(entry, index);
 		if (image === undefined) throw new HttpError(404, "not found");
 		res.writeHead(200, { "content-type": image.mimeType, "cache-control": "max-age=31536000, immutable" }).end(Buffer.from(image.data, "base64"));
 		return;
@@ -732,21 +778,80 @@ async function routeChat(req: IncomingMessage, res: ServerResponse, deps: BotSer
 		const body = await readJson(req);
 		const { entryId, emoji, on } = reactionInput(body);
 		const which = (body as { bot?: unknown }).bot ?? bot;
-		const done = await (await chatFor(bots, which)).react(entryId, emoji, on);
+		const inTopic = (body as { topic?: unknown }).topic ?? topic;
+		const done = await (await chatFor(bots, which, inTopic)).react(entryId, emoji, on);
 		if (done === undefined) throw new HttpError(404, "No reply with text has that entryId in this chat.");
-		deps.log?.(`owner (web${which === null || which === undefined ? "" : `, bot ${String(which)}`}): ${on ? "reacted" : "took back"} ${emoji} on entry ${entryId}`);
+		deps.log?.(`owner (web${given(inTopic) ? `, topic ${String(inTopic)}` : given(which) ? `, bot ${String(which)}` : ""}): ${on ? "reacted" : "took back"} ${emoji} on entry ${entryId}`);
 		sendJson(res, 202, done);
 		return;
 	}
 	if (method === "POST" && url.pathname === "/api/chat/stop") {
-		await (await chatFor(bots, bot)).stop();
+		await (await chatFor(bots, bot, topic)).stop();
 		res.writeHead(204).end();
 		return;
 	}
-	if (method === "GET" && url.pathname === "/api/chat/events") return streamChat(req, res, await chatFor(bots, bot), bots, deps);
+	if (method === "GET" && url.pathname === "/api/chat/events") {
+		const chat = await chatFor(bots, bot, topic);
+		const shown = topicId(topic);
+		const owner = shown === undefined ? (given(bot) ? Number(bot) : bots.main()) : (await bots.topic(shown))?.topic.bot;
+		return streamChat(req, res, chat, owner ?? bots.main(), bots, deps);
+	}
 	if (method === "GET" && url.pathname === "/api/chat/computer") {
-		sendJson(res, 200, (await (await chatFor(bots, bot)).computer()) ?? { steps: [] });
+		sendJson(res, 200, (await (await chatFor(bots, bot, topic)).computer()) ?? { steps: [] });
 		return;
+	}
+	throw new HttpError(404, "not found");
+}
+
+// What the owner's topic changes send: a JSON object with these fields, or a TopicError's 400.
+function topicInput(body: unknown) {
+	const record = body !== null && typeof body === "object" && !Array.isArray(body) ? (body as Record<string, unknown>) : {};
+	const { bot, name, entry } = record;
+	if (bot !== undefined && (typeof bot !== "number" || !Number.isInteger(bot))) throw new HttpError(400, "bot must be a bot id");
+	if (name !== undefined && typeof name !== "string") throw new HttpError(400, "name must be a string");
+	if (entry !== undefined && (typeof entry !== "number" || !Number.isInteger(entry))) throw new HttpError(400, "entry must be a message's entry id");
+	return { bot, name, entry } as { bot?: number; name?: string; entry?: number };
+}
+
+// Topics (src/topics.ts): POST /api/topics opens one (`{ bot, name, entry? }`), PUT /api/topics/<id> renames it
+// (`{ name }`), and POST /api/topics/<id>/assign (`{ entry }`), /close, and /reopen put a main-chat message in it, close
+// it (its bot then writes the outcome line), and reopen it. GET /api/topics lists every topic; the chat stream sends the
+// list too. Each answers with the topic.
+async function routeTopics(req: IncomingMessage, res: ServerResponse, deps: BotServerDeps, url: URL, method: string) {
+	const bots = deps.bots;
+	if (bots === undefined) throw new HttpError(404, "not found");
+	if (method === "GET" && url.pathname === "/api/topics") return sendJson(res, 200, { topics: bots.topics() });
+	if (method === "POST" && url.pathname === "/api/topics") {
+		const { bot, name, entry } = topicInput(await readJson(req));
+		const topic = await bots.openTopic(bot ?? bots.main(), name ?? "", entry);
+		deps.log?.(`owner (web): opened topic ${topic.id} "${topic.name}" of bot ${topic.bot}${entry === undefined ? "" : ` with entry ${entry}`}`);
+		return sendJson(res, 201, { topic });
+	}
+	const match = url.pathname.match(/^\/api\/topics\/(\d+)(?:\/(assign|close|reopen))?$/);
+	const id = Number(match?.[1]);
+	if (match === null) throw new HttpError(404, "not found");
+	if (method === "PUT" && match[2] === undefined) {
+		const { name } = topicInput(await readJson(req));
+		const topic = await bots.renameTopic(id, name ?? "");
+		deps.log?.(`owner (web): renamed topic ${id} to "${topic.name}"`);
+		return sendJson(res, 200, { topic });
+	}
+	if (method === "POST" && match[2] === "assign") {
+		const { entry } = topicInput(await readJson(req));
+		if (entry === undefined) throw new HttpError(400, "entry must be a message's entry id");
+		const topic = await bots.assignTopic(id, entry);
+		deps.log?.(`owner (web): put entry ${entry} in topic ${id}`);
+		return sendJson(res, 200, { topic });
+	}
+	if (method === "POST" && match[2] === "close") {
+		const topic = await bots.closeTopic(id);
+		deps.log?.(`owner (web): closed topic ${id}`);
+		return sendJson(res, 200, { topic });
+	}
+	if (method === "POST" && match[2] === "reopen") {
+		const topic = await bots.reopenTopic(id);
+		deps.log?.(`owner (web): reopened topic ${id}`);
+		return sendJson(res, 200, { topic });
 	}
 	throw new HttpError(404, "not found");
 }

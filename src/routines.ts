@@ -31,6 +31,7 @@ import { cronLabel, nextFire, toCronSpec, type LegacySchedule } from "./cron.ts"
 // Types only: src/bots.ts calls into this module, so nothing here may load it.
 import type { BotLookup } from "./bots.ts";
 import type { Turns } from "./turns.ts";
+import { botOf } from "./topics.ts";
 import {
 	MAX_ROUTINES,
 	readRoutineFile,
@@ -231,8 +232,9 @@ const schedule = defineTool({
 			return errorText(messageOf(error));
 		}
 		try {
-			const view = await addRoutine({ title: args.title, prompt: args.prompt, cron: spec, ...onceField(args.once), bot: Number(api.conversationId) }, ctx);
-			const item = (await api.snapshot(RoutinesDoc, api.conversationId, ctx))?.items[view.id];
+			const bot = await botOf(api, api.conversationId, ctx);
+			const view = await addRoutine({ title: args.title, prompt: args.prompt, cron: spec, ...onceField(args.once), bot }, ctx);
+			const item = (await api.snapshot(RoutinesDoc, bot as ConversationId, ctx))?.items[view.id];
 			const removal = view.once === true ? " It removes itself after that." : "";
 			return text(`Scheduled ${view.id} task ${item?.taskId} "${view.title}" (${spec}). Next fire: ${view.nextFire}.${removal}`);
 		} catch (error) {
@@ -247,7 +249,8 @@ const listRoutines = defineTool({
 	description: "List saved routines, their cron schedules, and the next and last times each fires.",
 	parameters: Type.Object({}),
 	execute: async (_args, api, ctx) => {
-		const items = (await api.snapshot(RoutinesDoc, api.conversationId, ctx))?.items ?? {};
+		const bot = (await botOf(api, api.conversationId, ctx)) as ConversationId;
+		const items = (await api.snapshot(RoutinesDoc, bot, ctx))?.items ?? {};
 		const now = new Date(api.now());
 		const lines = Object.entries(items).map(([id, item]) => {
 			const last = item.lastFiredAt === undefined ? "" : `  last ${new Date(item.lastFiredAt).toISOString()}`;
@@ -265,7 +268,7 @@ const runRoutine = defineTool({
 		const guard = unboundError();
 		if (guard !== undefined) return errorText(guard);
 		try {
-			const view = await runRoutineNow(args.id, ctx, Number(api.conversationId));
+			const view = await runRoutineNow(args.id, ctx, await botOf(api, api.conversationId, ctx));
 			return text(`Running "${view.title}" now.`);
 		} catch (error) {
 			if (error instanceof RoutineNotFoundError) return text(`No routine ${args.id}.`);
@@ -676,7 +679,7 @@ const cancelRoutine = defineTool({
 		const guard = unboundError();
 		if (guard !== undefined) return errorText(guard);
 		try {
-			await deleteRoutine(args.id, ctx, Number(api.conversationId));
+			await deleteRoutine(args.id, ctx, await botOf(api, api.conversationId, ctx));
 			return text(`Cancelled ${args.id}.`);
 		} catch (error) {
 			if (error instanceof RoutineNotFoundError) return text(`No routine ${args.id}.`);

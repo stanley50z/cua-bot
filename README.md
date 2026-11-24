@@ -18,8 +18,9 @@ cua-bot runs on your own computer as an always-on service for one owner. When a 
 
 ## What it does
 
-- **Uses real computers.** `computer_use` clicks and types on any of your Cua Spaces, picked by name, and you watch the default one live in the browser. Click Take control to drive it yourself; the bot waits until you hand it back.
+- **Uses real computers.** `computer_use` clicks and types on any of your Cua Spaces, picked by name, and you watch one live in the browser: the Space a bot last started working on, or any Space you pick. Click Take control to drive it yourself, busy or idle; the bot waits until you hand it back.
 - **Runs several bots.** Each bot has its own chat, instructions (`agent.md`) and routines, and the bots can message each other.
+- **Keeps side discussions apart.** Split a matter out of a bot's chat into a topic: a thread that knows the chat's history and sends only its one-line outcome back when it closes.
 - **Runs routines.** Cron schedules (`30 7 * * 1-5`, `@daily`, `@every 30m`), repeating or run-once, stored as durable tasks, editable in the web portal or in `routines.json`.
 - **Remembers.** Plain markdown memory you can read and edit by hand, each fact tagged with the bots that get it.
 - **Asks before it acts.** An email to anyone but you, or a delete, becomes an approval card. Nothing goes out until you click.

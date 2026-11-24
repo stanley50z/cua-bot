@@ -8,7 +8,7 @@
 <!--
  The cua-bot web portal (Workbench layout), served by src/web.ts at GET /. One self-contained document:
  inline CSS and JS, no dependencies, works offline. Talks to /api/bots (the bot list and its edits),
- /api/chat?bot=<id> (one bot's history, send, react, stop),
+ /api/chat?bot=<id> (one bot's history, send, react, stop; ?topic=<id> for one of its topics), /api/topics (open, rename, fill, close, reopen),
  /api/chat/events (server-sent live state), /api/chat/computer, /api/computer/control, /api/push, /api/routines, /api/connections, /api/autostart, /api/model,
  and /shots/. Registers /sw.js for Web Push once the owner turns notifications on. Links /manifest.webmanifest,
  without which an iPhone or iPad Home Screen icon gets no Web Push.
@@ -16,7 +16,8 @@
 -->
 <style>
 :root { --ink:#1B2129; --muted:#5A6370; --bg:#F4F6F8; --panel:#FFFFFF; --line:#DCE0E6; --drive:#A96500; --drive-line:#E2B567; --drive-bg:#FFF4E0;
-  --ok:#1E7A55; --bad:#B42318; --bad-bg:#FDF1F0; --accent:#27507F; --me:#E8EEF6; --focus:#2F6BFF; --star:#E07B00; }
+  --ok:#1E7A55; --bad:#B42318; --bad-bg:#FDF1F0; --accent:#27507F; --me:#E8EEF6; --focus:#2F6BFF; --star:#E07B00;
+  --topic:#6B4FA0; --topic-bg:#F3EFFA; --topic-line:#CDBFE6; }
 * { box-sizing: border-box; }
 html, body { height: 100%; margin: 0; }
 /* The side padding keeps a phone held sideways from drawing under its notch. */
@@ -242,11 +243,61 @@ dialog .row .btn.danger { margin-right: auto; }
 .receipt .result { flex-basis: 100%; margin: 4px 0 2px; }
 .banner { flex: none; margin: 12px 22px 0; border: 1px solid #E5B6B1; background: var(--bad-bg); color: var(--bad); border-radius: 8px; padding: 8px 12px; font-size: 13px; }
 
+/* topics (src/topics.ts): side threads of a bot's chat. A message in one wears its strip across the top of its bubble;
+   clicking the strip, or the topic's card in the right pane, shows the topic in the chat. */
+.tstrip { display: flex; align-items: center; gap: 6px; border: 0; border-bottom: 1px solid var(--topic-line); background: var(--topic-bg); color: var(--topic); font: inherit; font-size: 12px; line-height: 1.5; padding: 3px 13px; cursor: pointer; text-align: left; white-space: nowrap; }
+.tstrip b { font-weight: 600; overflow: hidden; text-overflow: ellipsis; }
+.tstrip .r { margin-left: auto; padding-left: 14px; color: var(--muted); }
+.tstrip:hover b, .tstrip:focus-visible b { text-decoration: underline; }
+.tstrip.closed { background: var(--bg); color: var(--muted); border-bottom-color: var(--line); }
+.tstrip .by { color: var(--muted); }
+.in-topic > .tstrip { margin: -8px -13px 8px; width: calc(100% + 26px); border-radius: 11px 11px 0 0; }
+.bubble.in-topic { border-color: var(--topic-line); }
+.m.me.in-topic { box-shadow: inset 0 0 0 1px var(--topic-line); }
+.bubble.in-topic:has(> .tstrip.closed) { border-color: var(--line); }
+.m.me.in-topic:has(> .tstrip.closed) { box-shadow: none; }
+.routine .tstrip { display: inline-flex; margin-right: 8px; padding: 0 8px; border: 1px solid var(--topic-line); border-radius: 6px; }
+.outcome { align-self: stretch; border-left: 3px solid var(--topic-line); padding: 3px 0 3px 12px; font-size: 13px; color: var(--muted); }
+.outcome b { color: var(--ink); font-weight: 600; }
+.trename { align-self: center; font-size: 12px; color: var(--topic); background: var(--topic-bg); border-radius: 999px; padding: 2px 12px; }
+/* in a topic's view, between the main-chat messages put in it and its own thread */
+.thread-start { align-self: stretch; display: flex; align-items: center; gap: 10px; font-size: 12px; color: var(--muted); }
+.thread-start::before, .thread-start::after { content: ""; flex: 1; border-top: 1px solid var(--line); }
+.acts button.hi { color: var(--topic); }
+.acts button.hi:hover { background: var(--topic-bg); color: var(--topic); }
+.acts button.grip { cursor: grab; }
+/* the chat's header while it shows a topic */
+.chatcol .bar.in-topic { background: var(--topic-bg); border-bottom-color: var(--topic-line); }
+.bar.in-topic #chat-h { color: var(--muted); font-weight: 400; }
+#topic-back, #topic-crumb, #topic-done { display: none; }
+.bar.in-topic #topic-back { display: inline-flex; }
+.bar.in-topic #topic-crumb { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.bar.in-topic #topic-done { display: inline-flex; margin-left: auto; }
+.bar.in-topic #model { margin-left: 0; }
+.bar.in-topic #edit-bot { display: none; }
+.bar.in-topic #chat-state:not(:empty) { margin-left: 8px; }
+#topic-crumb .sep { color: var(--muted); }
+#topic-name { border: 0; background: transparent; padding: 2px 4px; border-radius: 6px; color: var(--topic); font: 600 16px "Bahnschrift", sans-serif; cursor: text; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+#topic-name:hover { background: rgba(255,255,255,.6); }
+#topic-rename { font: 600 15px "Bahnschrift", sans-serif; color: var(--topic); border: 1px solid var(--topic); border-radius: 6px; padding: 2px 6px; min-width: 0; width: 220px; outline: none; }
+/* the message box while what it sends goes to a topic */
+.target { order: -1; flex: 0 0 calc(100% + 22px); margin: -8px -8px 0 -14px; display: flex; align-items: center; gap: 6px; padding: 4px 8px 4px 14px; background: var(--topic-bg); color: var(--topic); font-size: 12.5px; border-bottom: 1px solid var(--topic-line); border-radius: 11px 11px 0 0; }
+.target b { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.target button { margin-left: auto; width: 22px; height: 22px; border: 0; background: transparent; border-radius: 5px; color: var(--muted); cursor: pointer; display: grid; place-items: center; padding: 0; }
+.target button:hover { background: #fff; color: var(--ink); }
+.target button svg { width: 12px; height: 12px; }
+.composer.to-topic, .composer.to-topic:focus-within { border-color: var(--topic); }
+.composer.to-topic:focus-within { box-shadow: 0 0 0 2px var(--topic-line); }
+.composer.to-topic #send { background: var(--topic); border-color: var(--topic); }
+
 /* computer pane */
 .side { display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--bg); }
 .side .bar { background: var(--bg); }
 .side .bar .state { margin-left: auto; line-height: 1.15; }
-.side .bar h1 { flex: none; max-width: 55%; }
+.side .bar h1 { flex: none; max-width: 55%; min-width: 0; display: flex; margin-left: -6px; }
+.side .bar h1 select { font: inherit; letter-spacing: inherit; color: var(--ink); background: transparent; border: 0; border-radius: 7px; padding: 4px 4px 4px 6px; max-width: 100%; min-width: 0; text-overflow: ellipsis; cursor: pointer; }
+.side .bar h1 select:hover:not(:disabled) { background: var(--panel); }
+.side .bar h1 select:disabled { appearance: none; opacity: 1; cursor: default; }
 .side .bar .btn { flex: none; }
 .screen { flex: none; margin: 16px 16px 0; padding: 0; border-radius: 8px; overflow: hidden; aspect-ratio: 16 / 10; background: #000; border: 1px solid var(--line); position: relative; display: grid; place-items: center; cursor: zoom-in; }
 .screen.drive { outline: 3px solid var(--drive); outline-offset: -1px; border-color: var(--drive); }
@@ -286,8 +337,43 @@ dialog .row .btn.danger { margin-right: auto; }
 /* Focus sits here while the owner drives, so the browser's own keyboard handling turns keys into text. */
 .keys { position: absolute; left: 0; top: 0; width: 1px; height: 1px; padding: 0; border: 0; opacity: 0; resize: none; pointer-events: none; }
 .shot-time { flex: none; margin: 6px 16px 0; font-size: 12px; color: var(--muted); }
-.steps { margin: 12px 16px 16px; overflow: auto; flex: 1; min-height: 0; }
+/* The steps fold into one line under the screen; open, they take the place of the topic list. */
+.steps-line { flex: none; margin: 8px 16px 0; display: flex; align-items: center; gap: 6px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); padding: 6px 10px; font: inherit; font-size: 12.5px; color: var(--muted); cursor: pointer; text-align: left; white-space: nowrap; overflow: hidden; }
+.steps-line:hover { border-color: #9FB2C8; }
+.steps-line b { color: var(--ink); font-weight: 600; }
+.steps-line code { color: var(--accent); font-size: 12px; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.steps-line.running code { color: var(--drive); }
+.steps-line .chev { margin-left: auto; padding-left: 8px; }
+.steps-line[aria-expanded="true"] { border-radius: 8px 8px 0 0; border-bottom-color: transparent; }
+.steps { margin: 0 16px 16px; overflow: auto; flex: 1; min-height: 0; background: var(--panel); border: 1px solid var(--line); border-top: 0; border-radius: 0 0 8px 8px; padding: 4px 10px 8px; }
 .steps h2 { font: 600 13px "Bahnschrift", sans-serif; margin: 0 0 6px; color: var(--muted); letter-spacing: .02em; }
+.topics { flex: 1; min-height: 0; display: flex; flex-direction: column; margin: 12px 16px 16px; }
+.topics-head { flex: none; display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.topics-head h2 { font: 600 12px "Bahnschrift", sans-serif; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; margin: 0; }
+.topics-head .btn { margin-left: auto; color: var(--topic); border-color: var(--topic-line); background: var(--topic-bg); }
+.topics-head .btn:hover { background: #E9E1F6; }
+.topic-list { list-style: none; margin: 0; padding: 0; overflow: auto; display: flex; flex-direction: column; gap: 6px; min-height: 0; }
+.topic-list li { position: relative; }
+.tcard { width: 100%; display: block; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); padding: 7px 12px; text-align: left; cursor: pointer; font: inherit; font-size: 13px; color: var(--ink); }
+.tcard:hover { border-color: var(--topic-line); }
+.tcard[aria-current="true"] { border: 2px solid var(--topic); background: var(--topic-bg); padding: 6px 11px; }
+.tcard .head { display: flex; align-items: center; gap: 5px; padding-right: 64px; min-width: 0; }
+.tcard .name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tcard .meta { flex: none; color: var(--muted); font-size: 12px; }
+.tcard .last { display: block; color: var(--muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tcard .last.wait { color: var(--drive); }
+.tcard .unread, .tcard .busy { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--topic); }
+.tcard .busy { background: var(--accent); animation: pulse 1.2s ease-in-out infinite; }
+.tclose { position: absolute; top: 6px; right: 8px; opacity: 0; font-size: 12px; padding: 1px 8px; }
+.topic-list li:hover .tclose, .tclose:focus-visible { opacity: 1; }
+.tcard.drop { border: 2px dashed var(--topic); background: var(--topic-bg); padding: 6px 11px; }
+.tcard .hint { display: none; color: var(--topic); font-size: 12px; font-weight: 600; }
+.tcard.drop .hint { display: block; }
+.tcard.drop .last { display: none; }
+.new-topic { display: flex; align-items: center; gap: 8px; border: 2px solid var(--topic); border-radius: 10px; background: var(--panel); padding: 4px 6px 4px 10px; color: var(--topic); }
+.new-topic input { flex: 1; min-width: 0; border: 0; outline: none; font: inherit; font-size: 13px; color: var(--ink); padding: 4px 0; background: transparent; }
+.new-topic small { color: var(--muted); font-size: 11.5px; white-space: nowrap; }
+.topics-none { color: var(--muted); font-size: 12.5px; margin: 2px 0; }
 .steps ol { margin: 0; padding: 0; list-style: none; }
 .steps li { display: grid; grid-template-columns: 22px 150px minmax(0, 1fr) auto; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--line); font-size: 13px; }
 .steps li .n { color: var(--muted); font: 12px "Bahnschrift", sans-serif; padding-top: 1px; }
@@ -523,6 +609,13 @@ dialog .row { display: flex; gap: 8px; justify-content: flex-end; margin-top: 18
   #chat-state:empty, #model, #notify { display: none; }
   .to-computer { grid-column: 4; }
   #edit-bot { grid-column: 5; width: 40px; height: 40px; margin: 0; }
+  /* A topic's header: ← All and the topic's name in place of the bot's, and Done in place of the pencil. */
+  .bar.in-topic #chat-av, .bar.in-topic #chat-h, #topic-crumb .sep { display: none; }
+  #topic-back { grid-column: 2; padding: 6px 10px; }
+  #topic-crumb { grid-area: 1 / 3; }
+  .bar.in-topic #chat-state { grid-area: 2 / 3; margin-left: 0; }
+  .bar.in-topic:has(#chat-state:empty) #topic-crumb { grid-row: 1 / span 2; }
+  #topic-done { grid-column: 5; }
   #edit-bot svg { width: 18px; height: 18px; }
   .msgs { padding: 12px 12px 6px; }
   .m { max-width: 88%; }
@@ -626,6 +719,8 @@ dialog .row { display: flex; gap: 8px; justify-content: flex-end; margin-top: 18
  <symbol id="i-bell" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 17v-6a6 6 0 0 1 12 0v6l1.5 2h-15zM10 21.5h4"/></symbol>
  <symbol id="i-keys" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="6" width="19" height="12" rx="2"/><path d="M6.5 10h.1M10 10h.1M13.9 10h.1M17.4 10h.1M8 14h8"/></symbol>
  <symbol id="i-chip" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="7" y="7" width="10" height="10" rx="1.5"/><path d="M10 3.5V7M14 3.5V7M10 17v3.5M14 17v3.5M3.5 10H7M3.5 14H7M17 10h3.5M17 14h3.5"/></symbol>
+ <symbol id="i-branch" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="6.5" cy="5.5" r="2"/><circle cx="6.5" cy="18.5" r="2"/><circle cx="17.5" cy="9.5" r="2"/><path d="M6.5 7.5v9M17.5 11.5c0 3-4 3-9.4 5.4"/></symbol>
+ <symbol id="i-grip" viewBox="0 0 24 24" fill="currentColor"><circle cx="9" cy="6" r="1.6"/><circle cx="15" cy="6" r="1.6"/><circle cx="9" cy="12" r="1.6"/><circle cx="15" cy="12" r="1.6"/><circle cx="9" cy="18" r="1.6"/><circle cx="15" cy="18" r="1.6"/></symbol>
  <symbol id="i-edit"viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13 7l4 4"/></symbol>
 </svg>
 
@@ -646,10 +741,11 @@ dialog .row { display: flex; gap: 8px; justify-content: flex-end; margin-top: 18
     <ul id="bot-rows"></ul>
    </nav>
    <div class="chatcol">
-    <div class="bar"><span id="chat-av"></span><h1 id="chat-h">cua-bot</h1><button type="button" class="to-computer" id="to-computer" aria-label="Computer" title="Computer"><svg aria-hidden="true"><use href="#i-screen"/></svg></button><button type="button" class="edit" id="edit-bot" aria-label="Edit this bot" title="Edit name and agent file"><svg><use href="#i-edit"/></svg></button><span class="state" id="chat-state" aria-live="polite"></span><span class="aside" id="model"></span><button class="btn" id="notify" type="button" hidden>Turn on notifications</button></div>
+    <div class="bar" id="chat-bar"><button type="button" class="btn" id="topic-back" title="Back to all of this bot's messages">← All</button><span id="chat-av"></span><h1 id="chat-h">cua-bot</h1><span id="topic-crumb"><span class="sep" aria-hidden="true">›</span><button type="button" id="topic-name" title="Rename this topic"></button></span><button type="button" class="to-computer" id="to-computer" aria-label="Computer" title="Computer"><svg aria-hidden="true"><use href="#i-screen"/></svg></button><button type="button" class="edit" id="edit-bot" aria-label="Edit this bot" title="Edit name and agent file"><svg><use href="#i-edit"/></svg></button><span class="state" id="chat-state" aria-live="polite"></span><button type="button" class="btn" id="topic-done" title="Close this topic; the bot posts its outcome in the main chat">Done ✓</button><span class="aside" id="model"></span><button class="btn" id="notify" type="button" hidden>Turn on notifications</button></div>
     <div class="banner" id="chat-error" role="alert" hidden></div>
     <div class="msgs" id="msgs" aria-live="polite"></div>
     <form class="composer" id="composer">
+     <div class="target" id="target" hidden><span aria-hidden="true">◆</span><span>Replying in <b id="target-name"></b></span><button type="button" id="target-clear" aria-label="Send to the main chat instead" title="Send to the main chat instead"><svg><use href="#i-x"/></svg></button></div>
      <div class="attachments" id="attachments" aria-label="Images to send" hidden></div>
      <div class="input" id="input" contenteditable="plaintext-only" role="textbox" aria-multiline="true" aria-label="Message cua-bot" data-placeholder="Message cua-bot"></div>
      <button type="button" class="icon" id="stop" aria-label="Stop the current reply" title="Stop the current reply" hidden><svg><use href="#i-stop"/></svg></button>
@@ -741,11 +837,16 @@ dialog .row { display: flex; gap: 8px; justify-content: flex-end; margin-top: 18
   </section>
  </main>
 
- <aside class="side" aria-labelledby="space-h">
-  <div class="bar"><h1 id="space-h">Computer</h1><span class="state" id="space-state"></span><button class="btn" id="take-control" type="button" title="Expand the live screen and drive it with your mouse and keyboard">Take control</button></div>
+ <aside class="side" aria-label="Computer">
+  <div class="bar"><h1 id="space-h"><select id="space-pick" aria-label="Computer on the live screen" title="Show another computer. A bot's next computer task switches to the one it uses" disabled><option>Computer</option></select></h1><span class="state" id="space-state"></span><button class="btn" id="take-control" type="button" title="Expand the live screen and drive it with your mouse and keyboard">Take control</button></div>
   <button type="button" class="screen" id="screen" aria-label="Expand the live screen"><canvas id="live-screen" aria-label="Live screen of the computer"></canvas><span class="expand"><svg aria-hidden="true"><use href="#i-expand"/></svg>Expand</span><span class="note">You're on this computer, so its live screen is off here.</span><span class="tag" hidden>Bot is driving</span></button>
   <div class="shot-time" id="shot-time"></div>
-  <div class="steps"><h2 id="steps-h">Steps</h2><ol id="steps"></ol></div>
+  <button type="button" class="steps-line" id="steps-line" aria-expanded="false" aria-controls="steps-box"></button>
+  <div class="steps" id="steps-box" hidden><h2 id="steps-h">Steps</h2><ol id="steps"></ol></div>
+  <section class="topics" id="topics" aria-labelledby="topics-h">
+   <div class="topics-head"><h2 id="topics-h">Topics</h2><button type="button" class="btn" id="new-topic">+ New topic</button></div>
+   <ul class="topic-list" id="topic-list"></ul>
+  </section>
  </aside>
 </div>
 
@@ -924,11 +1025,18 @@ function markdown(text) {
 // `bot` is the id of the bot whose chat is open; `bots` is the list from /api/bots. `picking` is the reply whose
 // reaction picker is open; `tapped` is the key of the message whose toolbar a tap opened on a touch screen;
 // `reacting` holds reactions sent but not yet back as items, by "<reply id>:<emoji>".
-const state = { bot: null, bots: [], items: [], ids: new Set(), before: null, live: { busy: false, partial: "", tools: [] }, queued: [], open: new Set(), computer: { steps: [] }, approvals: [], picking: null, tapped: null, reacting: new Map() };
+// Topics (src/topics.ts): `topics` is every bot's topic list from the event stream; `topic` is the topic the chat shows,
+// or null for the bot's main chat, and `topicMessages` the main-chat messages in it, shown above its thread. `replyTo`
+// is the topic the message box sends to from the main chat (Reply in topic, or a quote of a message in a topic).
+// `newTopic` is the name field + New topic or Open as topic opened ({ entry } for the message it starts with), or null.
+// `stepsOpen` says the computer steps are expanded in place of the topic list.
+const state = { bot: null, bots: [], items: [], ids: new Set(), before: null, live: { busy: false, partial: "", tools: [] }, queued: [], open: new Set(), computer: { steps: [] }, approvals: [], picking: null, tapped: null, reacting: new Map(),
+  topic: null, topics: [], topicMessages: [], replyTo: null, newTopic: null, stepsOpen: false };
 // The expanded live screen (see "expanded live screen" below): whether the owner has control of the Space, whether
 // any bot's task is running on it, the keys they hold down there, and their input on its way. `here` says the Space is
 // the desktop this browser runs on, so the live screen stays off; it is undefined until the event stream says.
-const view = { space: undefined, here: undefined, owner: false, driving: false, held: new Map(), queue: [], sending: null, lastMove: 0 };
+// `spaces` lists every Space for the pane's picker; `space` is the shown one's id.
+const view = { space: undefined, spaces: [], here: undefined, owner: false, driving: false, held: new Map(), queue: [], sending: null, lastMove: 0 };
 // The owner's display choices, kept in this browser. `botTalk` shows the messages bots send each other, `tools` the
 // tool chips and screenshots in replies, `routineRuns` the line each routine firing leaves in its chat,
 // `controlOnExpand` makes clicking an undriven live screen take control. `sendKey` ("enter" or "ctrlEnter") is the
@@ -943,6 +1051,19 @@ for (const key of ["phrases", "emoji"]) {
 }
 const currentBot = () => state.bots.find((b) => b.id === state.bot) || { id: state.bot, name: "cua-bot", instructions: "", main: true };
 const mainId = () => (state.bots.find((b) => b.main) || {}).id;
+// The open bot's topics, oldest first; the one a main-chat message is in; and the topic the chat shows.
+const botTopics = () => state.topics.filter((t) => t.bot === state.bot);
+const openTopics = () => botTopics().filter((t) => !t.closed);
+const topicById = (id) => state.topics.find((t) => t.id === id);
+const topicOfEntry = (id) => botTopics().find((t) => t.messages.includes(id));
+const currentTopic = () => (state.topic === null ? undefined : topicById(state.topic));
+// The query naming the chat on screen for /api/chat and its routes: the topic's, or the bot's.
+const chatQuery = () => (state.topic !== null ? "topic=" + state.topic : "bot=" + state.bot);
+// What keys the message box's draft and pasted images: a topic's own, or the bot's.
+const chatKey = () => (state.topic !== null ? "topic:" + state.topic : String(state.bot));
+// The topic a message box send goes to: the one on screen, or the one Reply in topic picked; null for the main chat.
+const sendTarget = () => state.topic ?? state.replyTo;
+const fromMain = (item) => state.topic !== null && state.topicMessages.some((m) => m.id === item.id);
 const botNamed = (to) => {
   const key = String(to || "").trim().replace(/^@/, "").toLowerCase();
   return state.bots.find((b) => String(b.id) === key) || state.bots.find((b) => b.name.toLowerCase() === key);
@@ -1129,7 +1250,7 @@ async function react(target, emoji, on) {
   state.picking = state.tapped = null;
   renderChat();
   try {
-    await request("POST", "/api/chat/react", { bot: state.bot, entryId: target, emoji, on });
+    await request("POST", "/api/chat/react", { bot: state.bot, ...(state.topic === null ? {} : { topic: state.topic }), entryId: target, emoji, on });
     showChatError("");
   } catch (error) {
     if (state.reacting.get(key)?.on === on) state.reacting.delete(key);
@@ -1230,19 +1351,19 @@ function composedText() {
     .filter((part) => part !== "").join("\n\n");
 }
 
-// The unsent message box, one draft per bot, kept in this browser so a reload or a cua-bot restart brings it back.
-// selectBot shows the open bot's draft. Every change to the box saves it, including a send, which empties it.
-const draftKey = (bot) => "cua-bot.draft." + bot;
+// The unsent message box, one draft per bot and per topic (chatKey), kept in this browser so a reload or a cua-bot
+// restart brings it back. selectBot shows the open chat's draft. Every change to the box saves it, including a send, which empties it.
+const draftKey = (key) => "cua-bot.draft." + key;
 // Held the one draft all bots used to share; the first bot opened inherits it.
 const SHARED_DRAFT_KEY = "cua-bot.draft";
-function saveDraft(bot, parts) {
-  if (parts.length === 0) localStorage.removeItem(draftKey(bot));
-  else localStorage.setItem(draftKey(bot), JSON.stringify(parts));
+function saveDraft(key, parts) {
+  if (parts.length === 0) localStorage.removeItem(draftKey(key));
+  else localStorage.setItem(draftKey(key), JSON.stringify(parts));
 }
 function restoreDraft() {
   if (state.bot == null) return; // the bot list failed to load, so no bot is open
   let parts = [];
-  try { parts = JSON.parse(localStorage.getItem(draftKey(state.bot)) ?? localStorage.getItem(SHARED_DRAFT_KEY) ?? "[]"); } catch { /* unreadable: start empty */ }
+  try { parts = JSON.parse(localStorage.getItem(draftKey(chatKey())) ?? localStorage.getItem(SHARED_DRAFT_KEY) ?? "[]"); } catch { /* unreadable: start empty */ }
   localStorage.removeItem(SHARED_DRAFT_KEY);
   if (!Array.isArray(parts)) parts = [];
   caret = null;
@@ -1250,7 +1371,7 @@ function restoreDraft() {
     typeof part?.quote === "string" ? quoteChip(part.quote) : document.createTextNode(String(part?.text ?? ""))));
 }
 new MutationObserver(() => {
-  if (state.bot != null) saveDraft(state.bot, inputParts());
+  if (state.bot != null) saveDraft(chatKey(), inputParts());
 }).observe($("input"), { childList: true, subtree: true, characterData: true });
 
 // The owner's message as its blockquotes (without their "> ") and the text between them, in order.
@@ -1309,6 +1430,9 @@ function ownMessage(text, className, pics = []) {
 
 // The hover toolbar beside a message: Reply quotes the whole message; a bot reply also gets React, which opens the
 // quick picker. `mine` is the reply's reactions from reactionsOf(). On a touch screen a tap on the message opens it.
+// In the main chat, Reply on a message in an open topic becomes Reply in topic, which points the message box at that
+// topic, and every message gets Open as topic (unless it is in an open one) and a handle to drag it onto a topic in
+// the right pane. In a topic's view, the main-chat messages put in it get Reply alone.
 function messageActions(item, mine) {
   const acts = el("div", "acts" + (state.picking === item.id || state.tapped === String(item.id) ? " open" : ""));
   const tray = el("div", "tray");
@@ -1322,7 +1446,8 @@ function messageActions(item, mine) {
     tray.append(b);
     return b;
   };
-  if (item.kind === "assistant" && settings.emoji.length > 0) {
+  const topic = state.topic === null ? openTopicOf(item.id) : undefined;
+  if (item.kind === "assistant" && settings.emoji.length > 0 && !fromMain(item)) {
     const open = button("React", "i-smile", () => { state.picking = state.picking === item.id ? null : item.id; renderChat(); });
     open.setAttribute("aria-expanded", String(state.picking === item.id));
     if (state.picking === item.id) {
@@ -1341,10 +1466,21 @@ function messageActions(item, mine) {
       acts.append(picker);
     }
   }
-  if (item.text.trim() !== "") button("Reply", "i-reply", () => {
-    addQuote(item.text);
-    if (state.tapped !== null) { state.tapped = null; renderChat(); }
-  });
+  const untap = () => { if (state.tapped !== null) { state.tapped = null; renderChat(); } };
+  if (topic) button("Reply in " + topic.name, "i-reply", () => { replyInTopic(topic.id); untap(); }).classList.add("hi");
+  else if (item.text.trim() !== "") button("Reply", "i-reply", () => { addQuote(item.text); untap(); });
+  if (state.topic === null && isMessage(item)) {
+    if (!topic) button("Open as topic", "i-branch", () => { startNewTopic(item.id); untap(); });
+    if (!touch.matches) {
+      const grip = button("Drag onto a topic in the right pane", "i-grip", () => {});
+      grip.classList.add("grip");
+      grip.draggable = true;
+      grip.addEventListener("dragstart", (event) => {
+        event.dataTransfer.setData(DRAG_TYPE, String(item.id));
+        event.dataTransfer.effectAllowed = "move";
+      });
+    }
+  }
   acts.prepend(tray);
   return acts;
 }
@@ -1370,7 +1506,10 @@ function bubble(key, text, item, mine) {
   const node = el("div", "bubble");
   node.dataset.key = String(key);
   node.append(markdown(text));
-  if (item) node.append(messageActions(item, mine || new Map()));
+  if (item) {
+    wearTopic(node, item);
+    node.append(messageActions(item, mine || new Map()));
+  }
   return node;
 }
 
@@ -1390,10 +1529,13 @@ function selectedQuote() {
 
 // Add to chat, and the bar's quick replies: puts the selection in the message box as a quote chip at the caret,
 // followed by `reply` (a phrase or an emoji) when given, for the owner to edit or send.
+// A quote of a message in an open topic, from the main chat, points the message box at that topic, as Reply in topic does.
 function quoteSelection(reply = "") {
   const picked = selectedQuote();
   if (!picked) return false;
   document.getSelection().removeAllRanges();
+  const topic = state.topic === null ? openTopicOf(Number(picked.root.dataset.key)) : undefined;
+  if (topic) { state.replyTo = topic.id; renderTarget(); }
   addQuote(picked.text, reply);
   return true;
 }
@@ -1511,8 +1653,8 @@ function routineTitle(text) {
 // One node per card and status, reused across re-renders so a draft being edited survives live updates.
 const cards = new Map();
 const DESTRUCTIVE = /delete|trash|clear|remove/i;
-// A card belongs to the bot that filed it; cards from before there were several bots are the main bot's.
-const inThisChat = (a) => (a.conversationId ?? mainId()) === state.bot;
+// A card belongs to the chat that filed it, a bot's or a topic's; cards from before there were several bots are the main bot's.
+const inThisChat = (a) => (a.conversationId ?? mainId()) === (state.topic ?? state.bot);
 const approvalFor = (callId) => state.approvals.find((a) => a.callId === callId && inThisChat(a));
 
 async function loadApprovals() {
@@ -1666,13 +1808,22 @@ function renderChat() {
   const reactions = reactionsOf();
   let day = "";
   const visible = state.items.filter((item) => shows(item, results));
+  // A topic's view starts with the main-chat messages put in it, without their tool steps, then its own thread.
+  const pinned = state.topic === null ? [] : state.topicMessages.map((item) => (item.kind === "assistant" ? { ...item, tools: [] } : item)).filter((item) => shows(item, results));
+  if (pinned.length > 0 && visible.length > 0) visible.unshift({ kind: "thread-start" });
+  visible.unshift(...pinned);
   if (visible.length === 0 && !state.live.busy && state.queued.length === 0) {
     const bot = currentBot();
     const empty = el("div", "empty");
-    empty.append(el("b", "", "Ask " + bot.name + " anything"));
-    const about = bot.instructions.split("\n").find((line) => line.trim() !== "" && !line.trimStart().startsWith("#"));
-    empty.append(bot.main ? "It can use the computer" + (phone.matches ? "" : " on the right") + ", check your mail and calendar, email you, run routines on a schedule, and hand work to your other bots."
-      : about || "It has the same tools as your other bots. Tell it what it's for, or give it standing instructions with the pencil next to its name.");
+    if (state.topic !== null) {
+      empty.append(el("b", "", "Nothing in " + (currentTopic()?.name ?? "this topic") + " yet"),
+        "What you send here goes to this topic only. Drag a message from " + bot.name + "'s chat onto its card to add it.");
+    } else {
+      empty.append(el("b", "", "Ask " + bot.name + " anything"));
+      const about = bot.instructions.split("\n").find((line) => line.trim() !== "" && !line.trimStart().startsWith("#"));
+      empty.append(bot.main ? "It can use the computer" + (phone.matches ? "" : " on the right") + ", check your mail and calendar, email you, run routines on a schedule, and hand work to your other bots."
+        : about || "It has the same tools as your other bots. Tell it what it's for, or give it standing instructions with the pencil next to its name.");
+    }
     box.append(empty);
   }
   // The reply block still open for more chips: consecutive replies that only ran tools share one block, so their
@@ -1683,12 +1834,22 @@ function renderChat() {
       const label = dayLabel(item.at);
       if (label !== day) { day = label; box.append(el("div", "day", label)); }
     }
-    if (item.kind === "user") {
-      const pics = Array.from({ length: item.images }, (_, index) => `/api/chat/image?bot=${state.bot}&entry=${item.id}&index=${index}`);
+    if (item.kind === "thread-start") box.append(el("div", "thread-start", "In this topic"));
+    else if (item.kind === "user") {
+      const from = fromMain(item) ? "bot=" + state.bot : chatQuery();
+      const pics = Array.from({ length: item.images }, (_, index) => `/api/chat/image?${from}&entry=${item.id}&index=${index}`);
       const node = ownMessage(item.text, "m me", pics);
       node.dataset.key = String(item.id);
+      wearTopic(node, item);
       node.append(messageActions(item));
       box.append(node, stamp(item.at, "stamp me"));
+    } else if (item.kind === "topic-closed") {
+      const line = el("div", "outcome");
+      line.append(item.by === "owner" ? "Closed by you · " : "Closed by " + currentBot().name + " · ", el("b", "", item.name), ": " + item.outcome);
+      line.title = "Closed " + new Date(item.at).toLocaleString();
+      box.append(line);
+    } else if (item.kind === "topic-renamed") {
+      box.append(el("div", "trename", (item.by === "owner" ? "You renamed" : currentBot().name + " renamed") + ` this topic from "${item.from}" to "${item.to}"`));
     } else if (item.kind === "bot") {
       const node = el("div", "m peer");
       const from = el("div", "from");
@@ -1699,6 +1860,7 @@ function renderChat() {
       const line = el("div", "routine");
       line.append(el("b", "", routineTitle(item.text)), ` ran at ${time(item.at)}.`);
       line.title = item.text;
+      wearTopic(line, item);
       box.append(line);
     } else if (item.kind === "marker") box.append(el("div", "marker", item.text));
     else if (item.kind === "assistant") {
@@ -1745,6 +1907,246 @@ function renderChat() {
   restoreSelection(box, selection);
   if (nearBottom) box.scrollTop = box.scrollHeight;
 }
+
+/* ---------- topics ---------- */
+// What a message in a topic, from the main chat, may be: the kinds src/topics.ts takes.
+const isMessage = (item) => item.kind === "user" || item.kind === "bot" || item.kind === "routine" || (item.kind === "assistant" && item.text.trim() !== "");
+const DRAG_TYPE = "application/x-cua-bot-entry";
+const repliesText = (topic) => (topic.replies === 1 ? "1 reply" : topic.replies + " replies");
+// The open topic a main-chat message is in; a closed topic's messages reply in the main chat.
+const openTopicOf = (id) => { const topic = topicOfEntry(id); return topic && !topic.closed ? topic : undefined; };
+
+// A main-chat message in a topic wears the topic's strip across its top: purple while the topic is open, grey once it
+// closed. Clicking it shows the topic, reopening a closed one first. A routine line wears it inline.
+function wearTopic(node, item) {
+  if (state.topic !== null) return;
+  const topic = topicOfEntry(item.id);
+  if (!topic) return;
+  const strip = el("button", "tstrip" + (topic.closed ? " closed" : ""));
+  strip.type = "button";
+  strip.title = topic.closed ? "Reopen " + topic.name : "Show " + topic.name;
+  strip.append("◆", el("b", "", topic.name));
+  if (topic.by === "bot") strip.append(el("span", "by", "· by " + currentBot().name));
+  strip.append(el("span", "r", topic.closed ? "closed" : repliesText(topic)));
+  strip.addEventListener("click", () => openTopic(topic.id));
+  if (!node.classList.contains("routine")) node.classList.add("in-topic");
+  node.prepend(strip);
+}
+
+// Shows topic `id` in the chat, reopening it first when it is closed.
+async function openTopic(id) {
+  const topic = topicById(id);
+  if (topic?.closed && !(await topicChange("POST", `/api/topics/${id}/reopen`, undefined, "Could not reopen " + topic.name + ": "))) return;
+  await selectBot(state.bot, true, id);
+}
+
+// Puts a topic a request answered with into the list at once, ahead of the event stream's copy, keeping what only the
+// stream knows (busy, replies, the newest reply).
+function mergeTopic(topic) {
+  const old = topicById(topic.id) ?? { busy: false, replies: 0 };
+  const merged = { ...old, ...topic };
+  if (!topic.closed) delete merged.closed;
+  state.topics = [...state.topics.filter((t) => t.id !== topic.id), merged].sort((a, b) => a.createdAt - b.createdAt);
+}
+
+// Whether a topic's card shows a dot: the bot wrote in it since the owner last had it open (seenTopics, in this browser).
+const SEEN_KEY = "cua-bot.topics-seen";
+let seenTopics = {};
+try { seenTopics = JSON.parse(localStorage.getItem(SEEN_KEY) || "{}") || {}; } catch { /* unreadable: nothing seen yet */ }
+const unread = (topic) => topic.last?.from === "bot" && (seenTopics[topic.id] ?? 0) < topic.replies && state.topic !== topic.id;
+function markSeen() {
+  const topic = currentTopic();
+  if (!topic || seenTopics[topic.id] === topic.replies) return;
+  seenTopics[topic.id] = topic.replies;
+  try { localStorage.setItem(SEEN_KEY, JSON.stringify(seenTopics)); } catch { /* storage full or off: the dot comes back */ }
+}
+
+// The right pane's topic list: the open bot's open topics, oldest first, each a card that shows the topic in the chat
+// (clicking the shown one goes back to the main chat), with Close on hover. Messages dragged from the chat drop onto a
+// card. The name field from + New topic or Open as topic sits at the top while it is open.
+function renderTopics() {
+  const topics = openTopics();
+  $("topics-h").textContent = topics.length === 0 ? "Topics" : `Topics · ${topics.length} open`;
+  const list = $("topic-list");
+  const focused = document.activeElement?.id === "new-topic-name";
+  const typed = focused ? document.activeElement.value : "";
+  list.replaceChildren();
+  if (state.newTopic) {
+    const row = el("li", "new-topic");
+    const input = el("input");
+    input.id = "new-topic-name";
+    input.placeholder = state.newTopic.entry === undefined ? "Name the new topic" : "Name a topic for this message";
+    input.setAttribute("aria-label", input.placeholder);
+    input.value = typed;
+    input.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") { state.newTopic = null; renderTopics(); focusChat(); }
+      if (event.key === "Enter" && input.value.trim() !== "") { event.preventDefault(); createTopic(input.value, state.newTopic.entry); }
+    });
+    input.addEventListener("blur", () => setTimeout(() => {
+      if (state.newTopic && document.activeElement !== input && input.isConnected && input.value.trim() === "") { state.newTopic = null; renderTopics(); }
+    }, 150));
+    row.append("◆", input, el("small", "", "Enter to add"));
+    list.append(row);
+    // Once the click that opened it is done, another render may have replaced this field, so focus whichever is there.
+    if (focused || state.newTopic.focus) { state.newTopic.focus = false; setTimeout(() => $("new-topic-name")?.focus()); }
+  }
+  if (topics.length === 0 && !state.newTopic) {
+    list.append(el("li", "topics-none", "Split a side discussion out of this chat with + New topic, or Open as topic on a message. " + currentBot().name + " can open them too."));
+  }
+  for (const topic of topics) {
+    const item = el("li");
+    const card = el("button", "tcard");
+    card.type = "button";
+    card.setAttribute("aria-current", String(state.topic === topic.id));
+    card.title = state.topic === topic.id ? "Back to all messages" : "Show " + topic.name + " in the chat";
+    const head = el("span", "head");
+    if (topic.busy) { const dot = el("span", "busy"); dot.title = "Working"; head.append(dot); }
+    else if (unread(topic)) { const dot = el("span", "unread"); dot.title = "New reply"; head.append(dot); }
+    head.append(el("span", "name", topic.name), el("span", "meta", `· ${topic.by === "bot" ? "by " + currentBot().name : "by you"} · ${repliesText(topic)}`));
+    const waiting = state.approvals.some((a) => a.conversationId === topic.id && (a.status === "waiting" || a.status === "running"));
+    const said = topic.last ? (topic.last.from === "owner" ? "You: " : currentBot().name + ": ") + topic.last.text.replace(/\*\*|`/g, "").replace(/\s+/g, " ") : "";
+    const last = el("span", "last" + (waiting ? " wait" : ""), state.topic === topic.id ? "Showing in the chat" : waiting ? "Waiting for your approval" : said || "No replies yet");
+    card.append(head, last, el("span", "hint", "Drop to add to " + topic.name));
+    card.addEventListener("click", () => selectBot(state.bot, true, state.topic === topic.id ? null : topic.id));
+    card.addEventListener("dragover", (event) => {
+      if (![...event.dataTransfer.types].includes(DRAG_TYPE)) return;
+      event.preventDefault();
+      event.dataTransfer.dropEffect = "move";
+      card.classList.add("drop");
+    });
+    card.addEventListener("dragleave", () => card.classList.remove("drop"));
+    card.addEventListener("drop", (event) => {
+      event.preventDefault();
+      card.classList.remove("drop");
+      const entry = Number(event.dataTransfer.getData(DRAG_TYPE));
+      if (Number.isInteger(entry) && entry > 0) topicChange("POST", `/api/topics/${topic.id}/assign`, { entry }, "Could not add the message to " + topic.name + ": ");
+    });
+    const close = el("button", "btn tclose", "Close ✓");
+    close.type = "button";
+    close.title = "Close " + topic.name + "; " + currentBot().name + " posts its outcome in the main chat";
+    close.addEventListener("click", () => closeTopic(topic.id));
+    item.append(card, close);
+    list.append(item);
+  }
+}
+
+// One of the owner's topic changes; the event stream brings the new list. Returns the topic, or undefined on failure,
+// which shows in the chat's error line after `failure`.
+async function topicChange(method, path, payload, failure) {
+  try {
+    const data = await request(method, path, payload);
+    showChatError("");
+    if (data?.topic) { mergeTopic(data.topic); renderTopics(); renderTarget(); renderChat(); }
+    return data?.topic;
+  } catch (error) {
+    showChatError(failure + error.message);
+    return undefined;
+  }
+}
+
+// Opens the name field at the top of the topic list; `entry` is the message Open as topic starts it with.
+function startNewTopic(entry) {
+  state.newTopic = { entry, focus: true };
+  state.stepsOpen = false;
+  renderSteps();
+  // On a phone the topic list is on the computer screen.
+  if (phone.matches && place.pane !== "computer") goTo("chat", place.tab, "computer");
+  renderTopics();
+}
+
+async function createTopic(name, entry) {
+  const topic = await topicChange("POST", "/api/topics", { bot: state.bot, name, ...(entry === undefined ? {} : { entry }) }, "Could not open the topic: ");
+  if (!topic) return;
+  state.newTopic = null;
+  renderTopics();
+}
+
+// Closes topic `id`; the bot then writes its outcome line in the main chat. A topic on screen gives way to the main chat.
+async function closeTopic(id) {
+  const topic = await topicChange("POST", `/api/topics/${id}/close`, undefined, "Could not close the topic: ");
+  if (!topic) return;
+  if (state.replyTo === id) { state.replyTo = null; renderTarget(); }
+  if (state.topic === id) await selectBot(state.bot, true, null);
+}
+
+// Points the message box at topic `id` from the main chat, so what the owner sends goes to that topic.
+function replyInTopic(id) {
+  state.replyTo = id;
+  renderTarget();
+  focusInput();
+}
+
+// The message box's label: which topic a send goes to. A topic on screen holds it; Reply in topic sets it from the
+// main chat, where its ✕ drops it.
+function renderTarget() {
+  if (state.replyTo !== null && !openTopics().some((t) => t.id === state.replyTo)) state.replyTo = null;
+  const topic = topicById(sendTarget());
+  $("target").hidden = !topic;
+  $("target-name").textContent = topic?.name ?? "";
+  $("target-clear").hidden = state.topic !== null;
+  $("composer").classList.toggle("to-topic", Boolean(topic));
+  const placeholder = topic ? "Reply in " + topic.name : "Message " + currentBot().name;
+  $("input").dataset.placeholder = placeholder;
+  $("input").setAttribute("aria-label", placeholder);
+}
+$("target-clear").addEventListener("click", () => { state.replyTo = null; renderTarget(); focusInput(); });
+
+// The chat header while it shows a topic: ← All, the bot's name, the topic's name (click to rename), and Done.
+function renderTopicHeader() {
+  const topic = currentTopic();
+  $("chat-bar").classList.toggle("in-topic", Boolean(topic));
+  if (!topic) return;
+  if (document.activeElement?.id !== "topic-rename") $("topic-name").textContent = "◆ " + topic.name;
+}
+$("topic-back").addEventListener("click", () => selectBot(state.bot, true, null));
+$("topic-done").addEventListener("click", () => { if (state.topic !== null) closeTopic(state.topic); });
+$("topic-name").addEventListener("click", () => {
+  const topic = currentTopic();
+  if (!topic) return;
+  const button = $("topic-name");
+  const input = el("input");
+  input.id = "topic-rename";
+  input.value = topic.name;
+  input.setAttribute("aria-label", "Topic name");
+  let done = false;
+  const finish = async (save) => {
+    if (done) return;
+    done = true;
+    input.replaceWith(button);
+    if (save && input.value.trim() !== "" && input.value.trim() !== topic.name) await topicChange("PUT", `/api/topics/${topic.id}`, { name: input.value }, "Could not rename the topic: ");
+    renderTopicHeader();
+  };
+  input.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") { event.preventDefault(); finish(true); }
+    if (event.key === "Escape") finish(false);
+  });
+  input.addEventListener("blur", () => finish(true));
+  button.replaceWith(input);
+  input.focus();
+  input.select();
+});
+$("new-topic").addEventListener("click", () => startNewTopic(undefined));
+
+// The steps of the last computer task fold into one line under the screen; open, they replace the topic list.
+function renderSteps() {
+  const c = state.computer, last = c.steps.at(-1);
+  const line = $("steps-line");
+  line.setAttribute("aria-expanded", String(state.stepsOpen));
+  line.classList.toggle("running", last?.status === "running");
+  const parts = [el("b", "", "Steps")];
+  if (last) parts.push(` ${c.steps.length} ·`, el("code", "", last.name), `· ${last.status === "running" ? "now" : time(last.at)}`);
+  else parts.push(" · none yet");
+  parts.push(el("span", "chev", state.stepsOpen ? "▴" : "▾"));
+  line.replaceChildren(...parts);
+  line.title = state.stepsOpen ? "Hide the steps and show the topics" : "Show the steps of the last computer task";
+  $("steps-box").hidden = !state.stepsOpen;
+  $("topics").hidden = state.stepsOpen;
+}
+$("steps-line").addEventListener("click", () => {
+  state.stepsOpen = !state.stepsOpen;
+  renderSteps();
+  if (state.stepsOpen) $("steps").lastElementChild?.scrollIntoView({ block: "nearest" });
+});
 
 // Whether a chat entry shows anything under the owner's settings. With tool steps off, a reply that only ran tools
 // shows nothing and is left out, so it leaves no gap or lone day label.
@@ -1900,12 +2302,13 @@ function renderLive() {
 
 function renderComputer() {
   const c = state.computer;
-  $("space-h").textContent = c.space || "Computer";
+  renderSpacePick();
   captionScreen();
   const list = $("steps");
   list.textContent = "";
   $("steps-h").textContent = c.steps.length === 0 ? "Steps"
-    : c.taskSpace && c.taskSpace !== c.space ? `Steps of the last computer task, on ${c.taskSpace}` : "Steps of the last computer task";
+    : "Steps of the last computer task" + (c.taskSpace && c.taskSpace !== c.space ? `, on ${c.taskSpace}` : "") + (c.topic ? `, from the topic ${c.topic}` : "");
+  renderSteps();
   if (c.steps.length === 0) list.append(el("li", "none", "The bot's clicks and keystrokes appear here while it works."));
   c.steps.forEach((step, index) => {
     const row = el("li", step.status);
@@ -2180,24 +2583,36 @@ liveCanvas.addEventListener("wheel", (event) => {
 /* ---------- chat I/O ---------- */
 function showChatError(message) { $("chat-error").textContent = message; $("chat-error").hidden = !message; }
 
+// Loads the open chat's newest messages: the bot's, or a topic's thread with the main-chat messages put in it.
 async function loadHistory() {
-  const bot = state.bot;
-  const data = await request("GET", "/api/chat?limit=60&bot=" + bot);
-  if (bot !== state.bot) return; // the owner switched bots while this loaded
+  const query = chatQuery();
+  const data = await request("GET", "/api/chat?limit=60&" + query);
+  if (query !== chatQuery()) return; // the owner switched chats while this loaded
   state.items = []; state.ids = new Set();
   addItems(data.items);
   state.before = data.before;
   state.live = data.live;
-  if (!(await fetchUntilShown(bot, OPEN_TURNS))) return;
+  state.topicMessages = data.messages ?? [];
+  if (!(await fetchUntilShown(query, OPEN_TURNS))) return;
+  markSeen();
   renderLive();
   renderChat();
   $("msgs").scrollTop = $("msgs").scrollHeight;
 }
 
+// The main-chat messages in the topic on screen, again, after the bot or the owner put one in it.
+async function loadTopicMessages() {
+  const query = chatQuery();
+  const data = await request("GET", "/api/chat?limit=1&" + query).catch(() => undefined);
+  if (!data || query !== chatQuery()) return;
+  state.topicMessages = data.messages ?? [];
+  renderChat();
+}
+
 async function loadEarlier() {
   const box = $("msgs");
   const fromBottom = box.scrollHeight - box.scrollTop;
-  if (!(await fetchUntilShown(state.bot, shownTurns() + 1))) return;
+  if (!(await fetchUntilShown(chatQuery(), shownTurns() + 1))) return;
   renderChat();
   box.scrollTop = box.scrollHeight - fromBottom;
 }
@@ -2205,24 +2620,40 @@ async function loadEarlier() {
 // How many turns a chat opens with at least, so it never opens blank.
 const OPEN_TURNS = 3;
 
-// Fetches earlier pages of `bot`'s chat until `turns` turns show a message, or the history runs out. A page can be
-// all routine runs and tool-only replies, which show nothing with those settings off. Returns false if the owner
-// switched bots meanwhile, so the caller drops what it was about to draw.
-async function fetchUntilShown(bot, turns) {
+// Fetches earlier pages of the chat `query` names until `turns` turns show a message, or the history runs out. A page
+// can be all routine runs and tool-only replies, which show nothing with those settings off. Returns false if the
+// owner switched chats meanwhile, so the caller drops what it was about to draw.
+async function fetchUntilShown(query, turns) {
   while (state.before && shownTurns() < turns) {
-    const data = await request("GET", "/api/chat?limit=60&bot=" + bot + "&before=" + encodeURIComponent(state.before));
-    if (bot !== state.bot) return false;
+    const data = await request("GET", "/api/chat?limit=60&" + query + "&before=" + encodeURIComponent(state.before));
+    if (query !== chatQuery()) return false;
     addItems(data.items);
     state.before = data.before;
   }
   return true;
 }
 
-// One event stream, for the open bot's chat. It also carries approvals and the bot list.
+// The topic list from the event stream. The topic on screen gives way to the main chat once it closes or goes, and
+// reloads its main-chat messages when they change.
+function applyTopics(topics) {
+  const shown = currentTopic();
+  state.topics = topics;
+  const now = currentTopic();
+  if (state.topic !== null && (!now || now.closed || now.bot !== state.bot)) { selectBot(state.bot, false, null); return; }
+  if (shown && now && shown.messages.join() !== now.messages.join()) loadTopicMessages();
+  markSeen();
+  renderTopics();
+  renderTarget();
+  renderTopicHeader();
+  renderChat();
+}
+
+// One event stream, for the open chat: the bot's or a topic's. It also carries approvals, the bot list, the topics,
+// and the bot's computer pane.
 let source = null;
 function connect() {
   source?.close();
-  source = new EventSource("/api/chat/events?bot=" + state.bot);
+  source = new EventSource("/api/chat/events?" + chatQuery());
   let failed = false;
   source.onopen = () => { if (failed) { failed = false; showChatError(""); loadHistory().catch(() => {}); loadApprovals(); loadBots(); } };
   source.onerror = () => { failed = true; showChatError("Lost the connection to cua-bot. Reconnecting…"); };
@@ -2231,12 +2662,15 @@ function connect() {
     if (data.type === "items") { addItems(data.items); renderChat(); }
     else if (data.type === "live") { state.live = data.live; renderLive(); renderChat(); }
     else if (data.type === "computer") { state.computer = data.computer; renderComputer(); }
-    else if (data.type === "approvals") { state.approvals = data.approvals; renderChat(); }
+    else if (data.type === "approvals") { state.approvals = data.approvals; renderChat(); renderTopics(); }
     else if (data.type === "bots") { state.bots = data.bots; renderBots(); refreshBotTags(); }
+    else if (data.type === "topics") applyTopics(data.topics);
     else if (data.type === "control") {
-      // A task moved the live screen to another Space, so the pane's heading names that one.
+      // A task or the owner moved the live screen to another Space, so the pane's heading names that one.
       if (view.space !== undefined && data.space !== view.space) loadComputer(state.bot);
       view.space = data.space;
+      if (!view.spaces.some((space) => space.id === view.space)) loadSpaces();
+      renderSpacePick();
       view.driving = data.driving;
       const here = data.here === true;
       if (here !== view.here) {
@@ -2253,8 +2687,12 @@ function connect() {
 
 /* ---------- bots ---------- */
 async function loadBots() {
-  try { state.bots = (await request("GET", "/api/bots")).bots; renderBots(); }
-  catch (error) { showChatError("Could not load your bots: " + error.message); }
+  try {
+    const [bots, topics] = await Promise.all([request("GET", "/api/bots"), request("GET", "/api/topics")]);
+    state.bots = bots.bots;
+    state.topics = topics.topics;
+    renderBots();
+  } catch (error) { showChatError("Could not load your bots: " + error.message); }
 }
 
 // Pinned bots are avatar tiles above the list, oldest pin first; the rest are rows. Right-click either to pin or unpin.
@@ -2293,9 +2731,11 @@ function renderBots() {
   $("chat-h").textContent = bot.name;
   $("model").textContent = bot.activeModel || "";
   $("edit-bot").setAttribute("aria-label", "Edit " + bot.name);
-  $("input").dataset.placeholder = "Message " + bot.name;
-  $("input").setAttribute("aria-label", "Message " + bot.name);
-  document.title = bot.main ? "cua-bot" : bot.name + " · cua-bot";
+  const topic = currentTopic();
+  document.title = topic ? topic.name + " · " + bot.name : bot.main ? "cua-bot" : bot.name + " · cua-bot";
+  renderTopicHeader();
+  renderTarget();
+  renderTopics();
 }
 
 // A bot's row or tile: a click opens its chat, a right-click (or the keyboard's menu key) its menu. A finger held
@@ -2371,25 +2811,56 @@ document.addEventListener("pointerdown", (event) => { if (botMenu && !botMenu.me
 for (const type of ["resize", "blur"]) window.addEventListener(type, () => closeBotMenu(false));
 document.addEventListener("scroll", () => closeBotMenu(false), true);
 
-// Opens a bot's chat: its history, its computer pane, and a fresh event stream. The choice is kept in the URL,
-// as a new history entry when `push` is set.
-async function selectBot(id, push = false) {
+// Opens a bot's chat, or with `topic` one of its open topics: its history, its computer pane, and a fresh event
+// stream. The choice is kept in the URL, as a new history entry when `push` is set. The computer pane is the bot's, so
+// moving between the bot's chat and its topics keeps it.
+async function selectBot(id, push = false, topic = null) {
   if (!state.bots.some((b) => b.id === id)) id = mainId();
-  const switched = id !== state.bot;
+  if (topic !== null && !state.topics.some((t) => t.id === topic && t.bot === id && !t.closed)) topic = null;
+  const botSwitched = id !== state.bot;
+  const switched = botSwitched || topic !== state.topic;
   state.bot = id;
+  state.topic = topic;
+  // The message box's topic label belongs to the bot's main chat; a topic on screen holds its own.
+  if (switched) state.replyTo = null;
+  if (botSwitched) state.newTopic = null;
   savePlace(push);
   renderBots();
   if (!switched && source) return;
   if (switched) { restoreDraft(); renderAttachments(); }
-  Object.assign(state, { items: [], ids: new Set(), before: null, live: { busy: false, partial: "", tools: [] }, queued: [], open: new Set(), computer: { steps: [] }, picking: null, tapped: null, reacting: new Map() });
+  Object.assign(state, { items: [], ids: new Set(), before: null, live: { busy: false, partial: "", tools: [] }, queued: [], open: new Set(), picking: null, tapped: null, reacting: new Map(), topicMessages: [] });
+  const newPane = botSwitched || !source;
+  if (newPane) state.computer = { steps: [] };
   showChatError("");
   renderChat();
   renderComputer();
   connect();
-  loadComputer(id);
+  if (newPane) loadComputer(id);
   await loadHistory().catch((error) => showChatError("Could not load the conversation: " + error.message));
   if (place.view === "chat") focusChat();
 }
+
+// The pane's heading picks the Space on the live screen, idle or not; a bot's next computer task moves it to the
+// Space that task uses. Until the list loads, it names the shown Space alone.
+function renderSpacePick() {
+  const pick = $("space-pick");
+  const shown = view.spaces.some((space) => space.id === view.space) ? []
+    : [{ id: view.space ?? "", name: state.computer.space || "Computer" }];
+  const options = [...view.spaces, ...shown];
+  pick.replaceChildren(...options.map((space) => { const option = el("option", "", space.name || space.id); option.value = space.id; return option; }));
+  pick.value = view.space ?? "";
+  pick.disabled = options.length < 2;
+}
+
+async function loadSpaces() {
+  try { view.spaces = (await request("GET", "/api/computer/spaces")).spaces; renderSpacePick(); }
+  catch {}
+}
+
+$("space-pick").addEventListener("change", async (event) => {
+  try { await request("POST", "/api/computer/space", { space: event.target.value }); }
+  catch (error) { showChatError("Could not show that computer: " + error.message); renderSpacePick(); }
+});
 
 function loadComputer(id) {
   request("GET", "/api/chat/computer?bot=" + id).then((c) => { if (id === state.bot) { state.computer = c; renderComputer(); } }).catch(() => {});
@@ -2555,38 +3026,42 @@ $("b-delete").addEventListener("click", async () => {
   finally { $("b-delete").disabled = false; }
 });
 
-// Sends the owner's message to the open bot with any pasted `images` ({ data, mimeType }), showing it queued until it
-// lands in the chat. `whenBusy` is what it does if the bot is busy. Resolves to whether it went; a failure shows in the
-// chat's error line.
-async function sendMessage(text, images = [], whenBusy = settings.whenBusy) {
+// Sends the owner's message to the open bot, or to `topic`, with any pasted `images` ({ data, mimeType }). A message to
+// the chat on screen shows queued until it lands there; one sent from the main chat to a topic (Reply in topic) lands
+// in the topic, whose card shows it. `whenBusy` is what it does if the bot is busy. Resolves to whether it went; a
+// failure shows in the chat's error line.
+async function sendMessage(text, images = [], whenBusy = settings.whenBusy, topic = state.topic) {
   const queued = { text, images, whenBusy };
-  state.queued.push(queued);
-  renderChat();
-  $("msgs").scrollTop = $("msgs").scrollHeight;
+  const shown = topic === state.topic;
+  if (shown) {
+    state.queued.push(queued);
+    renderChat();
+    $("msgs").scrollTop = $("msgs").scrollHeight;
+  }
   try {
-    await request("POST", "/api/chat", { text, images, bot: state.bot, whenBusy: queued.whenBusy });
+    await request("POST", "/api/chat", { text, images, bot: state.bot, ...(topic === null ? {} : { topic }), whenBusy: queued.whenBusy });
     showChatError("");
     return true;
   } catch (error) {
     state.queued = state.queued.filter((item) => item !== queued);
-    renderChat();
+    if (shown) renderChat();
     showChatError("Your message was not sent: " + error.message);
     return false;
   }
 }
 
 /* ---------- pasted images ---------- */
-// Images pasted into the message box wait in imagesOf(bot) as { data (base64), mimeType } and go with the next send.
-// Like the draft text, they are per bot; unlike it, a reload drops them.
+// Images pasted into the message box wait in imagesOf(chatKey()) as { data (base64), mimeType } and go with the next
+// send. Like the draft text, they are per bot and per topic; unlike it, a reload drops them.
 const unsentImages = new Map();
-function imagesOf(bot) {
-  if (!unsentImages.has(bot)) unsentImages.set(bot, []);
-  return unsentImages.get(bot);
+function imagesOf(key) {
+  if (!unsentImages.has(key)) unsentImages.set(key, []);
+  return unsentImages.get(key);
 }
 const imageUrl = (image) => `data:${image.mimeType};base64,${image.data}`;
 function renderAttachments() {
   const row = $("attachments");
-  const images = imagesOf(state.bot);
+  const images = imagesOf(chatKey());
   row.hidden = images.length === 0;
   row.replaceChildren(...images.map((image) => {
     const pic = el("div", "pic");
@@ -2622,7 +3097,7 @@ $("input").addEventListener("paste", async (event) => {
   const files = [...(event.clipboardData?.files ?? [])].filter((file) => file.type.startsWith("image/"));
   if (files.length === 0 || event.clipboardData.getData("text/plain") !== "") return;
   event.preventDefault();
-  const images = imagesOf(state.bot);
+  const images = imagesOf(chatKey());
   try {
     images.push(...(await Promise.all(files.map(readImage))));
     renderAttachments();
@@ -2631,22 +3106,25 @@ $("input").addEventListener("paste", async (event) => {
 
 // Sends what's in the composer with `whenBusy`. The send button and the send key use the setting; the composer's
 // keydown passes the other method for the other key.
+// A send from the main chat with a topic label goes to that topic, and the label clears once it went.
 async function sendComposer(whenBusy) {
   const input = $("input");
   const text = composedText();
-  const bot = state.bot, images = imagesOf(bot);
+  const key = chatKey(), images = imagesOf(key), target = sendTarget();
   if (text === "" && images.length === 0) return;
   const parts = inputParts();
   const sending = images.splice(0);
   input.replaceChildren();
   renderAttachments();
-  if (!(await sendMessage(text, sending, whenBusy))) {
-    // The owner may have opened another bot meanwhile, so the message goes back to the bot it was for.
-    saveDraft(bot, parts);
-    if (bot === state.bot) restoreDraft();
-    images.unshift(...sending);
-    renderAttachments();
+  if (await sendMessage(text, sending, whenBusy, target)) {
+    if (state.topic === null && state.replyTo === target) { state.replyTo = null; renderTarget(); }
+    return;
   }
+  // The owner may have opened another chat meanwhile, so the message goes back to the chat it was for.
+  saveDraft(key, parts);
+  if (key === chatKey()) restoreDraft();
+  images.unshift(...sending);
+  renderAttachments();
 }
 $("composer").addEventListener("submit", (event) => {
   event.preventDefault();
@@ -2676,7 +3154,7 @@ $("input").addEventListener("keydown", (event) => {
 $("stop").addEventListener("click", async () => {
   $("stop").disabled = true;
   try {
-    await request("POST", "/api/chat/stop?bot=" + state.bot);
+    await request("POST", "/api/chat/stop?" + chatQuery());
     state.queued = [];
     // Stop also drops reactions and take-backs still waiting behind the turn; one that already landed comes back as an item.
     state.reacting.clear();
@@ -2736,16 +3214,17 @@ if (pushSupported && Notification.permission === "default") {
   addEventListener("click", askOnce, true);
   addEventListener("keydown", askOnce, true);
 }
-// A clicked notification names its bot here when a tab is already open (src/sw.js).
+// A clicked notification names its bot, and its topic for a message sent in one, here when a tab is already open (src/sw.js).
 if (pushSupported) navigator.serviceWorker.addEventListener("message", (event) => {
   goTo("chat");
-  selectBot(event.data.bot);
+  selectBot(event.data.bot, false, event.data.topic ?? null);
 });
 
 /* ---------- views and the URL ---------- */
 // The URL's hash keeps the owner's place, so a reload, Back, or a copied link lands there again: `view` (routines,
 // memory, settings; the chat when absent), `tab` (Settings' chat, model, approvals, connections or tags; its General tab when absent), `tag` (the
-// memory tag open in Memory; Every bot when absent), and `bot` (the open bot; the main bot when absent). #bot=<id> links from before views had URLs still open that bot's chat.
+// memory tag open in Memory; Every bot when absent), `bot` (the open bot; the main bot when absent), and `topic` (the
+// topic the chat shows; the bot's main chat when absent). #bot=<id> links from before views had URLs still open that bot's chat.
 // `pane` is which of a view's screens the phone layout shows (see its styles): the detail when absent, or `list`
 // or `computer`. A wide window shows them side by side and never writes it.
 const VIEWS = ["chat", "routines", "memory", "settings"], TABS = ["general", "chat", "model", "approvals", "connections", "tags"];
@@ -2755,7 +3234,7 @@ let place = { view: "chat", tab: TABS[0], pane: "detail" };
 function readPlace() {
   const hash = new URLSearchParams(location.hash.slice(1));
   const pick = (key, names) => (names.includes(hash.get(key)) ? hash.get(key) : names[0]);
-  return { view: pick("view", VIEWS), tab: pick("tab", TABS), pane: pick("pane", PANES), bot: Number(hash.get("bot")) || undefined, tag: hash.get("tag") ?? EVERY_BOT };
+  return { view: pick("view", VIEWS), tab: pick("tab", TABS), pane: pick("pane", PANES), bot: Number(hash.get("bot")) || undefined, topic: Number(hash.get("topic")) || null, tag: hash.get("tag") ?? EVERY_BOT };
 }
 
 // A new view or tab is a new history entry, so Back returns to the last one; a bot switch replaces the entry.
@@ -2766,6 +3245,7 @@ function savePlace(push) {
   if (place.view === "memory" && memoryView.tag !== EVERY_BOT) hash.set("tag", memoryView.tag);
   if (place.pane !== "detail") hash.set("pane", place.pane);
   if (state.bot !== null && state.bot !== mainId()) hash.set("bot", state.bot);
+  if (state.topic !== null) hash.set("topic", state.topic);
   const next = hash.size > 0 ? "#" + hash : "";
   if (next === location.hash) return;
   history[push ? "pushState" : "replaceState"](null, "", next || location.pathname + location.search);
@@ -2826,7 +3306,7 @@ window.addEventListener("popstate", () => {
   const next = readPlace();
   memoryView.tag = next.tag;
   showView(next.view, next.tab, next.pane);
-  selectBot(next.bot ?? mainId());
+  selectBot(next.bot ?? mainId(), false, next.topic);
   loadView();
 });
 
@@ -3564,7 +4044,7 @@ const start = readPlace();
 if (phone.matches && location.hash === "") start.pane = "list";
 memoryView.tag = start.tag;
 showView(start.view, start.tab, start.pane);
-loadBots().then(() => { selectBot(start.bot ?? mainId()); loadView(); });
+loadBots().then(() => { selectBot(start.bot ?? mainId(), false, start.topic); loadView(); });
 loadApprovals();
 showNotifyState();
 if (pushSupported && Notification.permission === "granted") turnOnPush();

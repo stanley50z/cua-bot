@@ -72,6 +72,22 @@ export const ROUTINE_FIRING = "cua-bot.routine-firing";
 /** Entry kind of the owner's decision on an approval card, as told to the bot (src/approvals.ts, delivered by src/turns.ts). Its model message is the `[approval]` text. */
 export const APPROVAL_OUTCOME = "cua-bot.approval-outcome";
 
+/** Who opened, renamed, or closed a topic (src/topics.ts): the owner in the web portal, or the bot with manage_topic. */
+export type TopicBy = "owner" | "bot";
+/**
+ * Entry kind of a topic's outcome line in its bot's main chat, written when the topic closes (src/topics.ts). Its data is a
+ * TopicClosed; its model message is the `[topic]` text the bot reads.
+ */
+export const TOPIC_CLOSED = "cua-bot.topic-closed";
+export type TopicClosed = { topic: number; name: string; by: TopicBy; outcome: string };
+/** Entry kind of a topic's rename, in the topic's own thread (src/topics.ts). Its data is a TopicRenamed; the bot doesn't read it. */
+export const TOPIC_RENAMED = "cua-bot.topic-renamed";
+export type TopicRenamed = { from: string; to: string; by: TopicBy; at: number };
+/** Entry kind of a main-chat message copied into a topic the bot can't see it from (src/topics.ts). The bot reads it; the chat shows the original instead. */
+export const TOPIC_MESSAGE = "cua-bot.topic-message";
+/** Entry kind of the turn asking a topic's bot for the outcome of a topic the owner closed (delivered by src/turns.ts). The chat doesn't show it. */
+export const TOPIC_CLOSE = "cua-bot.topic-close";
+
 export type ChatTool = { id: string; name: string; args: Record<string, unknown> };
 /** An image in an owner message: base64 data in a format the model takes. */
 export type ChatImage = { data: string; mimeType: string };
@@ -89,7 +105,11 @@ export type ChatItem =
 	| { id: number; kind: "reaction"; target: number; emoji: string; on: boolean; at: number }
 	| { id: number; kind: "assistant"; text: string; at: number; tools: ChatTool[]; error?: string; aborted: boolean }
 	| { id: number; kind: "tool"; callId: string; name: string; text: string; isError: boolean; shots: string[]; images: number }
-	| { id: number; kind: "marker"; text: string };
+	| { id: number; kind: "marker"; text: string }
+	/** A topic's outcome line in the main chat, posted when the topic closed. */
+	| ({ id: number; kind: "topic-closed"; at: number } & TopicClosed)
+	/** A topic's rename, in the topic's thread. */
+	| ({ id: number; kind: "topic-renamed" } & TopicRenamed);
 
 export type ChatLive = {
 	busy: boolean;
@@ -130,6 +150,22 @@ export function toChatItem(entry: EntryRecord): ChatItem | undefined {
 	if (entry.kind === REACTION) {
 		const data = (entry.data ?? {}) as Partial<Reaction>;
 		return { id, kind: "reaction", target: Number(data.target), emoji: String(data.emoji ?? ""), on: data.on !== false, at: message?.timestamp ?? 0 };
+	}
+	if (entry.kind === TOPIC_CLOSED) {
+		const data = (entry.data ?? {}) as Partial<TopicClosed>;
+		return {
+			id,
+			kind: "topic-closed",
+			topic: Number(data.topic),
+			name: String(data.name ?? "A topic"),
+			by: data.by === "bot" ? "bot" : "owner",
+			outcome: String(data.outcome ?? ""),
+			at: message?.timestamp ?? 0,
+		};
+	}
+	if (entry.kind === TOPIC_RENAMED) {
+		const data = (entry.data ?? {}) as Partial<TopicRenamed>;
+		return { id, kind: "topic-renamed", from: String(data.from ?? ""), to: String(data.to ?? ""), by: data.by === "bot" ? "bot" : "owner", at: Number(data.at ?? 0) };
 	}
 	if (entry.kind === ROUTINE_FIRING && message?.role === "user") return { id, kind: "routine", text: textOf(message.content), at: message.timestamp };
 	if (entry.kind === APPROVAL_OUTCOME && message?.role === "user") return { id, kind: "approval", text: textOf(message.content), at: message.timestamp };
@@ -215,9 +251,15 @@ export function toChatLive(live: Readonly<LiveState> | null): ChatLive {
 
 export type Chat = ReturnType<typeof createChat>;
 
-/** Bind the chat to one bot's conversation. Its messages and reactions reach the bot through `turns`. Call close() on shutdown. */
-export function createChat(deps: { harness: Harness; conversation: Conversation; context: Context; turns: Turns; computer?: ComputerView }) {
+/**
+ * Bind the chat to one bot's conversation, or to one of its topics (src/topics.ts). Its messages and reactions reach the bot
+ * through `turns`. A topic's chat passes `after`, the main-chat entry its fork starts from, so it shows only the topic's own
+ * thread. Call close() on shutdown.
+ */
+export function createChat(deps: { harness: Harness; conversation: Conversation; context: Context; turns: Turns; computer?: ComputerView; after?: number }) {
 	const { harness, conversation, context, turns, computer } = deps;
+	// The oldest entry the chat shows: a fork's history also holds its parent's entries up to the fork.
+	const first = deps.after === undefined ? {} : { minEntryId: (deps.after + 1) as EntryId };
 	const listeners = new Set<(event: ChatEvent) => void>();
 	// Listeners that show the computer pane; only they make the chat read computer snapshots.
 	let computerListeners = 0;
@@ -271,7 +313,7 @@ export function createChat(deps: { harness: Harness; conversation: Conversation;
 		let last = after;
 		let cursor: Cursor | undefined;
 		do {
-			const page = await conversation.entries({ order: "ascending", ...(after === undefined ? {} : { minEntryId: after }) }, 200, cursor, ctx);
+			const page = await conversation.entries({ order: "ascending", ...(after === undefined ? first : { minEntryId: after }) }, 200, cursor, ctx);
 			for (const entry of page.items) {
 				if (last !== undefined && entry.id <= last) continue;
 				last = entry.id;
@@ -303,20 +345,34 @@ export function createChat(deps: { harness: Harness; conversation: Conversation;
 		return queued.id as number;
 	}
 
+	// Sends the entries after lastSeen. Serialized so overlapping callbacks never emit entries twice or out of order.
+	const pumpEntries = (ctx: Context) =>
+		(pump = pump.then(async () => {
+			const items = await newEntries(ctx);
+			if (items.length > 0) emit({ type: "items", items });
+		}));
+
 	async function startWatch(): Promise<void> {
 		lastSeen = await newestEntry();
+		// Entries written outside a run, such as a topic's rename or outcome line (src/topics.ts), change no live state, so
+		// the transcript itself is watched too. Its window is kept to the newest entry: only the news matters here.
+		const transcript = await conversation.watch(context, { min: 1, max: 2 });
+		transcript.start(async (call, ctx) => {
+			if (call.kind === "value") await pumpEntries(ctx);
+		});
 		const watch = await harness.watchDoc(LiveDoc, conversation.id, context);
-		if (watch === undefined) return;
+		if (watch === undefined) {
+			stopWatch = () => transcript.stop();
+			return;
+		}
 		live = toChatLive(watch.value);
-		stopWatch = () => watch.stop();
+		stopWatch = () => Promise.all([watch.stop(), transcript.stop()]);
 		// A failed call is skipped: the next value follows once the doc recovers.
 		watch.start(async (call, ctx) => {
 			if (call.kind !== "value") return;
 			live = toChatLive(call.value);
-			// Serialize so overlapping callbacks never emit entries twice or out of order.
-			pump = pump.then(async () => {
-				const items = await newEntries(ctx);
-				if (items.length > 0) emit({ type: "items", items });
+			pumpEntries(ctx);
+			pump = pump.then(() => {
 				emit({ type: "live", live });
 				trackComputer();
 			});
@@ -325,9 +381,11 @@ export function createChat(deps: { harness: Harness; conversation: Conversation;
 	}
 
 	return {
+		/** The conversation's id: the bot's, or the topic's. */
+		id: Number(conversation.id),
 		/** A page of past messages, oldest first. Pass the returned `before` to get the page before it. */
 		async history(limit: number, before?: Cursor) {
-			const page = await conversation.entries({ order: "descending" }, limit, before, context);
+			const page = await conversation.entries({ order: "descending", ...first }, limit, before, context);
 			const items = page.items.flatMap((entry) => toChatItem(entry) ?? []).reverse();
 			return { items, before: page.next ?? null };
 		},

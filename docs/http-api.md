@@ -16,7 +16,7 @@ Every route answers 403 when the `Host` header isn't `127.0.0.1`, `localhost`, `
 
 Code: [src/chat.ts](../src/chat.ts).
 
-Every `/api/chat*` route takes `?bot=<id>`, or a `bot` field in the POST body. Without one, it's the main bot's chat.
+Every `/api/chat*` route takes `?bot=<id>`, or a `bot` field in the POST body. Without one, it's the main bot's chat. `?topic=<id>`, or a `topic` field, picks one of a bot's topics instead ([Topics](#topics)). A topic's `GET /api/chat` shows only its own thread, and its first page also carries `messages`, the main-chat messages in the topic. A topic's event stream and computer pane are its bot's.
 
 | Route | Does |
 | --- | --- |
@@ -25,7 +25,7 @@ Every `/api/chat*` route takes `?bot=<id>`, or a `bot` field in the POST body. W
 | `GET /api/chat/image?entry=<id>&index=<n>` | Serves back one of the owner's images. |
 | `POST /api/chat/react` | `{"entryId", "emoji", "on"}` turns the owner's reaction to a reply on or off. Either change starts a turn, or queues behind the current one. |
 | `POST /api/chat/stop` | Stops the current turn. |
-| `GET /api/chat/events` | Server-sent events: the live reply, running tools, new messages, the bot list whenever it changes, and a `control` event (`space`, the id of the Space on the live screen; `owner`; `driving`; `here`, true when that Space is the desktop of the computer the page's browser runs on) when the screen moves to another Space, control of it changes, or a bot's computer task starts or ends there. |
+| `GET /api/chat/events` | Server-sent events: the live reply, running tools, new messages, the bot list and the topic list whenever they change, the computer pane of the bot and its topics, and a `control` event (`space`, the id of the Space on the live screen; `owner`; `driving`; `here`, true when that Space is the desktop of the computer the page's browser runs on) when the screen moves to another Space, control of it changes, or a bot's computer task starts or ends there. |
 | `GET /api/chat/computer` | The computer pane: Space name, newest screenshot, steps of the latest computer-use run ([src/computer-view.ts](../src/computer-view.ts)). |
 
 `images` are the owner's pasted images as `[{"data": <base64>, "mimeType"}]`. pi-durable's Photon processor fits them to the model's limits.
@@ -55,6 +55,21 @@ Each listed bot carries:
 
 It also says whether the bot is working.
 
+## Topics
+
+Code: [src/topics.ts](../src/topics.ts), [How it works](architecture.md#topics).
+
+| Route | Does |
+| --- | --- |
+| `GET /api/topics` | Lists every bot's topics, open and closed, oldest first. |
+| `POST /api/topics` | `{bot, name, entry?}` opens a topic of that bot. `entry`, a main-chat message's entry id, goes in it first. |
+| `PUT /api/topics/<id>` | `{name}` renames it. |
+| `POST /api/topics/<id>/assign` | `{entry}` puts a main-chat message in it, taking it out of any other topic. A closed topic refuses. |
+| `POST /api/topics/<id>/close` | Closes it. Its bot then writes the outcome line in the main chat. |
+| `POST /api/topics/<id>/reopen` | Reopens it. |
+
+Each answers with `{topic}`. A listed topic carries its `id`, `bot`, `name`, `by` (`owner` or `bot`), `createdAt`, `messages` (the main-chat entry ids in it), `closed` (`{by, at, outcome}`, once it closed), `busy`, `replies` (the messages in its thread) and `last` (the newest, `{text, at, from}`).
+
 ## Computer
 
 | Route | Does |
@@ -62,6 +77,8 @@ It also says whether the bot is working.
 | `GET /shots/<name>.png` | Serves a computer-use screenshot. |
 | `GET /api/computer/live` | Streams the Space's screen as H.264 ([src/live-screen.ts](../src/live-screen.ts)). |
 | `POST /api/computer/control` | `{"owner": true}` gives the owner control of the Space's screen; `{"owner": false}` hands it back ([src/screen-control.ts](../src/screen-control.ts)). |
+| `GET /api/computer/spaces` | `{"spaces": [{"id", "name"?}], "shown"}`: every Cua Space and the id of the one on the live screen. |
+| `POST /api/computer/space` | `{"space": id}` puts that listed Space on the live screen and hands back the owner's control of the old one. A bot's next `computer_use` task switches it again. |
 | `POST /api/computer/input` | `{"events"}` performs the owner's mouse and keyboard on the Space over the live stream's media session, in cua-spacesd's `interactive_input` format. Only while the owner has control. |
 
 ## Approvals

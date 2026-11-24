@@ -137,6 +137,13 @@ test("clicking a bot's notification with no tab open opens that bot's chat", asy
 	assert.deepEqual(opened, ["/#bot=7"]);
 });
 
+test("clicking a notification from a topic opens that topic, in the open tab or a new one", async () => {
+	const open = await clickPushed({ title: "Alfred · Kanban stall", body: "found it", bot: 7, topic: 31 }, ["http://127.0.0.1:3000/"]);
+	assert.deepEqual(open.tabs.map((t) => [t.focused, t.messages]), [[true, [{ bot: 7, topic: 31 }]]]);
+	const closed = await clickPushed({ title: "Alfred · Kanban stall", bot: 7, topic: 31 }, []);
+	assert.deepEqual(closed.opened, ["/#bot=7&topic=31"]);
+});
+
 test("clicking a notification from no particular bot only brings the web portal up", async () => {
 	const open = await clickPushed({ title: "Approval needed" }, ["http://127.0.0.1:3000/"]);
 	assert.deepEqual(open.tabs.map((t) => [t.focused, t.messages]), [[true, []]]);

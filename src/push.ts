@@ -13,7 +13,8 @@ const TTL_SECONDS = 24 * 60 * 60;
 const BODY_MAX = 500;
 
 /** What the service worker (src/sw.js) shows. The same tag replaces an earlier notification; a click opens the chat of `bot`. */
-export type PushMessage = { title: string; body?: string; tag?: string; bot?: number };
+/** `bot`, and `topic` for a message sent in a topic (src/topics.ts), say which chat a click on the notification opens. */
+export type PushMessage = { title: string; body?: string; tag?: string; bot?: number; topic?: number };
 
 type Keys = { publicKey: string; privateKey: string };
 type Saved = Keys & { subscriptions: PushSubscription[] };

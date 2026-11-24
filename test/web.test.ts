@@ -353,7 +353,8 @@ test("the owner takes control, drives the Mac through the live session, and hand
 		return { requestKeyframe: () => {}, input: (events) => void sent.push(events), close: async () => {} };
 	});
 	const control = createScreenControl({ space: () => "mac" });
-	const server = createBotServer({ say: async () => "", context, live, control });
+	const spaces = async () => [{ id: "mac", name: "Mac" }, { id: "pc" }];
+	const server = createBotServer({ say: async () => "", context, live, control, spaces });
 	await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
 	const address = server.address();
 	assert.ok(address !== null && typeof address === "object");
@@ -388,6 +389,12 @@ test("the owner takes control, drives the Mac through the live session, and hand
 		assert.equal(await post("/api/computer/control", { owner: true }), 200);
 		watcher.abort();
 		await eventually(async () => !control.owner);
+
+		// The owner picks the PC from the listed Spaces; an unlisted one is refused.
+		assert.deepEqual(await (await fetch(`${base}/api/computer/spaces`)).json(), { spaces: await spaces(), shown: "mac" });
+		assert.equal(await post("/api/computer/space", { space: "phone" }), 400);
+		assert.equal(await post("/api/computer/space", { space: "pc" }), 200);
+		assert.equal(control.space, "pc");
 	} finally {
 		watcher.abort();
 		await new Promise<void>((resolve) => server.close(() => resolve()));

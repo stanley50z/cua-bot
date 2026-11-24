@@ -20,6 +20,7 @@ import { Type } from "typebox";
 import type { Context } from "@earendil-works/chord/context";
 import { type ConversationId, defineExtension, defineTool, type Extension, type Harness, section } from "@earendil-works/pi-durable";
 import { botFile, type BotFile, botFolder, slugOf } from "./bots.ts";
+import { botOf } from "./topics.ts";
 
 export type Tier = "profile" | "log";
 export type Fact = { text: string; date: string; tier: Tier; file: string; tags: string[] };
@@ -573,7 +574,7 @@ export async function messageNote(memory: Memory, message: string, id: number, b
 
 /**
  * Every bot's memory tools and prompt section. `bots` lists the bots, to resolve who holds which tag and whose
- * conversation is asking; a conversation that isn't a bot has only every-bot. The main bot's tools reach every
+ * conversation is asking; a topic's conversation asks as its bot, and any other conversation that isn't a bot has only every-bot. The main bot's tools reach every
  * fact, for its nightly memory routine, but its prompt and automatic searches stay limited to its tags, so
  * managing a fact doesn't put it in every request. `log` gets a line for the backup and each change of a
  * change_memory call. Installed by src/main.ts.
@@ -584,10 +585,12 @@ export function createMemoryExtension(deps: {
 	log?: (line: string) => void;
 }): Extension {
 	const { memory } = deps;
+	// A topic's conversation (src/topics.ts) sees what its bot sees.
 	const viewer = async (conversationId: ConversationId, read: Pick<Harness, "snapshot">, context: Context) => {
 		const bots = await deps.bots(read, context);
 		const tags = await memory.tagViews(bots);
-		const me = bots.find((bot) => bot.id === Number(conversationId));
+		const self = await botOf(read, conversationId, context);
+		const me = bots.find((bot) => bot.id === self);
 		return { bots, tags, me, seen: seenBy(me, tags) };
 	};
 

@@ -1,6 +1,6 @@
-// Which Space the web portal's live screen shows, and who drives it: the bots, or the owner. The screen follows the
-// bots: drive() moves it to the Space a computer_use task (src/computer.ts) starts on, unless the owner has control of
-// the one shown. The expanded live view takes control (POST /api/computer/control) and hands it back with "I'm done";
+// Which Space the web portal's live screen shows, and who drives it: the bots, or the owner. The screen shows the Space
+// the newest move named: drive() moves it to the Space a computer_use task (src/computer.ts) starts on, unless the owner
+// has control of the one shown, and the owner picks any Space with show() (POST /api/computer/space). The expanded live view takes control (POST /api/computer/control) and hands it back with "I'm done";
 // src/web.ts also hands it back when the last live viewer leaves. While the owner has it, every on-screen step on the
 // shown Space waits in botTurn(), so a running task pauses where it is and resumes on the owner's screen as they left
 // it. Tasks on other Spaces carry on. `driving` says a bot's task runs on the shown Space, which lets the portal skip
@@ -43,6 +43,18 @@ export function createScreenControl(options: { space?: () => string | undefined;
 			if (owner === next) return;
 			owner = next;
 			if (!owner) for (const resume of waiting.splice(0)) resume();
+			changed();
+		},
+		/**
+		 * The owner's pick of the Space to show, idle or not. Any control they had of the old one goes back to the bots, so
+		 * its waiting task resumes; a bot task that starts after this moves the screen again.
+		 */
+		show(space: string) {
+			if (space === shownSpace()) return;
+			moved = space;
+			options.shown?.(space);
+			owner = false;
+			for (const resume of waiting.splice(0)) resume();
 			changed();
 		},
 		/** Runs one bot task on `space`, and shows that Space unless the owner has control. */

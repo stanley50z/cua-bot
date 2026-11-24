@@ -1,5 +1,6 @@
 // Every turn that reaches a bot goes through deliver() here: owner messages (the portal and /say), the owner's
-// reactions, messages from other bots (message_bot), routine firings, and approval outcomes. For each kind of turn
+// reactions, messages from other bots (message_bot), routine firings, approval outcomes, and the owner closing a topic
+// (src/topics.ts). A topic's turns go to the topic's conversation and search memory as its bot. For each kind of turn
 // this module decides whether memory is searched first (owner and bot messages only, the note submitted just ahead of
 // the message), what the turn does while the bot is busy, its request id, and the entry kind the chat reads it back by
 // (src/chat.ts). The texts the model reads are the callers', except a bot message's and a reaction's, which are built
@@ -9,7 +10,8 @@
 import type { Context } from "@earendil-works/chord/context";
 import type { ConversationHandle, Harness, InputSubmissionDraft, Submission, UserInput } from "@earendil-works/pi-durable";
 import type { BotLookup } from "./bots.ts";
-import { APPROVAL_OUTCOME, BOT_MESSAGE, type BotMessage, MEMORY_NOTE, REACTION, type Reaction, reactionText, ROUTINE_FIRING, textOf, type WhenBusy } from "./chat.ts";
+import { APPROVAL_OUTCOME, BOT_MESSAGE, type BotMessage, MEMORY_NOTE, REACTION, type Reaction, reactionText, ROUTINE_FIRING, textOf, TOPIC_CLOSE, type WhenBusy } from "./chat.ts";
+import { botOf, topicOf } from "./topics.ts";
 
 /** What the memory search reads the bot list through: the Harness, or a tool's or task's own reader. */
 export type Reader = Pick<Harness, "snapshot">;
@@ -30,7 +32,9 @@ export type Turn =
 	/** A firing of the routine whose sleeper is `task`: at its slot `at`, or, `manual`, run now at `at`. */
 	| { kind: "routine"; text: string; task: number; at: number; manual: boolean }
 	/** The owner's decision on an approval card. */
-	| { kind: "approval"; text: string };
+	| { kind: "approval"; text: string }
+	/** The owner closed the topic `name`, to the topic's conversation: the bot writes its outcome with manage_topic. */
+	| { kind: "topic-close"; name: string };
 
 /** The turn a message from another bot starts. The chat shows the BotMessage data instead. */
 function inboundText(from: { id: number; name: string }, text: string): string {
@@ -65,6 +69,15 @@ function draftOf(turn: Turn): { search?: string; draft: InputSubmissionDraft } {
 			};
 		case "approval":
 			return { draft: { type: "input", content: turn.text, whenBusy: "followUp", entry: { kind: APPROVAL_OUTCOME } } };
+		case "topic-close":
+			return {
+				draft: {
+					type: "input",
+					content: `[topic] The owner closed the topic "${turn.name}". Call manage_topic with action close and the topic's outcome in one line; it is posted to your main chat. Don't send_message.`,
+					whenBusy: "followUp",
+					entry: { kind: TOPIC_CLOSE },
+				},
+			};
 	}
 }
 
@@ -79,7 +92,7 @@ export function createTurns(memoryNote: MemoryNote) {
 	async function deliver(to: ConversationHandle, turn: Turn, read: Reader, context: Context): Promise<Submission> {
 		const { search, draft } = draftOf(turn);
 		if (search !== undefined) {
-			const note = await memoryNote(Number(to.id), search, read, context);
+			const note = await memoryNote(await botOf(read, to.id, context), search, read, context);
 			// The note is a write of its own, committed before the message, and the Harness places the two independently.
 			// On an idle bot with nothing queued, and no other delivery in between, the note lands right before the
 			// message. Otherwise it can land before other messages, or a whole run before its own (issue 6).
@@ -91,12 +104,15 @@ export function createTurns(memoryNote: MemoryNote) {
 	return {
 		deliver,
 		/**
-		 * Tell a bot the owner's decision on an approval card: the bot that filed it (`filedBy`), or the main bot when the
-		 * card names none (cards from before multi-bot support) or that bot was deleted.
+		 * Tell a bot the owner's decision on an approval card: the conversation that filed it (`filedBy`), a bot's or an open
+		 * topic's; the topic's bot once the topic is closed; or the main bot when the card names none (cards from before
+		 * multi-bot support) or that bot was deleted.
 		 */
 		async approval(bots: Pick<BotLookup, "list" | "conversation">, filedBy: number | undefined, text: string, read: Reader, context: Context): Promise<Submission> {
-			const known = filedBy !== undefined && (await bots.list(context)).some((bot) => bot.id === filedBy);
-			const to = await bots.conversation(known ? filedBy : undefined, context);
+			const topic = filedBy === undefined ? undefined : await topicOf(read, filedBy, context);
+			const bot = topic?.bot ?? filedBy;
+			const known = bot !== undefined && (await bots.list(context)).some((b) => b.id === bot);
+			const to = await bots.conversation(!known ? undefined : topic !== undefined && topic.closed === undefined ? filedBy : bot, context);
 			if (to === undefined) throw new Error(`Bot ${filedBy} is listed but has no conversation.`);
 			return deliver(to, { kind: "approval", text }, read, context);
 		},

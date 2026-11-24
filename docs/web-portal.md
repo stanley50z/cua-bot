@@ -53,6 +53,7 @@ The URL hash keeps your place, so a reload, Back, or a copied link lands in the 
 | `tab` | `chat`, `model`, `approvals`, `connections`, `tags` | Settings' General tab |
 | `tag` | A memory tag, in Memory | Every bot |
 | `bot` | A bot id | The main bot |
+| `topic` | A topic id | The bot's main chat |
 | `pane` | `list`, `computer`; only the [phone layout](#on-a-phone) reads or writes it | The chat, or the page a list row opens |
 
 For example `#view=settings&tab=connections` or `#view=memory&tag=job-bots`. Each new view or tab is a history entry; switching bots replaces the entry. In the phone layout, opening a bot or a tag from its list adds an entry too. Old links of the form `#bot=<id>` still open that bot's chat.
@@ -103,9 +104,23 @@ A reaction wakes the bot. It starts a turn with `[The owner reacted 👍 to your
 
 If the bot is working, the change waits for that turn to end, and until then only the tab you clicked in shows it. Undoing a change that is still waiting withdraws it, and the bot sees neither. Stop drops waiting changes the same way it drops queued messages, so the pills go back to how they were.
 
+## Topics
+
+A topic is a side thread split out of a bot's chat, so a temporary matter stays out of the bot's main conversation ([How it works](architecture.md#topics)). The right column lists the open bot's open topics under the live screen. Each card shows the topic's name, who opened it, how many messages its thread has and the newest one. A dot means the bot wrote there since you last looked, and a pulsing dot means it is working there.
+
+- **Open one.** Click + New topic and type a name, or choose Open as topic on a message's toolbar to start one with that message. A bot can open topics too, with its first message to you.
+- **Fill it.** Drag a message onto a card by the handle on its toolbar. A message is in one topic at a time, so dropping it on another card moves it. In the chat, a message in a topic wears the topic's strip across the top of its bubble, grey once the topic closed.
+- **Reply in it.** On a message in an open topic, Reply becomes Reply in topic, and quoting text from it does the same: the message box gets a purple Replying in label, and what you send goes to that topic only. The chat stays where it is. The label's ✕ sends to the main chat instead.
+- **Show it.** Click a card or a strip. The chat header turns purple and the chat shows just the topic: the main-chat messages in it, then its own thread. Everything you send there goes to the topic. Click the topic's name to rename it, ← All or the card again to go back.
+- **Close it.** Done in the topic's header, or Close on a card. The bot then posts the outcome in one line in the main chat. Closing doesn't need you: the bot closes topics it considers settled the same way. Click a grey strip to reopen its topic.
+
+Each topic keeps its own draft. A notification from a topic opens that topic.
+
 ## Computer pane
 
-The right column shows a Space's screen live, plus each click and keystroke of the open bot's most recent computer-use task. The screen follows the bots: when any bot starts a computer-use task, the pane switches to that task's Space (the heading names it) and stays there after the task ends, across restarts too. Before any task, it shows the default Space. While you have control, the screen doesn't switch. A task on another Space then runs there, the frame stays plain, and the status above it names that Space. When the open bot's last task ran on a Space other than the one on screen, the steps heading names it. The frame turns amber while a bot is driving the Space on screen.
+The right column shows a Space's screen live, plus each click and keystroke of the open bot's most recent computer-use task. The heading picks the Space on screen: choose any of your Spaces there, whether a bot is using one or not, then click Take control to drive it. Switching hands back control of the Space you left, so a task waiting on it carries on. When any bot starts a computer-use task, the pane switches to that task's Space, so the newest switch, yours or a bot's, wins. The pane stays on that Space after the task ends, across restarts too. Before any switch, it shows the default Space. While you have control, a bot's task doesn't switch the screen. A task on another Space then runs there, the frame stays plain, and the status above it names that Space. When the open bot's last task ran on a Space other than the one on screen, the steps heading names it. The frame turns amber while a bot is driving the Space on screen.
+
+The steps fold into one line under the screen: how many there were and the newest one. Click it to open them in place of the topic list, and again to fold them. The steps are the open bot's newest computer task from its chat or any of its open topics; the heading names the topic one came from.
 
 All open panes share one media session: about 15 fps at the display's native resolution, roughly 100 KB/s on a quiet screen and more when it changes a lot, decoded with WebCodecs. A pane streams only while its tab is visible and the pane is on screen, unless you have control. The session closes when the last pane closes. If the stream is down, or the browser lacks WebCodecs, the pane stays black. The caption says Connecting… while it retries, or that the browser can't play the live screen.
 

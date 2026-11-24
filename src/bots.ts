@@ -8,7 +8,8 @@
 // a `cua-bot.bot-message` entry (shown as "Message from <name>") and wakes it on a later turn.
 // main.ts installs createBotsExtension() before Harness.open, makes one botLookup() after it for bindRoutines and
 // createBots, then builds the manager with createBots() for the web portal, which lists, adds, edits, and deletes bots
-// and gives each one a Chat.
+// and gives each one a Chat. createBots also follows each bot's topics (src/topics.ts): a Chat per topic, the topic
+// list the portal shows, the owner's topic changes, and each bot's computer pane across its chat and topics.
 import { existsSync, watch as watchFiles } from "node:fs";
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
@@ -20,19 +21,38 @@ import {
 	configure,
 	type Conversation,
 	type ConversationId,
+	type Cursor,
 	defineDoc,
 	defineExtension,
 	defineTool,
+	type EntryId,
 	type Extension,
 	type Harness,
+	InboxDoc,
+	LiveDoc,
 	section,
 	type Tx,
 } from "@earendil-works/pi-durable";
-import { type Chat, type ChatItem, createChat, SEND_MESSAGE, SENT_MESSAGE, type SentMessage } from "./chat.ts";
-import type { ComputerView } from "./computer-view.ts";
+import { type Chat, type ChatItem, createChat, SEND_MESSAGE, SENT_MESSAGE, type SentMessage, toChatItem, TOPIC_CLOSE } from "./chat.ts";
+import type { ComputerSnapshot, ComputerView } from "./computer-view.ts";
 import type { Memory } from "./memory.ts";
 import { parseModelRef, parseThinkingLevel } from "./models.ts";
 import { removeBotRoutines, syncRoutines } from "./routines.ts";
+import {
+	assignTopic,
+	botOf,
+	closeByOwner,
+	harnessHost,
+	openTopic,
+	readTopics,
+	removeBotTopics,
+	renameTopic,
+	reopenTopic,
+	type Topic,
+	TopicError,
+	topicsIn,
+	watchTopics,
+} from "./topics.ts";
 import type { Turns } from "./turns.ts";
 
 export const MAIN_NAME = "cua-bot";
@@ -337,7 +357,8 @@ export function createBotsExtension(options: { agent: () => AgentChange; turns: 
 		}),
 		execute: async ({ to, text }, api, context) => {
 			const bots = botsOf(await api.snapshot(BotsDoc, context));
-			const self = Number(api.conversationId);
+			// A topic's conversation (src/topics.ts) sends as its bot.
+			const self = await botOf(api, api.conversationId, context);
 			const me = bots.find((bot) => bot.id === self);
 			if (me === undefined) return reply("Only a bot's own chat can send bot messages.", true);
 			const target = findBot(bots, to);
@@ -398,9 +419,12 @@ export function createBotsExtension(options: { agent: () => AgentChange; turns: 
 		name: "bots",
 		tools: [sendMessage, messageBot, createBotTool],
 		sections: [
-			section("bots", async (input, context) => botSection(await loadBots(dir, await input.read.snapshot(BotsDoc, context)), Number(input.conversationId)), {
-				tag: false,
-			}),
+			// A topic's conversation is its bot, by name and instructions.
+			section(
+				"bots",
+				async (input, context) => botSection(await loadBots(dir, await input.read.snapshot(BotsDoc, context)), await botOf(input.read, input.conversationId, context)),
+				{ tag: false },
+			),
 		],
 	});
 }
@@ -417,6 +441,22 @@ export type BotView = Bot & {
 
 /** What the host tracks per bot beyond its record. */
 type ListView = Pick<BotView, "busy" | "preview" | "botPreview">;
+
+/**
+ * A topic (src/topics.ts) as the web portal lists it: whether its bot is working in it, how many messages its thread has
+ * (the owner's and the bot's), and the newest one.
+ */
+export type TopicView = Topic & { busy: boolean; replies: number; last?: { text: string; at: number; from: "owner" | "bot" } };
+type ThreadView = Pick<TopicView, "busy" | "replies" | "last">;
+
+// Counts a topic thread's messages into `view`, oldest first.
+function applyThread(view: ThreadView, items: ChatItem[]): void {
+	for (const item of items) {
+		if (item.kind !== "user" && !(item.kind === "assistant" && item.text.trim() !== "")) continue;
+		view.replies += 1;
+		view.last = { text: item.text, at: item.at, from: item.kind === "user" ? "owner" : "bot" };
+	}
+}
 
 // An item's line for the bot list, under the field it updates; undefined for items the list ignores.
 function previewOf(item: ChatItem): { field: "preview" | "botPreview"; text: string; at: number } | undefined {
@@ -454,9 +494,10 @@ export async function createBots(deps: {
 	memory: Pick<Memory, "botRenamed" | "botRemoved">;
 	/** Told when a sync after a hand edit to a routines.json fails, or the watch on the bot folders does. */
 	onError: (error: unknown) => void;
+	/** The computer pane of a bot's chat, made once per bot; its topics' chats share it. */
 	computer?: (conversation: Conversation) => ComputerView;
-	/** Each message a bot sends the owner with send_message, in any bot's chat; main.ts pushes it to the owner's browser. */
-	sent?: (bot: Bot, text: string) => void;
+	/** Each message a bot sends the owner with send_message, in any bot's chat or `topic`; main.ts pushes it to the owner's browser. */
+	sent?: (bot: Bot, text: string, topic?: Topic) => void;
 	/** How each bot's chat delivers the owner's messages and reactions. */
 	turns: Turns;
 }) {
@@ -480,6 +521,20 @@ export async function createBots(deps: {
 	const listeners = new Set<(bots: BotView[]) => void>();
 	let bots: Bot[] = [];
 	let lastSent = "";
+	// Each bot's computer pane, shared with its topics' chats.
+	const computers = new Map<number, ComputerView>();
+	// Topics (src/topics.ts): every topic as the list holds it, each opened topic's chat, and its thread for the list.
+	const host = harnessHost(harness, context);
+	const topicChats = new Map<number, { chat: Chat; stop: () => void; bot: number }>();
+	const opening = new Map<number, Promise<Chat | undefined>>();
+	const threads = new Map<number, ThreadView>();
+	const topicListeners = new Set<(topics: TopicView[]) => void>();
+	let topics: Topic[] = [];
+	let lastTopics = "";
+	// Live computer panes by bot: each feed gets the pane snapshots of the bot's chat and of its topics' chats, since a
+	// computer_use run in any of them is the bot's latest. feedStops holds each chat's subscription while its bot has feeds.
+	const feeds = new Map<number, Set<(computer: ComputerSnapshot) => void>>();
+	const feedStops = new Map<number, () => void>();
 
 	const activeModel = (bot: Bot) => (bot.model === undefined ? deps.agent().model?.modelId : parseModelRef(bot.model).modelId) ?? "";
 	const list = (): BotView[] => bots.map((bot) => ({ ...bot, busy: false, ...views.get(bot.id), activeModel: activeModel(bot) }));
@@ -497,6 +552,7 @@ export async function createBots(deps: {
 		const conversation = await lookup.conversation(bot.id, context);
 		if (conversation === undefined) return;
 		const computer = deps.computer?.(conversation);
+		if (computer !== undefined) computers.set(bot.id, computer);
 		const chat = createChat({ harness, conversation, context, turns: deps.turns, ...(computer === undefined ? {} : { computer }) });
 		const first: ListView = { busy: chat.live.busy };
 		applyPreviews(first, (await chat.history(20)).items);
@@ -530,9 +586,123 @@ export async function createBots(deps: {
 			await gone.chat.close();
 			chats.delete(id);
 			views.delete(id);
+			computers.delete(id);
+			feedStops.delete(id);
 		}
 		for (const bot of bots) await open(bot);
+		syncFeeds();
 		publish();
+	}
+
+	// Subscribes each chat, the bots' and their topics', to the computer pane while its bot has a feed, and drops the rest.
+	function syncFeeds(): void {
+		const family = [...[...chats].map(([id, { chat }]) => ({ id, bot: id, chat })), ...[...topicChats].map(([id, { chat, bot }]) => ({ id, bot, chat }))];
+		for (const { id, bot, chat } of family) {
+			const want = (feeds.get(bot)?.size ?? 0) > 0;
+			const stop = feedStops.get(id);
+			if (want && stop === undefined) {
+				feedStops.set(
+					id,
+					chat.subscribe((event) => {
+						if (event.type === "computer") for (const listener of feeds.get(bot) ?? []) listener(event.computer);
+					}),
+				);
+			}
+			if (!want && stop !== undefined) {
+				stop();
+				feedStops.delete(id);
+			}
+		}
+	}
+
+	const topicList = (): TopicView[] => topics.map((topic) => ({ ...topic, busy: false, replies: 0, ...threads.get(topic.id) }));
+	const publishTopics = () => {
+		const all = topicList();
+		const text = JSON.stringify(all);
+		if (text === lastTopics) return;
+		lastTopics = text;
+		for (const listener of topicListeners) listener(all);
+	};
+
+	// Every message of a topic chat's thread so far, oldest first.
+	async function wholeThread(chat: Chat): Promise<ChatItem[]> {
+		const pages: ChatItem[][] = [];
+		let before: Cursor | undefined;
+		do {
+			const page = await chat.history(200, before);
+			pages.push(page.items);
+			before = page.before ?? undefined;
+		} while (before !== undefined);
+		return pages.reverse().flat();
+	}
+
+	// Opens a topic's chat and follows it for the topic list, and pushes what the bot sends the owner in it.
+	function openTopicChat(topic: Topic): Promise<Chat | undefined> {
+		const open = topicChats.get(topic.id);
+		if (open !== undefined) return Promise.resolve(open.chat);
+		const started =
+			opening.get(topic.id) ??
+			(async () => {
+				const conversation = await harness.conversation(topic.id as ConversationId, context);
+				if (conversation === undefined) return undefined;
+				const computer = computers.get(topic.bot);
+				const chat = createChat({
+					harness,
+					conversation,
+					context,
+					turns: deps.turns,
+					...(computer === undefined ? {} : { computer }),
+					...(topic.forkedAt === undefined ? {} : { after: topic.forkedAt }),
+				});
+				const first: ThreadView = { busy: chat.live.busy, replies: 0 };
+				applyThread(first, await wholeThread(chat));
+				threads.set(topic.id, first);
+				const stop = chat.subscribe(
+					(event) => {
+						const view = threads.get(topic.id) ?? { busy: false, replies: 0 };
+						if (event.type === "live") view.busy = event.live.busy;
+						if (event.type === "items") {
+							applyThread(view, event.items);
+							const bot = bots.find((b) => b.id === topic.bot);
+							for (const item of event.items) {
+								if (bot === undefined || item.kind !== "assistant" || item.aborted || item.text.trim() === "") continue;
+								deps.sent?.(bot, item.text, topics.find((t) => t.id === topic.id) ?? topic);
+							}
+						}
+						threads.set(topic.id, view);
+						publishTopics();
+					},
+					{ computer: false },
+				);
+				topicChats.set(topic.id, { chat, stop, bot: topic.bot });
+				syncFeeds();
+				return chat;
+			})().finally(() => opening.delete(topic.id));
+		opening.set(topic.id, started);
+		return started;
+	}
+
+	// Follows the topic list: an open topic's chat opens, and a dropped topic's chat closes.
+	async function refreshTopics(next: Topic[]): Promise<void> {
+		topics = next;
+		const ids = new Set(topics.map((topic) => topic.id));
+		for (const [id, gone] of topicChats) {
+			if (ids.has(id)) continue;
+			gone.stop();
+			await gone.chat.close();
+			topicChats.delete(id);
+			threads.delete(id);
+			feedStops.delete(id);
+		}
+		for (const topic of topics) if (topic.closed === undefined) await openTopicChat(topic);
+		publishTopics();
+	}
+
+	// Gives every topic of bot `id` the bot's model settings, as configure() does for the bot.
+	async function configureTopics(id: number, record: Pick<BotRecord, "model" | "thinkingLevel">): Promise<void> {
+		for (const topic of (await readTopics(harness, context)).filter((t) => t.bot === id)) {
+			await harness.commit((tx) => configure(tx, topic.id as ConversationId, agentOf(record, deps.agent())), context);
+		}
 	}
 
 	// The doc changes when the web portal edits a bot or a bot runs create_bot.
@@ -546,6 +716,28 @@ export async function createBots(deps: {
 		await pending;
 	});
 	const reload = () => (pending = pending.then(async () => refresh(await harness.snapshot(BotsDoc, context))));
+	// The topic list changes when the owner or a bot opens, renames, fills, closes, or reopens a topic.
+	const topicWatch = await watchTopics(harness, context);
+	let topicsPending = refreshTopics(topicWatch === undefined ? await readTopics(harness, context) : topicsIn(topicWatch.value));
+	await topicsPending;
+	// A failed call is skipped: the next value follows once the doc recovers.
+	topicWatch?.start(async (call) => {
+		if (call.kind !== "value") return;
+		topicsPending = topicsPending.then(() => refreshTopics(topicsIn(call.value)));
+		await topicsPending;
+	});
+	// The owner's topic changes wait for the list to show them, so the stream has the change before the request returns.
+	const settled = async <T>(change: Promise<T>): Promise<T> => {
+		try {
+			const result = await change;
+			topicsPending = topicsPending.then(async () => refreshTopics(await readTopics(harness, context)));
+			await topicsPending;
+			return result;
+		} catch (error) {
+			if (error instanceof TopicError) throw new BotError(error.status, error.message);
+			throw error;
+		}
+	};
 	// The one watch on the bot folders. A hand edit to an agent file reaches the web portal within a second (prompts
 	// re-read the file every turn anyway), and one to a routines.json syncs that bot's routines within a second or two.
 	// Each waits for 250 ms of quiet, since an editor's save is several events.
@@ -580,7 +772,10 @@ export async function createBots(deps: {
 		},
 		/** Puts every bot, the main one too, on the current model settings under its own overrides, for its next turn. */
 		async applyAgent() {
-			for (const bot of botsOf(await harness.snapshot(BotsDoc, context))) await harness.commit((tx) => configure(tx, bot.id as ConversationId, agentOf(bot, deps.agent())), context);
+			for (const bot of botsOf(await harness.snapshot(BotsDoc, context))) {
+				await harness.commit((tx) => configure(tx, bot.id as ConversationId, agentOf(bot, deps.agent())), context);
+				await configureTopics(bot.id, bot);
+			}
 			publish();
 		},
 		async update(id: number, input: BotInput): Promise<Bot> {
@@ -604,6 +799,7 @@ export async function createBots(deps: {
 				await configure(tx, id as ConversationId, agentOf(record, deps.agent()));
 				return { bot: { ...entryOf(id, record, before.main), instructions: valid.instructions }, before };
 			}, context);
+			await configureTopics(id, bot);
 			// The folder follows a rename, with everything in it; this is the only move of a bot's files. Then the bot's
 			// memory tag follows, and its routines resync, finding their file in the new folder.
 			const from = folderPath(dir, before);
@@ -641,6 +837,8 @@ export async function createBots(deps: {
 			await memory.botRemoved(bot);
 			await removeBotRoutines(id, context);
 			await conversation?.abort(context, { background: true });
+			// Its topics stop and leave the list; their conversations stay in the database, like the bot's.
+			for (const topic of await removeBotTopics(host, id)) await (await harness.conversation(topic.id as ConversationId, context))?.abort(context, { background: true });
 			await harness.commit(async (tx) => {
 				delete (await tx.doc(BotsDoc)).bots[String(id)];
 			}, context);
@@ -652,17 +850,87 @@ export async function createBots(deps: {
 			listeners.add(listener);
 			return () => listeners.delete(listener);
 		},
+		/** Every topic of every bot, open and closed, oldest first; the web portal shows the open bot's. */
+		topics: topicList,
+		/** Receive the topic list whenever a topic changes, or a bot starts, stops, or sends a message in one. */
+		subscribeTopics(listener: (topics: TopicView[]) => void) {
+			topicListeners.add(listener);
+			return () => topicListeners.delete(listener);
+		},
+		/** The topic `id` and its chat; undefined for an unknown topic. A closed topic's chat opens on request. */
+		async topic(id: number): Promise<{ topic: TopicView; chat: Chat } | undefined> {
+			await topicsPending;
+			const topic = (await readTopics(harness, context)).find((t) => t.id === id);
+			if (topic === undefined) return undefined;
+			const chat = await openTopicChat(topic);
+			if (chat === undefined) return undefined;
+			return { topic: { ...topic, busy: false, replies: 0, ...threads.get(id) }, chat };
+		},
+		/** The main-chat messages in topic `id`, in the order they were put there. */
+		async topicMessages(id: number): Promise<ChatItem[]> {
+			const topic = (await readTopics(harness, context)).find((t) => t.id === id);
+			const main = topic === undefined ? undefined : await lookup.conversation(topic.bot, context);
+			if (topic === undefined || main === undefined) return [];
+			const items = await Promise.all(
+				topic.messages.map(async (entry) => {
+					const id = entry as EntryId;
+					const found = (await main.entries({ order: "ascending", minEntryId: id, maxEntryId: id }, 1, undefined, context)).items[0];
+					return found === undefined ? undefined : toChatItem(found);
+				}),
+			);
+			return items.filter((item) => item !== undefined);
+		},
+		/** The owner opens a topic of bot `bot`, with main-chat message `entry` in it when given. */
+		async openTopic(bot: number, name: string, entry?: number): Promise<Topic> {
+			if (!bots.some((b) => b.id === bot)) throw new BotError(404, "No such bot.");
+			return settled(openTopic(host, { bot, name, by: "owner", ...(entry === undefined ? {} : { entry }) }));
+		},
+		/** The owner renames topic `id`. */
+		renameTopic: (id: number, name: string) => settled(renameTopic(host, id, name, "owner")),
+		/** The owner puts main-chat message `entry` in topic `id`, taking it out of any other. */
+		assignTopic: (id: number, entry: number) => settled(assignTopic(host, id, entry, "owner")),
+		/** The owner closes topic `id`; its bot then writes the outcome line in the main chat. */
+		closeTopic: (id: number) => settled(closeByOwner(host, deps.turns, id)),
+		/**
+		 * The owner reopens closed topic `id`. A close of theirs still waiting for the bot's outcome is withdrawn; one the
+		 * bot is already answering is refused when its answer comes (reopenTopic in src/topics.ts).
+		 */
+		reopenTopic: (id: number) =>
+			settled(
+				(async () => {
+					const conversation = id as ConversationId;
+					const asks = ((await harness.snapshot(InboxDoc, conversation, context))?.items ?? []).filter((item) => item.entry?.kind === TOPIC_CLOSE);
+					for (const ask of asks) await harness.abortSubmission(ask.id, context, conversation);
+					const busy = (await harness.snapshot(LiveDoc, conversation, context))?.run !== undefined;
+					return reopenTopic(host, id, asks.length > 0 || !busy);
+				})(),
+			),
+		/** Receive bot `bot`'s computer pane, from its chat and its topics' chats, until the returned function is called. */
+		computerFeed(bot: number, listener: (computer: ComputerSnapshot) => void) {
+			const set = feeds.get(bot) ?? new Set();
+			set.add(listener);
+			feeds.set(bot, set);
+			syncFeeds();
+			return () => {
+				set.delete(listener);
+				if (set.size === 0) feeds.delete(bot);
+				syncFeeds();
+			};
+		},
 		async close() {
 			listeners.clear();
+			topicListeners.clear();
 			clearTimeout(agentTimer);
 			clearTimeout(routinesTimer);
 			files.close();
 			await watch?.stop();
-			for (const entry of chats.values()) {
+			await topicWatch?.stop();
+			for (const entry of [...chats.values(), ...topicChats.values()]) {
 				entry.stop();
 				await entry.chat.close();
 			}
 			chats.clear();
+			topicChats.clear();
 		},
 	};
 }

@@ -10,7 +10,7 @@ import { createRegistry, defineExtension, Harness, section } from "@earendil-wor
 import { createNodePhotonImages } from "@earendil-works/pi-durable/images/node";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { botLookup, createBots, createBotsExtension, DEFAULT_BOTS_DIR, readBots } from "./bots.ts";
-import { createComputerExtension, defaultSpaceId, isThisComputer, openLiveStream, registrySpaces, screenControl, spaceLabel, spaceShell, spacesText } from "./computer.ts";
+import { createComputerExtension, defaultSpaceId, isThisComputer, listSpaces, openLiveStream, registrySpaces, screenControl, spaceLabel, spaceShell, spacesText } from "./computer.ts";
 import { createConnections, listCuaSpaces, probeTcp } from "./connections.ts";
 import { createLiveScreen } from "./live-screen.ts";
 import { createBotToolSearchExtension } from "./tool-search.ts";
@@ -28,6 +28,7 @@ import { createPush } from "./push.ts";
 import { LEGACY_ROUTINE_FILE } from "./routines-file.ts";
 import { bindRoutines, createRoutinesExtension, routineDir, syncRoutines } from "./routines.ts";
 import { today } from "./today.ts";
+import { botOf, createTopicsExtension, readTopics } from "./topics.ts";
 import { traceExtension } from "./trace.ts";
 import { createTurns } from "./turns.ts";
 import { createUpdates, dependencies, installedPackage, latestCua, latestPackage, localCua, runHere, updatePackages } from "./updates.ts";
@@ -92,6 +93,8 @@ registry.install(
 );
 registry.install(traceExtension);
 registry.install(createBotsExtension({ agent: botAgent, turns }));
+// Side threads split out of a bot's chat, and manage_topic (src/topics.ts).
+registry.install(createTopicsExtension({ bots: readBots }));
 // Fits images to the model's limits, in a worker thread: the owner's pasted ones, and those read and space_read return.
 const images = await createNodePhotonImages();
 registry.install(createComputerExtension(registry, images));
@@ -125,8 +128,14 @@ if (executorUrl && executorKey) {
 		call: (name, args) => executor(name, args),
 		// Decisions come from the web portal, which listens only once `lookup` and `harness` are set.
 		notify: (text, filedBy) => turns.approval(lookup, filedBy, text, harness, context),
+		// A card a topic filed opens that topic.
 		filed: (approval) =>
-			void push.send({ title: "Approval needed", body: describeApproval(approval), tag: approval.id, ...(approval.conversationId === undefined ? {} : { bot: approval.conversationId }) }),
+			void (async () => {
+				const from = approval.conversationId;
+				const bot = from === undefined ? undefined : await botOf(harness, from, context);
+				const topic = from !== undefined && bot !== from ? { topic: from } : {};
+				await push.send({ title: "Approval needed", body: describeApproval(approval), tag: approval.id, ...(bot === undefined ? {} : { bot }), ...topic });
+			})(),
 	});
 	registry.install(createExecutorExtension({ executor, approvals, ...(process.env.OWNER_EMAIL ? { ownerEmail: process.env.OWNER_EMAIL } : {}) }));
 } else {
@@ -156,10 +165,19 @@ const bots = await createBots({
 	agent: botAgent,
 	memory,
 	onError: logRoutineSyncFailure,
-	sent: (bot, text) => void push.send({ title: bot.name, body: text, bot: bot.id }),
+	sent: (bot, text, topic) =>
+		void push.send({ title: topic === undefined ? bot.name : `${bot.name} · ${topic.name}`, body: text, bot: bot.id, ...(topic === undefined ? {} : { topic: topic.id }) }),
 	turns,
 	computer: (conversation) =>
-		createComputerView({ harness, storage, conversation, shotsDir: join(DATA_DIR, "shots"), context, space }),
+		createComputerView({
+			harness,
+			storage,
+			conversation,
+			shotsDir: join(DATA_DIR, "shots"),
+			context,
+			space,
+			topics: async () => (await readTopics(harness, context)).filter((topic) => topic.bot === Number(conversation.id) && topic.closed === undefined),
+		}),
 });
 log(`bots: ${bots.list().map((bot) => bot.name).join(", ")}`);
 const synced = await syncRoutines(context);
@@ -173,7 +191,7 @@ const mainChat = await bots.chat();
 if (mainChat === undefined) throw new Error("The main bot has no chat.");
 
 const live = createLiveScreen(openLiveStream);
-// When a task moves the screen to another Space, the open panes reconnect to that Space's stream.
+// When a task or the owner moves the screen to another Space, the open panes reconnect to that Space's stream.
 let shownSpace = screenControl.space;
 screenControl.subscribe(() => {
 	if (screenControl.space === shownSpace) return;
@@ -221,7 +239,7 @@ const updates = createUpdates({
 });
 // Settings > Model: the model and reasoning effort in .env, applied to every bot without a restart.
 const modelSettings = createModelSettings({ models, apply: bots.applyAgent });
-createBotServer({ say: (text) => mainChat.say(text), bots, memory, memoryBots: () => bots.list(), images, context, log, control: screenControl, live, thisComputer: { addresses, isSpace: isThisComputer }, push, connections, autostart, updates, modelSettings, allowedHosts: ALLOWED_HOSTS, ...(approvals === undefined ? {} : { approvals }) }).listen(PORT, "127.0.0.1", () =>
+createBotServer({ say: (text) => mainChat.say(text), bots, memory, memoryBots: () => bots.list(), images, context, log, control: screenControl, spaces: listSpaces, live, thisComputer: { addresses, isSpace: isThisComputer }, push, connections, autostart, updates, modelSettings, allowedHosts: ALLOWED_HOSTS, ...(approvals === undefined ? {} : { approvals }) }).listen(PORT, "127.0.0.1", () =>
 	log(`listening: web portal http://127.0.0.1:${PORT}/ · chat POST http://127.0.0.1:${PORT}/say`),
 );
 
