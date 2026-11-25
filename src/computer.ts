@@ -41,6 +41,7 @@ import {
 import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
 import { createReadTool, type ImageProcessor } from "@earendil-works/pi-durable/tools";
 import { toLlmContent, type CallToolResult, type LlmContent } from "@earendil-works/pi-mcp";
+import { lowLatencyH264 } from "./h264.ts";
 import type { OpenLiveStream } from "./live-screen.ts";
 import { botModel } from "./models.ts";
 import { createScreenControl } from "./screen-control.ts";
@@ -627,7 +628,8 @@ export const openLiveStream: OpenLiveStream = async (sink) => {
 	const listed = await listSpaces();
 	const shown = listed.some((space) => space.id === screenControl.space) ? screenControl.space : undefined;
 	const space = await connectSpace(pickSpace(listed, shown, defaultSpaceId()).id);
-	const ticket = await space.openStream({ codecs: ["h264"], maxFps: 15, maxDimension: 0, audio: false, policy: "allow_activation" });
+	// 60 fps keeps the wait for the next frame under 17 ms; a quiet 1080p screen costs about 150 KB/s at it (15 fps: 104).
+	const ticket = await space.openStream({ codecs: ["h264"], maxFps: 60, maxDimension: 0, audio: false, policy: "allow_activation" });
 	// Input batches carry contiguous sequence numbers; the first one on a socket may start anywhere, and after a
 	// gap cua-spacesd names the sequence it expects next.
 	let sequence = 1;
@@ -635,8 +637,12 @@ export const openLiveStream: OpenLiveStream = async (sink) => {
 		.attachStream(
 			ticket,
 			{
-				// The SDK may reuse the buffer after onFrame returns, so each frame is copied out.
-				onFrame: (frame) => sink.frame({ keyframe: frame.keyframe, data: new Uint8Array(frame.data.slice(0)) }),
+				// The SDK may reuse the buffer after onFrame returns, so each frame is copied out. Keyframes carry the SPS,
+				// which lowLatencyH264 marks as never reordering frames, so browsers show each frame on arrival.
+				onFrame: (frame) => {
+					const data = new Uint8Array(frame.data.slice(0));
+					sink.frame({ keyframe: frame.keyframe, data: frame.keyframe ? lowLatencyH264(data) : data });
+				},
 				onEvent: (event) => {
 					if (event.kind === "closed") sink.closed(`the Space closed the live stream: ${event.json}`);
 					if (event.kind === "error") {
